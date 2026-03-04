@@ -12,3 +12,6 @@ wheels/
 # Environment variable files
 .env
 .envrc
+
+# Node modules
+node_modules/
