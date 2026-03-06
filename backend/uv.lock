@@ -166,8 +166,10 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "python-jose", extra = ["cryptography"] },
+    { name = "structlog" },
     { name = "supabase" },
     { name = "twilio" },
+    { name = "twilio-stubs" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -196,8 +198,10 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.0" },
+    { name = "structlog", specifier = ">=25.5.0" },
     { name = "supabase", specifier = ">=2.10.0" },
     { name = "twilio", specifier = ">=9.3.0" },
+    { name = "twilio-stubs", specifier = ">=0.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
 provides-extras = ["dev"]
@@ -1483,6 +1487,15 @@ wheels = [
 ]
 
 [[package]]
+name = "structlog"
+version = "25.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510 },
+]
+
+[[package]]
 name = "supabase"
 version = "2.28.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1551,6 +1564,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/1c/a1/44cd8604eb69b1c5e
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6c/ac/e1937f70544075f896bfcd6b23fa7c15cad945e4598bcfa7017b7c120ad8/twilio-9.10.2-py2.py3-none-any.whl", hash = "sha256:8722bb59bacf31fab5725d6f5d3fac2224265c669d38f653f53179165533da43", size = 2256481 },
 ]
+
+[[package]]
+name = "twilio-stubs"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "twilio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/1b/2e4c6baee18623083ff33b89d266c1c0d0bf135b8078261c743958f49b4f/twilio-stubs-0.2.0.tar.gz", hash = "sha256:15638201295aef536451d31282133544406e334550ed276e40e63877e79b89b8", size = 113626 }
 
 [[package]]
 name = "typing-extensions"

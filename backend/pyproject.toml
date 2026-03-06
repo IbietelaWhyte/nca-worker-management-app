@@ -15,6 +15,8 @@ dependencies = [
     "twilio>=9.3.0",
     "apscheduler>=3.10.0",
     "python-dotenv>=1.0.0",
+    "structlog>=25.5.0",
+    "twilio-stubs>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -35,7 +37,7 @@ build-backend = "hatchling.build"
 packages = ["app"]
 
 [tool.ruff]
-line-length = 88
+line-length = 120
 target-version = "py313"
 
 [tool.ruff.lint]
