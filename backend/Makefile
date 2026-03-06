@@ -10,7 +10,7 @@ dev:
 
 # Run production server
 run:
-	uv run uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+	uv run uvicorn app.main:app --host 0.0.0.0 --port $${PORT:-8000}
 
 # Run tests
 test:
