@@ -55,8 +55,7 @@ def setup_logging() -> None:
 
     root_logger = logging.getLogger()
     root_logger.handlers = [handler]
-    root_logger.setLevel(
-        logging.INFO if settings.is_production else logging.DEBUG)
+    root_logger.setLevel(logging.INFO if settings.is_production else logging.DEBUG)
 
     # Quieten noisy third-party loggers
     logging.getLogger("httpx").setLevel(logging.WARNING)

@@ -2,10 +2,13 @@ from uuid import UUID
 
 from supabase import Client
 
+from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
 from app.schemas.models import WorkerStatus
 from app.schemas.workers.models import WorkerResponse
+
+logger = get_logger(__name__)
 
 
 class WorkerRepository(BaseRepository[WorkerResponse]):
@@ -17,6 +20,7 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             client (Client): The Supabase client instance used for database operations.
         """
         super().__init__(client, q.TABLE, WorkerResponse)
+        self.logger = logger.bind(repository="WorkerRepository")
 
     def get_by_email(self, email: str) -> WorkerResponse | None:
         """
@@ -32,15 +36,15 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse | None: A WorkerResponse model instance if found, None if no worker exists with
                           the given email address or if the response contains no data.
         """
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.EMAIL, email)
-            .single()
-            .execute()
-        )
-        return self._to_model(response.data) if response.data else None
-    
+        log = self.logger.bind(method="get_by_email", email=email)
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.EMAIL, email).single().execute()
+        worker = self._to_model(response.data) if response.data else None
+        if worker:
+            log.debug("worker_found_by_email", worker_id=str(worker.id))
+        else:
+            log.debug("worker_not_found_by_email")
+        return worker
+
     def get_by_phone(self, phone: str) -> WorkerResponse | None:
         """
         Retrieve a worker by their phone number.
@@ -55,14 +59,14 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse | None: A WorkerResponse model instance if found, None if no worker exists with
                           the given phone number or if the response contains no data.
         """
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.PHONE, phone)
-            .single()
-            .execute()
-        )
-        return self._to_model(response.data) if response.data else None
+        log = self.logger.bind(method="get_by_phone", phone=phone)
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.PHONE, phone).single().execute()
+        worker = self._to_model(response.data) if response.data else None
+        if worker:
+            log.debug("worker_found_by_phone", worker_id=str(worker.id))
+        else:
+            log.debug("worker_not_found_by_phone")
+        return worker
 
     def get_active_workers(self) -> list[WorkerResponse]:
         """
@@ -75,13 +79,11 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             list[WorkerResponse]: A list of WorkerResponse model instances with active status. Returns an
                          empty list if no active workers are found or if the response contains no data.
         """
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.STATUS, WorkerStatus.ACTIVE)
-            .execute()
-        )
-        return self._to_model_list(response.data or [])
+        log = self.logger.bind(method="get_active_workers")
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.STATUS, WorkerStatus.ACTIVE).execute()
+        workers = self._to_model_list(response.data or [])
+        log.debug("fetched_active_workers", count=len(workers))
+        return workers
 
     def get_workers_by_department(self, department_id: UUID) -> list[WorkerResponse]:
         """
@@ -102,6 +104,7 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             The method uses a junction table to handle the many-to-many relationship between
             workers and departments, selecting worker data through the 'workers(*)' relation.
         """
+        log = self.logger.bind(method="get_workers_by_department", department_id=str(department_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
             .select("workers(*)")
@@ -113,12 +116,10 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         if not response.data:
             return []
 
-        rows = [
-            row["workers"]
-            for row in response.data
-            if isinstance(row, dict) and "workers" in row
-        ]
-        return self._to_model_list(rows)
+        rows = [row["workers"] for row in response.data if isinstance(row, dict) and "workers" in row]
+        workers = self._to_model_list(rows)
+        log.debug("fetched_workers_by_department", count=len(workers))
+        return workers
 
     def update_status(self, id: UUID, status: WorkerStatus) -> WorkerResponse | None:
         """
@@ -135,7 +136,13 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse | None: The updated WorkerResponse model instance if the update was successful,
                           None if the worker was not found or the update failed.
         """
-        return self.update(id, {q.Columns.STATUS: status})
+        log = self.logger.bind(method="update_status", worker_id=str(id), status=status)
+        worker = self.update(id, {q.Columns.STATUS: status})
+        if worker:
+            log.info("worker_status_updated")
+        else:
+            log.warning("worker_not_found")
+        return worker
 
     def search(self, query: str) -> list[WorkerResponse]:
         """
@@ -155,16 +162,16 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
 
         Example:
             >>> repository.search("smith")
-            [WorkerResponse(first_name="John", last_name="Smith"), 
+            [WorkerResponse(first_name="John", last_name="Smith"),
             WorkerResponse(first_name="Jane", last_name="Smithson")]
         """
+        log = self.logger.bind(method="search", query=query)
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
-            .or_(
-                f"{q.Columns.FIRST_NAME}.ilike.%{query}%"
-                f",{q.Columns.LAST_NAME}.ilike.%{query}%"
-            )
+            .or_(f"{q.Columns.FIRST_NAME}.ilike.%{query}%,{q.Columns.LAST_NAME}.ilike.%{query}%")
             .execute()
         )
-        return self._to_model_list(response.data or [])
+        workers = self._to_model_list(response.data or [])
+        log.debug("search_completed", count=len(workers))
+        return workers

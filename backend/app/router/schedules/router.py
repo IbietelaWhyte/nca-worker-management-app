@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.dependencies import (
     CurrentUser,
-    DepartmentHeadUser,
+    HODUser,
     get_reminder_service,
     get_schedule_service,
 )
 from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
-    ScheduleGenerateRequest,
+    ScheduleCreate,
     ScheduleResponse,
 )
 from app.service.reminders.service import ReminderService
@@ -38,8 +38,7 @@ def get_schedule(
     try:
         return service.get_schedule(schedule_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post(
@@ -48,8 +47,8 @@ def get_schedule(
     status_code=status.HTTP_201_CREATED,
 )
 def generate_schedule(
-    data: ScheduleGenerateRequest,
-    token: TokenPayload = DepartmentHeadUser,
+    data: ScheduleCreate,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> ScheduleResponse:
     """
@@ -59,26 +58,22 @@ def generate_schedule(
     try:
         schedule = service.generate_schedule(data, created_by=UUID(token.sub))
         if schedule is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule")
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(
     schedule_id: UUID,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> None:
     try:
         service.delete_schedule(schedule_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get("/workers/{worker_id}/assignments", response_model=list[AssignmentResponse])
@@ -104,13 +99,12 @@ def update_assignment_status(
     try:
         return service.update_assignment_status(assignment_id, status_update)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/reminders/trigger", response_model=MessageResponse)
 def trigger_reminders(
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Manually trigger the reminder job — useful for testing."""

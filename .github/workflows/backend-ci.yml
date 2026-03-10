@@ -1,0 +1,60 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run make check (lint, typecheck, test)
+        run: make check
+        env:
+          # Mock environment variables for tests
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'test-anon-key' }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key' }}
+          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET || 'test-jwt-secret' }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID || 'test-account-sid' }}
+          TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN || 'test-auth-token' }}
+          TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER || '+1234567890' }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY || 'test-secret-key-for-ci' }}
+          APP_ENV: test
+
+      - name: Upload coverage reports
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          directory: ./backend
+          flags: backend
+          fail_ci_if_error: false

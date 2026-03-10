@@ -18,7 +18,7 @@ class ReminderService:
         worker_repo: WorkerRepository,
     ) -> None:
         """Initialize the ReminderService with required dependencies.
-        
+
         Args:
             schedule_repo: Repository for schedule database operations.
             sms_service: Service for sending SMS notifications.
@@ -34,7 +34,7 @@ class ReminderService:
 
     def start(self) -> None:
         """Start the background scheduler for automated reminders.
-        
+
         Schedules a daily job at 08:00 to send reminders for upcoming assignments.
         """
         self.scheduler.add_job(
@@ -55,7 +55,7 @@ class ReminderService:
 
     def _send_due_reminders(self) -> None:
         """Internal method to send reminders for all due assignments.
-        
+
         This is called automatically by the scheduler. It fetches all assignments
         due for reminders today, sends SMS reminders to workers, and marks them as sent.
         """
@@ -64,21 +64,29 @@ class ReminderService:
         today = date.today()
         log.info("reminder_job_started", date=today.isoformat())
 
-        due_assignments = self.schedule_repo.get_assignments_due_for_reminder(
-            today)
+        due_assignments = self.schedule_repo.get_assignments_due_for_reminder(today)
         log.info("reminders_due", count=len(due_assignments))
 
         sent = 0
         failed = 0
 
         for assignment in due_assignments:
+            if not assignment.workers or not assignment.schedules:
+                log.warning(
+                    "reminder_skipped_missing_data",
+                    assignment_id=assignment.id,
+                )
+                continue
+
             worker = self.worker_repo.get_by_id(assignment.worker_id)
             schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
 
             if not worker or not schedule:
                 log.warning(
-                    "reminder_skipped_missing_data",
+                    "reminder_skipped_invalid_worker_or_schedule",
                     assignment_id=assignment.id,
+                    worker_id=assignment.worker_id,
+                    schedule_id=assignment.schedule_id,
                 )
                 continue
 
@@ -113,15 +121,14 @@ class ReminderService:
 
     def trigger_manually(self) -> int:
         """Manually trigger reminder sending for testing or emergency use.
-        
+
         Returns:
             int: Number of reminders successfully sent.
         """
         log = self.logger.bind(method="trigger_manually")
         log.info("reminder_manual_trigger")
         today = date.today()
-        due_assignments = self.schedule_repo.get_assignments_due_for_reminder(
-            today)
+        due_assignments = self.schedule_repo.get_assignments_due_for_reminder(today)
         sent_count = 0
 
         for assignment in due_assignments:

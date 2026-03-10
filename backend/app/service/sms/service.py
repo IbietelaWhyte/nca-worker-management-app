@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 class SMSService:
     def __init__(self) -> None:
         """Initialize the SMSService with Twilio client configuration.
-        
+
         Loads Twilio credentials from application settings and creates
         a Twilio client for sending SMS messages.
         """
@@ -24,11 +24,11 @@ class SMSService:
 
     def send_sms(self, to: str, body: str) -> bool:
         """Send an SMS message to a phone number.
-        
+
         Args:
             to: Recipient phone number in E.164 format (e.g., +14165551234).
             body: Message text to send.
-            
+
         Returns:
             bool: True if message sent successfully, False if sending failed.
         """
@@ -36,7 +36,7 @@ class SMSService:
         log = self.logger.bind(method="send_sms", to=to)
         log.debug("attempting_to_send_sms", body=body)
         try:
-            message = self.client.messages.create( # type: ignore[no-untyped-call]
+            message = self.client.messages.create(  # type: ignore[no-untyped-call]
                 to=to,
                 from_=self.from_number,
                 body=body,
@@ -56,17 +56,17 @@ class SMSService:
         start_time: str,
     ) -> bool:
         """Send a schedule reminder SMS to a worker.
-        
+
         Formats and sends a reminder message with schedule details asking
         the worker to confirm or decline the assignment.
-        
+
         Args:
             to: Recipient phone number in E.164 format.
             worker_name: Name of the worker receiving the reminder.
             schedule_title: Title/name of the scheduled event.
             scheduled_date: Date of the scheduled event.
             start_time: Start time of the scheduled event.
-            
+
         Returns:
             bool: True if reminder sent successfully, False if sending failed.
         """

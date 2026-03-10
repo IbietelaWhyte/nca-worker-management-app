@@ -1,48 +1,48 @@
-from datetime import datetime
+from datetime import date, datetime, time
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from app.schemas.workers.models import WorkerResponse
 
 
 class Schedule(BaseModel):
     id: UUID
     department_id: UUID
+    subteam_id: UUID | None
     title: str
-    scheduled_date: datetime
-    start_time: datetime
-    end_time: datetime
-    notes: str | None
+    scheduled_date: date
+    start_time: time
+    end_time: time
+    reminder_days_before: int
+    notes: str | None = None
     created_by: UUID
     created_at: datetime
 
 
-class CreateSchedule(BaseModel):
+class ScheduleCreate(BaseModel):
+    department_id: UUID
+    subteam_id: UUID | None = None
     title: str
-    scheduled_date: datetime
-    start_time: datetime
-    end_time: datetime
-    notes: str | None
-
-
-class ScheduleResponse(Schedule):
-    pass
+    scheduled_date: date
+    start_time: time
+    end_time: time
+    notes: str | None = None
+    reminder_days_before: int
 
 
 class AssignmentResponse(BaseModel):
     id: UUID
     schedule_id: UUID
     worker_id: UUID
-    schedule_date: datetime
+    department_role_id: UUID | None = None
+    subteam_id: UUID | None = None
     status: str
-    worker_name: str | None
+    created_at: datetime
+    reminder_sent_at: datetime | None = None
+    workers: WorkerResponse | None = None  # Nested worker object from joined query
+    schedules: "Schedule | None" = None  # Nested schedule object from joined query
 
 
-class ScheduleGenerateRequest(BaseModel):
-    department_id: UUID
-    subteam_id: UUID | None
-    title: str
-    scheduled_date: datetime
-    start_time: datetime
-    end_time: datetime
-    notes: str | None
-    reminder_days_before: int
+class ScheduleResponse(Schedule):
+    schedule_assignments: list[AssignmentResponse] = []

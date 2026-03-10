@@ -18,23 +18,21 @@ _jwks = None
 
 async def get_jwks() -> Any:
     """Fetch and cache the JSON Web Key Set (JWKS) from Supabase.
-    
+
     This function retrieves the public keys used to verify JWT tokens from
     Supabase's well-known JWKS endpoint. The keys are cached at module level
     to avoid repeated network requests.
-    
+
     Returns:
         Any: The first JWK (JSON Web Key) from Supabase's JWKS endpoint.
-        
+
     Raises:
         httpx.HTTPStatusError: If the request to fetch JWKS fails.
     """
     global _jwks
     if _jwks is None:
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
-            )
+            response = await client.get(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
             response.raise_for_status()
             _jwks = response.json()["keys"][0]  # grab the first key
     return _jwks
@@ -80,13 +78,13 @@ async def verify_token(
 
 def get_current_user(token: TokenPayload = Depends(verify_token)) -> TokenPayload:
     """FastAPI dependency that requires a valid authentication token.
-    
+
     This is the base authentication dependency that simply verifies the token
     is valid and returns the token payload without any role-based restrictions.
-    
+
     Args:
         token: The verified token payload from verify_token dependency.
-        
+
     Returns:
         TokenPayload: The decoded and validated token payload containing user info.
     """
@@ -95,16 +93,16 @@ def get_current_user(token: TokenPayload = Depends(verify_token)) -> TokenPayloa
 
 def require_admin(token: TokenPayload = Depends(verify_token)) -> TokenPayload:
     """FastAPI dependency that requires the user to have admin role.
-    
+
     This dependency validates that the authenticated user has 'admin' role
     in their token. If not, a 403 Forbidden error is raised.
-    
+
     Args:
         token: The verified token payload from verify_token dependency.
-        
+
     Returns:
         TokenPayload: The token payload if user has admin role.
-        
+
     Raises:
         HTTPException: 403 Forbidden if user lacks admin role.
     """
@@ -118,28 +116,28 @@ def require_admin(token: TokenPayload = Depends(verify_token)) -> TokenPayload:
     return token
 
 
-def require_department_head(
+def require_hod(
     token: TokenPayload = Depends(verify_token),
 ) -> TokenPayload:
     """FastAPI dependency that requires admin or department head role.
-    
+
     This dependency validates that the authenticated user has either 'admin'
-    or 'department_head' role. If not, a 403 Forbidden error is raised.
-    
+    or 'hod' role. If not, a 403 Forbidden error is raised.
+
     Args:
         token: The verified token payload from verify_token dependency.
-        
+
     Returns:
         TokenPayload: The token payload if user has required role.
-        
+
     Raises:
         HTTPException: 403 Forbidden if user lacks required role.
     """
-    if token.role not in ("admin", "department_head"):
-        log = logger.bind(method="require_department_head", sub=token.sub)
-        log.warning("Department head access required")
+    if token.role not in ("admin", "hod"):
+        log = logger.bind(method="require_hod", sub=token.sub)
+        log.warning("HOD access required")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Department head access required",
+            detail="HOD access required",
         )
     return token

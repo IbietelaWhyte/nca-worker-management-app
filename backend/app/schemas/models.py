@@ -33,12 +33,12 @@ class AssignmentStatus(StrEnum):
 
 class UserRole(StrEnum):
     ADMIN = "admin"
-    DEPARTMENT_HEAD = "hod"
+    HOD = "hod"
     WORKER = "worker"
 
 
 class TokenPayload(BaseModel):
-    sub: str          # Supabase user UUID
+    sub: str  # Supabase user UUID
     role: str = UserRole.WORKER
     email: str | None = None
 

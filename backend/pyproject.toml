@@ -17,6 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "structlog>=25.5.0",
     "twilio-stubs>=0.2.0",
+    "types-python-jose>=3.5.0.20250531",
 ]
 
 [project.optional-dependencies]

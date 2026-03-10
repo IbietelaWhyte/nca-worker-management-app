@@ -12,11 +12,11 @@ U = TypeVar("U", bound=BaseModel)
 class BaseRepository(Generic[T]):
     """
     Base repository providing common CRUD operations.
-    
+
     This generic repository class serves as a foundation for all domain-specific repositories,
     providing standard database operations through the Supabase client. Subclasses inherit
     type-safe CRUD methods and only need to implement domain-specific queries.
-    
+
     Type Parameters:
         T: A Pydantic BaseModel subclass that represents the data model for this repository.
     """
@@ -46,7 +46,7 @@ class BaseRepository(Generic[T]):
 
         Args:
             data (Any): Raw data from the database response, expected to be a dictionary.
-            model (type[U] | None): Optional override model class to use for validation. 
+            model (type[U] | None): Optional override model class to use for validation.
             Defaults to the repository's model.
 
         Returns:
@@ -67,7 +67,7 @@ class BaseRepository(Generic[T]):
 
         Args:
             data (list[Any]): List of raw records from the database response.
-            model (type[T] | None): Optional override model class to use for validation. 
+            model (type[T] | None): Optional override model class to use for validation.
             Defaults to the repository's model.
 
         Returns:
@@ -87,13 +87,7 @@ class BaseRepository(Generic[T]):
         Returns:
             T | None: The model instance if found, None if no record exists with the given ID.
         """
-        response = (
-            self.client.table(self.table)
-            .select("*")
-            .eq("id", str(id))
-            .single()
-            .execute()
-        )
+        response = self.client.table(self.table).select("*").eq("id", str(id)).single().execute()
         return self._to_model(response.data) if response.data else None
 
     def get_all(self, limit: int = 100, offset: int = 0) -> list[T]:
@@ -107,12 +101,7 @@ class BaseRepository(Generic[T]):
         Returns:
             list[T]: A list of model instances. Returns an empty list if no records are found.
         """
-        response = (
-            self.client.table(self.table)
-            .select("*")
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
+        response = self.client.table(self.table).select("*").range(offset, offset + limit - 1).execute()
         return self._to_model_list(response.data or [])
 
     def create(self, data: dict[str, Any]) -> T:
@@ -125,11 +114,7 @@ class BaseRepository(Generic[T]):
         Returns:
             T: The newly created model instance with all database-generated fields populated.
         """
-        response = (
-            self.client.table(self.table)
-            .insert(data)
-            .execute()
-        )
+        response = self.client.table(self.table).insert(data).execute()
         return self._to_model(response.data[0])
 
     def update(self, id: UUID, data: dict[str, Any]) -> T | None:
@@ -143,12 +128,7 @@ class BaseRepository(Generic[T]):
         Returns:
             T | None: The updated model instance if successful, None if the record was not found.
         """
-        response = (
-            self.client.table(self.table)
-            .update(data)
-            .eq("id", str(id))
-            .execute()
-        )
+        response = self.client.table(self.table).update(data).eq("id", str(id)).execute()
         return self._to_model(response.data[0]) if response.data else None
 
     def delete(self, id: UUID) -> bool:
@@ -161,12 +141,7 @@ class BaseRepository(Generic[T]):
         Returns:
             bool: True if the record was successfully deleted, False if no record was found.
         """
-        response = (
-            self.client.table(self.table)
-            .delete()
-            .eq("id", str(id))
-            .execute()
-        )
+        response = self.client.table(self.table).delete().eq("id", str(id)).execute()
         return len(response.data) > 0
 
     def count(self) -> int:
@@ -176,9 +151,5 @@ class BaseRepository(Generic[T]):
         Returns:
             int: The total number of records. Returns 0 if the table is empty.
         """
-        response = (
-            self.client.table(self.table)
-            .select("*", count=CountMethod.exact)
-            .execute()
-        )
+        response = self.client.table(self.table).select("*", count=CountMethod.exact).execute()
         return response.count or 0

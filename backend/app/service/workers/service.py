@@ -11,12 +11,12 @@ logger = get_logger(__name__)
 
 class WorkerService:
     def __init__(
-            self, 
-            worker_repo: WorkerRepository,
-            department_repo: DepartmentRepository,
-        ) -> None:
+        self,
+        worker_repo: WorkerRepository,
+        department_repo: DepartmentRepository,
+    ) -> None:
         """Initialize the WorkerService with required repositories.
-        
+
         Args:
             worker_repo: Repository for worker database operations.
             department_repo: Repository for department database operations.
@@ -29,13 +29,13 @@ class WorkerService:
 
     def get_worker(self, worker_id: UUID) -> WorkerResponse:
         """Retrieve a worker by ID.
-        
+
         Args:
             worker_id: Unique identifier of the worker.
-            
+
         Returns:
             WorkerResponse: The worker data.
-            
+
         Raises:
             ValueError: If worker not found.
         """
@@ -49,7 +49,7 @@ class WorkerService:
 
     def get_all_workers(self) -> list[WorkerResponse]:
         """Retrieve all workers.
-        
+
         Returns:
             list[WorkerResponse]: List of all workers in the system.
         """
@@ -61,7 +61,7 @@ class WorkerService:
 
     def get_active_workers(self) -> list[WorkerResponse]:
         """Retrieve all active workers.
-        
+
         Returns:
             list[WorkerResponse]: List of workers with active status.
         """
@@ -73,10 +73,10 @@ class WorkerService:
 
     def get_workers_by_department(self, department_id: UUID) -> list[WorkerResponse]:
         """Retrieve all workers assigned to a specific department.
-        
+
         Args:
             department_id: Unique identifier of the department.
-            
+
         Returns:
             list[WorkerResponse]: List of workers in the department.
         """
@@ -91,16 +91,16 @@ class WorkerService:
 
     def create_worker(self, data: WorkerCreate) -> WorkerResponse:
         """Create a new worker.
-        
+
         Validates that either email or phone is provided and checks for existing workers
         with the same contact information.
-        
+
         Args:
             data: Worker creation data including name, contact info.
-            
+
         Returns:
             WorkerResponse: The newly created worker.
-            
+
         Raises:
             ValueError: If contact info is missing or worker already exists.
         """
@@ -122,24 +122,23 @@ class WorkerService:
 
     def update_worker(self, worker_id: UUID, data: WorkerUpdate) -> WorkerResponse:
         """Update a worker's information.
-        
+
         Args:
             worker_id: Unique identifier of the worker to update.
             data: Partial worker data with fields to update.
-            
+
         Returns:
             WorkerResponse: The updated worker data.
-            
+
         Raises:
             ValueError: If worker not found or update fails.
         """
         # bind the method and worker_id for better traceability in logs
-        log = self.logger.bind(method="update_worker", 
-                               worker_id=str(worker_id), 
-                               data=data.model_dump(exclude_none=True))
+        log = self.logger.bind(
+            method="update_worker", worker_id=str(worker_id), data=data.model_dump(exclude_none=True)
+        )
         self.get_worker(worker_id)
-        updated = self.worker_repo.update(
-            worker_id, data.model_dump(exclude_none=True))
+        updated = self.worker_repo.update(worker_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("worker_update_failed")
             raise ValueError(f"Failed to update worker {worker_id}")
@@ -148,13 +147,13 @@ class WorkerService:
 
     def deactivate_worker(self, worker_id: UUID) -> WorkerResponse:
         """Deactivate a worker (set is_active to False).
-        
+
         Args:
             worker_id: Unique identifier of the worker to deactivate.
-            
+
         Returns:
             WorkerResponse: The updated worker with is_active=False.
-            
+
         Raises:
             ValueError: If worker not found or deactivation fails.
         """
@@ -170,12 +169,12 @@ class WorkerService:
 
     def search_workers(self, query: str) -> list[WorkerResponse]:
         """Search for workers by name.
-        
+
         Performs case-insensitive partial matching on first and last names.
-        
+
         Args:
             query: Search term to match against worker names.
-            
+
         Returns:
             list[WorkerResponse]: List of workers matching the search query.
         """
@@ -184,18 +183,17 @@ class WorkerService:
         workers = self.worker_repo.search(query)
         log.debug("worker_search", results=len(workers), workers=workers)
         return workers
-    
+
     def get_worker_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
         """Retrieve all departments a worker is assigned to.
-        
+
         Args:
             worker_id: Unique identifier of the worker.
-            
+
         Returns:
             list[DepartmentResponse]: List of departments the worker belongs to.
         """
         log = self.logger.bind(method="get_worker_departments", worker_id=str(worker_id))
-        departments = self.department_repo.get_departments_for_worker(
-            worker_id)
+        departments = self.department_repo.get_departments_for_worker(worker_id)
         log.debug("fetched_worker_departments", count=len(departments))
         return [DepartmentResponse.model_validate(dept) for dept in departments]

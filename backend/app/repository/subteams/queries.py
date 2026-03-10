@@ -5,7 +5,6 @@ SELECT_ALL = "*"
 SELECT_WITH_WORKERS = "*, workers(*)"
 
 
-
 class Columns:
     ID = "id"
     DEPARTMENT_ID = "department_id"
@@ -17,5 +16,3 @@ class Columns:
 class JunctionColumns:
     WORKER_ID = "worker_id"
     SUBTEAM_ID = "subteam_id"
-
-

@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 class SubteamService:
     def __init__(self, subteam_repo: SubteamRepository) -> None:
         """Initialize the SubteamService with required repository.
-        
+
         Args:
             subteam_repo: Repository for subteam database operations.
         """
@@ -19,13 +19,13 @@ class SubteamService:
 
     def get_subteam(self, subteam_id: UUID) -> SubteamResponse:
         """Retrieve a subteam by ID.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam.
-            
+
         Returns:
             SubteamResponse: The subteam data.
-            
+
         Raises:
             ValueError: If subteam not found.
         """
@@ -38,7 +38,7 @@ class SubteamService:
 
     def get_all_subteams(self) -> list[SubteamResponse]:
         """Retrieve all subteams.
-        
+
         Returns:
             list[SubteamResponse]: List of all subteams in the system.
         """
@@ -49,13 +49,13 @@ class SubteamService:
 
     def get_subteam_with_workers(self, subteam_id: UUID) -> list[SubteamWithWorkersResponse]:
         """Retrieve a subteam with all assigned workers embedded.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam.
-            
+
         Returns:
             list[SubteamWithWorkersResponse]: Subteam with worker details.
-            
+
         Raises:
             ValueError: If subteam not found.
         """
@@ -68,15 +68,15 @@ class SubteamService:
 
     def create_subteam(self, data: SubteamCreate) -> SubteamResponse:
         """Create a new subteam.
-        
+
         Validates that no subteam with the same name exists.
-        
+
         Args:
             data: Subteam creation data including name and department.
-            
+
         Returns:
             SubteamResponse: The newly created subteam.
-            
+
         Raises:
             ValueError: If subteam with the same name already exists.
         """
@@ -90,27 +90,24 @@ class SubteamService:
         log.info("subteam_created")
         return dept
 
-    def update_subteam(
-        self, subteam_id: UUID, data: SubteamUpdate
-    ) -> SubteamResponse:
+    def update_subteam(self, subteam_id: UUID, data: SubteamUpdate) -> SubteamResponse:
         """Update a subteam's information.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam to update.
             data: Partial subteam data with fields to update.
-            
+
         Returns:
             SubteamResponse: The updated subteam data.
-            
+
         Raises:
             ValueError: If subteam not found or update fails.
         """
-        log = self.logger.bind(method="update_subteam", 
-                               subteam_id=str(subteam_id), 
-                               data=data.model_dump(exclude_none=True))
+        log = self.logger.bind(
+            method="update_subteam", subteam_id=str(subteam_id), data=data.model_dump(exclude_none=True)
+        )
         self.get_subteam(subteam_id)
-        updated = self.subteam_repo.update(
-            subteam_id, data.model_dump(exclude_none=True))
+        updated = self.subteam_repo.update(subteam_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("subteam_update_failed")
             raise ValueError(f"Failed to update subteam {subteam_id}")
@@ -119,47 +116,44 @@ class SubteamService:
 
     def delete_subteam(self, subteam_id: UUID) -> None:
         """Delete a subteam.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam to delete.
-            
+
         Raises:
             ValueError: If subteam not found.
         """
-        log = self.logger.bind(method="delete_subteam",
-                               subteam_id=str(subteam_id))
+        log = self.logger.bind(method="delete_subteam", subteam_id=str(subteam_id))
         self.get_subteam(subteam_id)
         self.subteam_repo.delete(subteam_id)
         log.info("subteam_deleted")
 
     def assign_worker(self, subteam_id: UUID, worker_id: UUID) -> None:
         """Assign a worker to a subteam.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam.
             worker_id: Unique identifier of the worker to assign.
-            
+
         Raises:
             ValueError: If subteam not found.
         """
-        log = self.logger.bind(method="assign_worker", subteam_id=str(
-            subteam_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
         self.get_subteam(subteam_id)
         self.subteam_repo.assign_worker(subteam_id, worker_id)
         log.info("worker_assigned_to_subteam")
 
     def unassign_worker(self, subteam_id: UUID, worker_id: UUID) -> None:
         """Remove a worker's assignment from a subteam.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam.
             worker_id: Unique identifier of the worker to unassign.
-            
+
         Raises:
             ValueError: If subteam not found.
         """
-        log = self.logger.bind(method="unassign_worker", subteam_id=str(
-            subteam_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="unassign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
         self.get_subteam(subteam_id)
         self.subteam_repo.unassign_worker(subteam_id, worker_id)
         log.info(
@@ -168,34 +162,32 @@ class SubteamService:
 
     def set_hod(self, subteam_id: UUID, worker_id: UUID) -> SubteamResponse:
         """Set the Head of Department (HOD) for a subteam.
-        
+
         Args:
             subteam_id: Unique identifier of the subteam.
             worker_id: Unique identifier of the worker to set as HOD.
-            
+
         Returns:
             SubteamResponse: The updated subteam with new HOD.
-            
+
         Raises:
             ValueError: If subteam not found or HOD assignment fails.
         """
-        log = self.logger.bind(method="set_hod", subteam_id=str(
-            subteam_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="set_hod", subteam_id=str(subteam_id), worker_id=str(worker_id))
         self.get_subteam(subteam_id)
         updated = self.subteam_repo.update(subteam_id, {"hod_id": str(worker_id)})
         if not updated:
             log.error("set_hod_failed")
-            raise ValueError(
-                f"Failed to set HOD for subteam {subteam_id}")
+            raise ValueError(f"Failed to set HOD for subteam {subteam_id}")
         log.info("hod_assigned")
         return updated
-    
+
     def get_subteams_by_department(self, department_id: UUID) -> list[SubteamResponse]:
         """Retrieve all subteams belonging to a specific department.
-        
+
         Args:
             department_id: Unique identifier of the department.
-            
+
         Returns:
             list[SubteamResponse]: List of subteams in the department.
         """
