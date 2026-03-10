@@ -37,13 +37,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
                                       exists with the given name.
         """
         log = self.logger.bind(method="get_by_name", name=name)
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.NAME, name)
-            .single()
-            .execute()
-        )
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).single().execute()
         department = self._to_model(response.data) if response.data else None
         if department:
             log.debug("department_found_by_name", department_id=str(department.id))
@@ -99,11 +93,11 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
             .execute()
         )
-        rows = [
-            row["departments"]
-            for row in response.data
-            if isinstance(row, dict) and "departments" in row
-        ] if response.data else []
+        rows = (
+            [row["departments"] for row in response.data if isinstance(row, dict) and "departments" in row]
+            if response.data
+            else []
+        )
         departments = self._to_model_list(rows)
         log.debug("fetched_departments_for_worker", count=len(departments))
         return departments
@@ -125,10 +119,12 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         log = self.logger.bind(method="assign_worker", department_id=str(department_id), worker_id=str(worker_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
-            .insert({
-                q.JunctionColumns.DEPARTMENT_ID: str(department_id),
-                q.JunctionColumns.WORKER_ID: str(worker_id),
-            })
+            .insert(
+                {
+                    q.JunctionColumns.DEPARTMENT_ID: str(department_id),
+                    q.JunctionColumns.WORKER_ID: str(worker_id),
+                }
+            )
             .execute()
         )
         log.info("worker_assigned_to_department")

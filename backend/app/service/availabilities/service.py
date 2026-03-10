@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class AvailabilityService:
     def __init__(self, availability_repo: AvailabilityRepository) -> None:
         """Initialize the AvailabilityService with required repository.
-        
+
         Args:
             availability_repo: Repository for availability database operations.
         """
@@ -26,10 +26,10 @@ class AvailabilityService:
 
     def get_worker_availability(self, worker_id: UUID) -> list[AvailabilityResponse]:
         """Retrieve all availability records for a specific worker.
-        
+
         Args:
             worker_id: Unique identifier of the worker.
-            
+
         Returns:
             list[AvailabilityResponse]: All availability records for the worker.
         """
@@ -42,15 +42,13 @@ class AvailabilityService:
         )
         return records
 
-    def get_availability_by_day(
-        self, worker_id: UUID, day_of_week: DayOfWeek
-    ) -> AvailabilityResponse | None:
+    def get_availability_by_day(self, worker_id: UUID, day_of_week: DayOfWeek) -> AvailabilityResponse | None:
         """Retrieve a worker's availability for a specific day of the week.
-        
+
         Args:
             worker_id: Unique identifier of the worker.
             day_of_week: Day of the week to query.
-            
+
         Returns:
             AvailabilityResponse | None: Availability record if found, None otherwise.
         """
@@ -62,14 +60,12 @@ class AvailabilityService:
         )
         return record
 
-    def get_available_workers_on_day(
-        self, day_of_week: DayOfWeek
-    ) -> list[AvailabilityResponse]:
+    def get_available_workers_on_day(self, day_of_week: DayOfWeek) -> list[AvailabilityResponse]:
         """Retrieve all workers available on a specific day of the week.
-        
+
         Args:
             day_of_week: Day of the week to query.
-            
+
         Returns:
             list[AvailabilityResponse]: List of availability records for available workers.
         """
@@ -83,28 +79,27 @@ class AvailabilityService:
 
     def set_availability(self, data: AvailabilityCreate) -> AvailabilityResponse:
         """Create or update a worker's availability record.
-        
+
         Uses upsert so callers don't need to know if a record already exists.
         Handles both recurring weekly availability and specific date availability.
-        
+
         Args:
             data: Availability creation data with type, worker, and availability status.
-            
+
         Returns:
             AvailabilityResponse: The created or updated availability record.
-            
+
         Raises:
             ValueError: If specific_date is required but not provided.
         """
-        log = self.logger.bind(worker_id=str(
-            data.worker_id), data=data.model_dump(exclude={"worker_id"}))
+        log = self.logger.bind(worker_id=str(data.worker_id), data=data.model_dump(exclude={"worker_id"}))
         if data.availability_type == AvailabilityType.RECURRING and data.day_of_week is not None:
             record = self.availability_repo.upsert_availability(
                 worker_id=data.worker_id,
                 day_of_week=data.day_of_week.to_number(),
                 is_available=data.is_available,
             )
-            
+
             log.info(
                 "recurring_availability_set",
             )
@@ -113,7 +108,7 @@ class AvailabilityService:
                 raise ValueError("specific_date is required for specific date availability")
             record = self.availability_repo.upsert_specific_date_availability(
                 worker_id=data.worker_id,
-                specific_date=data.specific_date, 
+                specific_date=data.specific_date,
                 is_available=data.is_available,
             )
             log.info(
@@ -121,54 +116,39 @@ class AvailabilityService:
             )
         return record
 
-    def update_availability(
-        self, availability_id: UUID, data: AvailabilityUpdate
-    ) -> AvailabilityResponse:
+    def update_availability(self, availability_id: UUID, data: AvailabilityUpdate) -> AvailabilityResponse:
         """Update an existing availability record.
-        
+
         Args:
             availability_id: Unique identifier of the availability record.
             data: Partial availability data with fields to update.
-            
+
         Returns:
             AvailabilityResponse: The updated availability record.
-            
+
         Raises:
             ValueError: If availability record not found or update fails.
         """
         log = self.logger.bind(availability_id=str(availability_id), data=data.model_dump(exclude_none=True))
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
-            log.warning(
-                "availability_not_found"
-            )
-            raise ValueError(
-                f"Availability record {availability_id} not found")
+            log.warning("availability_not_found")
+            raise ValueError(f"Availability record {availability_id} not found")
 
-        updated = self.availability_repo.update(
-            availability_id, data.model_dump(exclude_none=True)
-        )
+        updated = self.availability_repo.update(availability_id, data.model_dump(exclude_none=True))
         if not updated:
-            log.error(
-                "availability_update_failed"
-            )
-            raise ValueError(
-                f"Failed to update availability {availability_id}")
+            log.error("availability_update_failed")
+            raise ValueError(f"Failed to update availability {availability_id}")
 
-        log.info(
-            "availability_updated"
-        )
+        log.info("availability_updated")
         return updated
 
     def delete_availability(self, availability_id: UUID) -> None:
         log = self.logger.bind(availability_id=str(availability_id))
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
-            log.warning(
-                "availability_not_found"
-            )
-            raise ValueError(
-                f"Availability record {availability_id} not found")
+            log.warning("availability_not_found")
+            raise ValueError(f"Availability record {availability_id} not found")
 
         self.availability_repo.delete(availability_id)
         log.info("availability_deleted")
@@ -179,9 +159,7 @@ class AvailabilityService:
         log = self.logger.bind(worker_id=str(worker_id))
         log.info("worker_availability_cleared")
 
-    def bulk_set_availability(
-        self, worker_id: UUID, records: list[AvailabilityCreate]
-    ) -> list[AvailabilityResponse]:
+    def bulk_set_availability(self, worker_id: UUID, records: list[AvailabilityCreate]) -> list[AvailabilityResponse]:
         """
         Sets availability for multiple days/dates at once.
         Useful for onboarding a new worker or updating a full weekly schedule.
@@ -189,7 +167,5 @@ class AvailabilityService:
         log = self.logger.bind(worker_id=str(worker_id), count=len(records))
         log.info("bulk_availability_set_started")
         results = [self.set_availability(record) for record in records]
-        log.info(
-            "bulk_availability_set_completed"
-        )
+        log.info("bulk_availability_set_completed")
         return results

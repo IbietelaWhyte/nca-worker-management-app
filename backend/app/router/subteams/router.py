@@ -24,8 +24,7 @@ def get_subteam(
     try:
         return service.get_subteam(subteam_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("", response_model=SubteamResponse, status_code=status.HTTP_201_CREATED)
@@ -37,8 +36,7 @@ def create_subteam(
     try:
         return service.create_subteam(data)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 
 @router.patch("/{subteam_id}", response_model=SubteamResponse)
@@ -51,8 +49,7 @@ def update_subteam(
     try:
         return service.update_subteam(subteam_id, data)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.delete("/{subteam_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -64,5 +61,4 @@ def delete_subteam(
     try:
         service.delete_subteam(subteam_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

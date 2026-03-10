@@ -144,9 +144,7 @@ class TestGenerateSchedule:
         # Verify recurring availability was never checked
         mock_availability_repo.get_by_worker_and_day.assert_not_called()
 
-    def test_raises_when_department_not_found(
-        self, service, mock_department_repo
-    ):
+    def test_raises_when_department_not_found(self, service, mock_department_repo):
         mock_department_repo.get_by_id.return_value = None
         with pytest.raises(ValueError, match="not found"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
@@ -173,9 +171,7 @@ class TestRoundRobin:
         )
 
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = [
-            recently_assigned, never_assigned
-        ]
+        mock_worker_repo.get_workers_by_department.return_value = [recently_assigned, never_assigned]
         mock_availability_repo.get_by_worker_and_type.return_value = None
         mock_availability_repo.get_by_worker_and_day.return_value = None
 
@@ -190,9 +186,7 @@ class TestRoundRobin:
         mock_schedule_repo.bulk_create_assignments.return_value = []
         mock_schedule_repo.get_with_assignments.return_value = schedule
 
-        service.generate_schedule(
-            make_generate_request(department_id=dept.id), created_by=uuid4()
-        )
+        service.generate_schedule(make_generate_request(department_id=dept.id), created_by=uuid4())
 
         assignments_arg = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
         assert assignments_arg[0]["worker_id"] == str(never_assigned.id)

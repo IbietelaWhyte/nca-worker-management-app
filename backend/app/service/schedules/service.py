@@ -45,9 +45,7 @@ class ScheduleService:
             raise ValueError(f"Schedule {schedule_id} not found")
         return schedule
 
-    def get_schedules_by_department(
-        self, department_id: UUID
-    ) -> list[ScheduleResponse]:
+    def get_schedules_by_department(self, department_id: UUID) -> list[ScheduleResponse]:
         # bind the method and department_id for better traceability in logs
         log = self.logger.bind(method="get_schedules_by_department", department_id=str(department_id))
         schedules = self.schedule_repo.get_by_department(department_id)
@@ -62,17 +60,15 @@ class ScheduleService:
         log.info("fetching_worker_assignments")
         return self.schedule_repo.get_assignments_for_worker(worker_id)
 
-    def generate_schedule(
-        self, data: ScheduleCreate, created_by: UUID
-    ) -> ScheduleResponse | None:
+    def generate_schedule(self, data: ScheduleCreate, created_by: UUID) -> ScheduleResponse | None:
         # bind the method and key parameters for better traceability in logs
-        log = self.logger.bind(method="generate_schedule", 
-                               department_id=str(data.department_id), 
-                               subteam_id=str(data.subteam_id) if data.subteam_id else None, 
-                               scheduled_date=data.scheduled_date.isoformat())
-        log.info(
-            "schedule_generation_started"
+        log = self.logger.bind(
+            method="generate_schedule",
+            department_id=str(data.department_id),
+            subteam_id=str(data.subteam_id) if data.subteam_id else None,
+            scheduled_date=data.scheduled_date.isoformat(),
         )
+        log.info("schedule_generation_started")
 
         # 1. Resolve workers needed
         department = self.department_repo.get_by_id(data.department_id)
@@ -95,16 +91,11 @@ class ScheduleService:
         if data.subteam_id:
             subteam_with_workers = self.subteam_repo.get_with_workers(data.subteam_id)
             if subteam_with_workers:
-                eligible_workers = [
-                    w.worker for w in subteam_with_workers
-                    if w.worker and w.worker.is_active
-                ]
+                eligible_workers = [w.worker for w in subteam_with_workers if w.worker and w.worker.is_active]
             else:
                 eligible_workers = []
         else:
-            eligible_workers_response = self.worker_repo.get_workers_by_department(
-                data.department_id
-            )
+            eligible_workers_response = self.worker_repo.get_workers_by_department(data.department_id)
             eligible_workers = [Worker(**w.model_dump()) for w in eligible_workers_response]
         eligible_workers = [w for w in eligible_workers if w.is_active]
 
@@ -118,29 +109,19 @@ class ScheduleService:
         db_day_of_week = (day_of_week + 1) % 7
 
         available_workers = [
-            w for w in eligible_workers
-            if self._is_worker_available(w.id, data.scheduled_date, db_day_of_week)
+            w for w in eligible_workers if self._is_worker_available(w.id, data.scheduled_date, db_day_of_week)
         ]
 
-        log.debug(
-            "available_workers_after_filter",
-            count=len(available_workers),
-            available_workers=available_workers
-        )
+        log.debug("available_workers_after_filter", count=len(available_workers), available_workers=available_workers)
 
         if not available_workers:
-            raise ValueError(
-                f"No available workers found for {data.scheduled_date}")
+            raise ValueError(f"No available workers found for {data.scheduled_date}")
 
         # 4. Sort by round-robin fairness
-        available_workers = self._sort_by_round_robin(
-            available_workers
-        )
+        available_workers = self._sort_by_round_robin(available_workers)
 
         log.debug(
-            "available_workers_after_round_robin",
-            count=len(available_workers),
-            available_workers=available_workers
+            "available_workers_after_round_robin", count=len(available_workers), available_workers=available_workers
         )
 
         # 5. Pick top N and create schedule + assignments
@@ -181,17 +162,13 @@ class ScheduleService:
             assignments_created=len(assignments),
         )
 
-        return self.schedule_repo.get_with_assignments(schedule.id)  
+        return self.schedule_repo.get_with_assignments(schedule.id)
 
-    def update_assignment_status(
-        self, assignment_id: UUID, status: AssignmentStatus
-    ) -> AssignmentResponse:
+    def update_assignment_status(self, assignment_id: UUID, status: AssignmentStatus) -> AssignmentResponse:
         log = self.logger.bind(method="update_assignment_status", assignment_id=str(assignment_id), status=status.value)
-        updated = self.schedule_repo.update_assignment_status(
-            assignment_id, status)
+        updated = self.schedule_repo.update_assignment_status(assignment_id, status)
         if not updated:
-            log.warning("assignment_not_found",
-                           assignment_id=str(assignment_id))
+            log.warning("assignment_not_found", assignment_id=str(assignment_id))
             raise ValueError(f"Assignment {assignment_id} not found")
         log.info(
             "assignment_status_updated",
@@ -201,8 +178,7 @@ class ScheduleService:
         return updated
 
     def delete_schedule(self, schedule_id: UUID) -> None:
-        log = self.logger.bind(method="delete_schedule",
-                               schedule_id=str(schedule_id))
+        log = self.logger.bind(method="delete_schedule", schedule_id=str(schedule_id))
         self.schedule_repo.delete_assignments_for_schedule(schedule_id)
         self.schedule_repo.delete(schedule_id)
         log.info("schedule_deleted")
@@ -211,9 +187,7 @@ class ScheduleService:
     # Private helpers
     # ----------------------------------------------------------------
 
-    def _is_worker_available(
-        self, worker_id: UUID, scheduled_date: date, day_of_week: int
-    ) -> bool:
+    def _is_worker_available(self, worker_id: UUID, scheduled_date: date, day_of_week: int) -> bool:
         # Specific date override takes precedence over recurring
         specific = self.availability_repo.get_by_worker_and_type(
             worker_id,
@@ -223,9 +197,7 @@ class ScheduleService:
         if specific is not None:
             return specific.is_available
 
-        recurring = self.availability_repo.get_by_worker_and_day(
-            worker_id, day_of_week
-        )
+        recurring = self.availability_repo.get_by_worker_and_day(worker_id, day_of_week)
         if recurring is not None:
             return recurring.is_available
 
@@ -234,12 +206,12 @@ class ScheduleService:
     def _sort_by_round_robin(self, workers: list[Worker]) -> list[Worker]:
         def last_assigned(worker: Worker) -> date:
             log = self.logger.bind(method="_sort_by_round_robin.last_assigned", worker_id=str(worker.id))
-            assignments = self.schedule_repo.get_assignments_for_worker(
-                worker.id)
-            log.debug("worker_assignments_for_round_robin",
-                      count=len(assignments),
-                      assignments=assignments,
-                      )
+            assignments = self.schedule_repo.get_assignments_for_worker(worker.id)
+            log.debug(
+                "worker_assignments_for_round_robin",
+                count=len(assignments),
+                assignments=assignments,
+            )
             if not assignments:
                 log.debug("worker_never_assigned, returning date.min")
                 return date.min
@@ -248,10 +220,14 @@ class ScheduleService:
                 for a in assignments
                 if hasattr(a, "schedules") and hasattr(a.schedules, "scheduled_date") and a.schedules
             ]
-            log.debug("assignment_dates_for_worker",
-                      count=len(dates),
-                      dates=dates,
-                      )
+            log.debug(
+                "assignment_dates_for_worker",
+                count=len(dates),
+                dates=dates,
+            )
             return max(dates) if dates else date.min
 
-        return sorted(workers, key=last_assigned)
+        return sorted(
+            workers,
+            key=last_assigned,
+        )

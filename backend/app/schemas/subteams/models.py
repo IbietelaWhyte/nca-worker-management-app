@@ -27,7 +27,7 @@ class SubteamResponse(Subteam):
 
 class SubteamWithWorkersResponse(SubteamResponse):
     worker: Worker | None = None
-    
+
 
 class SubteamUpdate(BaseModel):
     name: str | None = None

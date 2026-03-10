@@ -29,11 +29,14 @@ class TestCreateSubteam:
         mock_subteam_service.create_subteam.return_value = subteam
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.post("/api/v1/subteams", json={
-            "department_id": str(dept_id),
-            "name": "Toddlers",
-            "workers_per_slot": 3,
-        })
+        response = client.post(
+            "/api/v1/subteams",
+            json={
+                "department_id": str(dept_id),
+                "name": "Toddlers",
+                "workers_per_slot": 3,
+            },
+        )
         assert response.status_code == 201
         assert response.json()["workers_per_slot"] == 3
 
@@ -41,18 +44,24 @@ class TestCreateSubteam:
         mock_subteam_service.create_subteam.side_effect = ValueError("already exists")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.post("/api/v1/subteams", json={
-            "department_id": str(uuid4()),
-            "name": "Toddlers",
-        })
+        response = client.post(
+            "/api/v1/subteams",
+            json={
+                "department_id": str(uuid4()),
+                "name": "Toddlers",
+            },
+        )
         assert response.status_code == 409
 
     def test_returns_403_for_worker_role(self, mock_subteam_service):
         client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
-        response = client.post("/api/v1/subteams", json={
-            "department_id": str(uuid4()),
-            "name": "Toddlers",
-        })
+        response = client.post(
+            "/api/v1/subteams",
+            json={
+                "department_id": str(uuid4()),
+                "name": "Toddlers",
+            },
+        )
         assert response.status_code == 403
 
 

@@ -43,33 +43,37 @@ class TestGenerateSchedule:
             schedule_service=mock_schedule_service,
         )
 
-        response = client.post("/api/v1/schedules/generate", json={
-            "department_id": str(uuid4()),
-            "title": "Sunday Service",
-            "scheduled_date": "2026-03-15",
-            "start_time": "09:00:00",
-            "end_time": "11:00:00",
-            "reminder_days_before": 1,
-        })
+        response = client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "title": "Sunday Service",
+                "scheduled_date": "2026-03-15",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": 1,
+            },
+        )
         assert response.status_code == 201
 
     def test_returns_400_when_no_available_workers(self, mock_schedule_service):
-        mock_schedule_service.generate_schedule.side_effect = ValueError(
-            "No available workers"
-        )
+        mock_schedule_service.generate_schedule.side_effect = ValueError("No available workers")
         client = make_client(
             role=UserRole.HOD,
             schedule_service=mock_schedule_service,
         )
 
-        response = client.post("/api/v1/schedules/generate", json={
-            "department_id": str(uuid4()),
-            "title": "Sunday Service",
-            "scheduled_date": "2026-03-15",
-            "start_time": "09:00:00",
-            "end_time": "11:00:00",
-            "reminder_days_before": 1,
-        })
+        response = client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "title": "Sunday Service",
+                "scheduled_date": "2026-03-15",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": 1,
+            },
+        )
         assert response.status_code == 400
 
     def test_returns_403_for_worker_role(self, mock_schedule_service):
@@ -77,14 +81,17 @@ class TestGenerateSchedule:
             role=UserRole.WORKER,
             schedule_service=mock_schedule_service,
         )
-        response = client.post("/api/v1/schedules/generate", json={
-            "department_id": str(uuid4()),
-            "title": "Sunday Service",
-            "scheduled_date": "2026-03-15",
-            "start_time": "09:00:00",
-            "end_time": "11:00:00",
-            "reminder_days_before": 1,
-        })
+        response = client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "title": "Sunday Service",
+                "scheduled_date": "2026-03-15",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": 1,
+            },
+        )
         assert response.status_code == 403
 
 

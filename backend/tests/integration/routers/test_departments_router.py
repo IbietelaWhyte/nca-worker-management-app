@@ -29,7 +29,7 @@ class TestListSubteams:
         response = client.get(f"/api/v1/departments/{dept_id}/subteams")
         assert response.status_code == 200
         assert len(response.json()) == 2
-        
+
 
 class TestGetDepartment:
     def test_returns_200_when_found(self, mock_department_service):

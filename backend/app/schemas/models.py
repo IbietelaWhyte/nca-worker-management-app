@@ -38,7 +38,7 @@ class UserRole(StrEnum):
 
 
 class TokenPayload(BaseModel):
-    sub: str          # Supabase user UUID
+    sub: str  # Supabase user UUID
     role: str = UserRole.WORKER
     email: str | None = None
 

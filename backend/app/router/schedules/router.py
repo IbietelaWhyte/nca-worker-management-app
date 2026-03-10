@@ -38,8 +38,7 @@ def get_schedule(
     try:
         return service.get_schedule(schedule_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post(
@@ -59,13 +58,10 @@ def generate_schedule(
     try:
         schedule = service.generate_schedule(data, created_by=UUID(token.sub))
         if schedule is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule")
         return schedule
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -77,8 +73,7 @@ def delete_schedule(
     try:
         service.delete_schedule(schedule_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.get("/workers/{worker_id}/assignments", response_model=list[AssignmentResponse])
@@ -104,8 +99,7 @@ def update_assignment_status(
     try:
         return service.update_assignment_status(assignment_id, status_update)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/reminders/trigger", response_model=MessageResponse)

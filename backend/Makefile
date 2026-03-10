@@ -1,8 +1,12 @@
-.PHONY: install dev run test lint format typecheck clean
+.PHONY: install dev run test lint format typecheck clean install-hooks
 
 # Install all dependencies
 install:
 	uv sync --all-extras
+
+# Install git hooks
+install-hooks:
+	./scripts/install-hooks.sh
 
 # Run dev server with hot reload
 dev:
@@ -33,7 +37,7 @@ typecheck:
 	uv run mypy app
 
 # Run all checks
-check: lint typecheck test
+check: lint format typecheck test
 
 # Clean up
 clean:

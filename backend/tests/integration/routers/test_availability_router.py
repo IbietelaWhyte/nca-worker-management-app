@@ -35,12 +35,15 @@ class TestSetAvailability:
         mock_availability_service.set_availability.return_value = record
         client = make_client(availability_service=mock_availability_service)
 
-        response = client.post("/api/v1/availability", json={
-            "worker_id": str(worker_id),
-            "availability_type": "recurring",
-            "day_of_week": "sunday",
-            "is_available": True,
-        })
+        response = client.post(
+            "/api/v1/availability",
+            json={
+                "worker_id": str(worker_id),
+                "availability_type": "recurring",
+                "day_of_week": "sunday",
+                "is_available": True,
+            },
+        )
         assert response.status_code == 201
 
     def test_returns_400_on_invalid_data(self, mock_availability_service):
@@ -48,11 +51,14 @@ class TestSetAvailability:
         client = make_client(availability_service=mock_availability_service)
 
         # Missing day_of_week for recurring type
-        response = client.post("/api/v1/availability", json={
-            "worker_id": str(uuid4()),
-            "availability_type": "recurring",
-            "is_available": True,
-        })
+        response = client.post(
+            "/api/v1/availability",
+            json={
+                "worker_id": str(uuid4()),
+                "availability_type": "recurring",
+                "is_available": True,
+            },
+        )
         assert response.status_code == 422  # Pydantic validation error
 
 
@@ -90,10 +96,13 @@ class TestBulkSetAvailability:
         mock_availability_service.bulk_set_availability.return_value = records
         client = make_client(availability_service=mock_availability_service)
 
-        response = client.post(f"/api/v1/availability/workers/{worker_id}/bulk", json=[
-            {"worker_id": str(worker_id), "availability_type": "recurring", "day_of_week": "sunday"},
-            {"worker_id": str(worker_id), "availability_type": "recurring", "day_of_week": "wednesday"},
-        ])
+        response = client.post(
+            f"/api/v1/availability/workers/{worker_id}/bulk",
+            json=[
+                {"worker_id": str(worker_id), "availability_type": "recurring", "day_of_week": "sunday"},
+                {"worker_id": str(worker_id), "availability_type": "recurring", "day_of_week": "wednesday"},
+            ],
+        )
         assert response.status_code == 200
         assert len(response.json()) == 2
 

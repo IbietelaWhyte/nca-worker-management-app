@@ -37,20 +37,14 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
                                       exists with the given name.
         """
         log = self.logger.bind(method="get_by_name", name=name)
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.NAME, name)
-            .single()
-            .execute()
-        )
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).single().execute()
         subteam = self._to_model(response.data) if response.data else None
         if subteam:
             log.debug("subteam_found_by_name", subteam_id=str(subteam.id))
         else:
             log.debug("subteam_not_found_by_name")
         return subteam
-    
+
     def get_by_department(self, department_id: UUID) -> list[SubteamResponse]:
         """
         Retrieve all subteams that belong to a specific department.
@@ -67,10 +61,7 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         """
         log = self.logger.bind(method="get_by_department", department_id=str(department_id))
         response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.DEPARTMENT_ID, str(department_id))
-            .execute()
+            self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.DEPARTMENT_ID, str(department_id)).execute()
         )
         subteams = self._to_model_list(response.data) if response.data else []
         log.debug("fetched_subteams_by_department", count=len(subteams))
@@ -123,11 +114,11 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
             .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
             .execute()
         )
-        rows = [
-            row["subteams"]
-            for row in response.data
-            if isinstance(row, dict) and "subteams" in row
-        ] if response.data else []
+        rows = (
+            [row["subteams"] for row in response.data if isinstance(row, dict) and "subteams" in row]
+            if response.data
+            else []
+        )
         subteams = self._to_model_list(rows)
         log.debug("fetched_subteams_for_worker", count=len(subteams))
         return subteams
@@ -149,10 +140,12 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
-            .insert({
-                q.JunctionColumns.SUBTEAM_ID: str(subteam_id),
-                q.JunctionColumns.WORKER_ID: str(worker_id),
-            })
+            .insert(
+                {
+                    q.JunctionColumns.SUBTEAM_ID: str(subteam_id),
+                    q.JunctionColumns.WORKER_ID: str(worker_id),
+                }
+            )
             .execute()
         )
         log.info("worker_assigned_to_subteam")

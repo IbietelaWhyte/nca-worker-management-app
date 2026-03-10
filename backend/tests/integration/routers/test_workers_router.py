@@ -65,35 +65,44 @@ class TestCreateWorker:
         mock_worker_service.create_worker.return_value = worker
         client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
 
-        response = client.post("/api/v1/workers", json={
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "phone": "+14165550101",
-        })
+        response = client.post(
+            "/api/v1/workers",
+            json={
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john.doe@example.com",
+                "phone": "+14165550101",
+            },
+        )
         assert response.status_code == 201
 
     def test_returns_409_on_duplicate_email(self, mock_worker_service):
         mock_worker_service.create_worker.side_effect = ValueError("already exists")
         client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
 
-        response = client.post("/api/v1/workers", json={
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "phone": "+14165550101",
-        })
+        response = client.post(
+            "/api/v1/workers",
+            json={
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john.doe@example.com",
+                "phone": "+14165550101",
+            },
+        )
         assert response.status_code == 409
 
     def test_returns_403_for_non_admin(self, mock_worker_service):
         client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)
 
-        response = client.post("/api/v1/workers", json={
-            "first_name": "John",
-            "last_name": "Doe",
-            "email": "john.doe@example.com",
-            "phone": "+14165550101",
-        })
+        response = client.post(
+            "/api/v1/workers",
+            json={
+                "first_name": "John",
+                "last_name": "Doe",
+                "email": "john.doe@example.com",
+                "phone": "+14165550101",
+            },
+        )
         assert response.status_code == 403
 
 

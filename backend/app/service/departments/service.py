@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class DepartmentService:
     def __init__(self, department_repo: DepartmentRepository) -> None:
         """Initialize the DepartmentService with required repository.
-        
+
         Args:
             department_repo: Repository for department database operations.
         """
@@ -24,13 +24,13 @@ class DepartmentService:
 
     def get_department(self, department_id: UUID) -> DepartmentResponse:
         """Retrieve a department by ID.
-        
+
         Args:
             department_id: Unique identifier of the department.
-            
+
         Returns:
             DepartmentResponse: The department data.
-            
+
         Raises:
             ValueError: If department not found.
         """
@@ -43,7 +43,7 @@ class DepartmentService:
 
     def get_all_departments(self) -> list[DepartmentResponse]:
         """Retrieve all departments.
-        
+
         Returns:
             list[DepartmentResponse]: List of all departments in the system.
         """
@@ -54,13 +54,13 @@ class DepartmentService:
 
     def get_department_with_workers(self, department_id: UUID) -> DepartmentWithWorkersResponse:
         """Retrieve a department with all assigned workers embedded.
-        
+
         Args:
             department_id: Unique identifier of the department.
-            
+
         Returns:
             DepartmentWithWorkersResponse: Department with worker details.
-            
+
         Raises:
             ValueError: If department not found.
         """
@@ -73,15 +73,15 @@ class DepartmentService:
 
     def create_department(self, data: DepartmentCreate) -> DepartmentResponse:
         """Create a new department.
-        
+
         Validates that no department with the same name exists.
-        
+
         Args:
             data: Department creation data including name and description.
-            
+
         Returns:
             DepartmentResponse: The newly created department.
-            
+
         Raises:
             ValueError: If department with the same name already exists.
         """
@@ -95,27 +95,24 @@ class DepartmentService:
         log.info("department_created")
         return dept
 
-    def update_department(
-        self, department_id: UUID, data: DepartmentUpdate
-    ) -> DepartmentResponse:
+    def update_department(self, department_id: UUID, data: DepartmentUpdate) -> DepartmentResponse:
         """Update a department's information.
-        
+
         Args:
             department_id: Unique identifier of the department to update.
             data: Partial department data with fields to update.
-            
+
         Returns:
             DepartmentResponse: The updated department data.
-            
+
         Raises:
             ValueError: If department not found or update fails.
         """
-        log = self.logger.bind(method="update_department", 
-                               department_id=str(department_id), 
-                               data=data.model_dump(exclude_none=True))
+        log = self.logger.bind(
+            method="update_department", department_id=str(department_id), data=data.model_dump(exclude_none=True)
+        )
         self.get_department(department_id)
-        updated = self.department_repo.update(
-            department_id, data.model_dump(exclude_none=True))
+        updated = self.department_repo.update(department_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("department_update_failed")
             raise ValueError(f"Failed to update department {department_id}")
@@ -124,47 +121,44 @@ class DepartmentService:
 
     def delete_department(self, department_id: UUID) -> None:
         """Delete a department.
-        
+
         Args:
             department_id: Unique identifier of the department to delete.
-            
+
         Raises:
             ValueError: If department not found.
         """
-        log = self.logger.bind(method="delete_department",
-                               department_id=str(department_id))
+        log = self.logger.bind(method="delete_department", department_id=str(department_id))
         self.get_department(department_id)
         self.department_repo.delete(department_id)
         log.info("department_deleted")
 
     def assign_worker(self, department_id: UUID, worker_id: UUID) -> None:
         """Assign a worker to a department.
-        
+
         Args:
             department_id: Unique identifier of the department.
             worker_id: Unique identifier of the worker to assign.
-            
+
         Raises:
             ValueError: If department not found.
         """
-        log = self.logger.bind(method="assign_worker", department_id=str(
-            department_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="assign_worker", department_id=str(department_id), worker_id=str(worker_id))
         self.get_department(department_id)
         self.department_repo.assign_worker(department_id, worker_id)
         log.info("worker_assigned_to_department")
 
     def unassign_worker(self, department_id: UUID, worker_id: UUID) -> None:
         """Remove a worker's assignment from a department.
-        
+
         Args:
             department_id: Unique identifier of the department.
             worker_id: Unique identifier of the worker to unassign.
-            
+
         Raises:
             ValueError: If department not found.
         """
-        log = self.logger.bind(method="unassign_worker", department_id=str(
-            department_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="unassign_worker", department_id=str(department_id), worker_id=str(worker_id))
         self.get_department(department_id)
         self.department_repo.unassign_worker(department_id, worker_id)
         log.info(
@@ -173,24 +167,22 @@ class DepartmentService:
 
     def set_hod(self, department_id: UUID, worker_id: UUID) -> DepartmentResponse:
         """Set the Head of Department (HOD) for a department.
-        
+
         Args:
             department_id: Unique identifier of the department.
             worker_id: Unique identifier of the worker to set as HOD.
-            
+
         Returns:
             DepartmentResponse: The updated department with new HOD.
-            
+
         Raises:
             ValueError: If department not found or HOD assignment fails.
         """
-        log = self.logger.bind(method="set_hod", department_id=str(
-            department_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="set_hod", department_id=str(department_id), worker_id=str(worker_id))
         self.get_department(department_id)
         updated = self.department_repo.update(department_id, {"hod_id": str(worker_id)})
         if not updated:
             log.error("set_hod_failed")
-            raise ValueError(
-                f"Failed to set HOD for department {department_id}")
+            raise ValueError(f"Failed to set HOD for department {department_id}")
         log.info("hod_assigned")
         return updated

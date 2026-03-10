@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         """Check if the application is running in production environment.
-        
+
         Returns:
             bool: True if app_env is 'production', False otherwise.
         """

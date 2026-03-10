@@ -55,8 +55,7 @@ def set_availability(
     try:
         return service.set_availability(data)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.patch("/{availability_id}", response_model=AvailabilityResponse)
@@ -69,8 +68,7 @@ def update_availability(
     try:
         return service.update_availability(availability_id, data)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.delete("/{availability_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -82,8 +80,7 @@ def delete_availability(
     try:
         service.delete_availability(availability_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/workers/{worker_id}/bulk", response_model=list[AvailabilityResponse])
@@ -96,8 +93,7 @@ def bulk_set_availability(
     try:
         return service.bulk_set_availability(worker_id, records)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.delete("/workers/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -109,5 +105,4 @@ def clear_worker_availability(
     try:
         service.clear_worker_availability(worker_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

@@ -44,10 +44,8 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
             notes=kwargs.get("notes", "Be on time!"),
             created_by=kwargs.get("created_by", uuid4()),
             created_at=kwargs.get("schedule_created_at", "2026-02-01T10:00:00Z"),
-
         ),
     )
-    
 
 
 @pytest.fixture
@@ -76,9 +74,7 @@ def service(mock_schedule_repo, mock_sms_service, mock_worker_repo):
 
 
 class TestSendDueReminders:
-    def test_sends_reminders_and_marks_sent(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_sends_reminders_and_marks_sent(self, service, mock_schedule_repo, mock_sms_service):
         assignments = [make_due_assignment(), make_due_assignment()]
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = assignments
         mock_sms_service.send_reminder.return_value = True
@@ -88,9 +84,7 @@ class TestSendDueReminders:
         assert mock_sms_service.send_reminder.call_count == 2
         assert mock_schedule_repo.mark_reminder_sent.call_count == 2
 
-    def test_does_not_mark_sent_when_sms_fails(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_does_not_mark_sent_when_sms_fails(self, service, mock_schedule_repo, mock_sms_service):
         assignment = make_due_assignment()
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = [assignment]
         mock_sms_service.send_reminder.return_value = False
@@ -100,9 +94,7 @@ class TestSendDueReminders:
         mock_sms_service.send_reminder.assert_called_once()
         mock_schedule_repo.mark_reminder_sent.assert_not_called()
 
-    def test_skips_assignment_with_missing_worker_data(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_skips_assignment_with_missing_worker_data(self, service, mock_schedule_repo, mock_sms_service):
         assignment = make_due_assignment()
         assignment.workers = None
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = [assignment]
@@ -111,18 +103,14 @@ class TestSendDueReminders:
 
         mock_sms_service.send_reminder.assert_not_called()
 
-    def test_handles_empty_due_list(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_handles_empty_due_list(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = []
         service._send_due_reminders()
         mock_sms_service.send_reminder.assert_not_called()
 
 
 class TestTriggerManually:
-    def test_returns_sent_count(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_returns_sent_count(self, service, mock_schedule_repo, mock_sms_service):
         assignments = [make_due_assignment(), make_due_assignment(), make_due_assignment()]
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = assignments
         mock_sms_service.send_reminder.return_value = True
@@ -130,16 +118,12 @@ class TestTriggerManually:
         count = service.trigger_manually()
         assert count == 3
 
-    def test_returns_zero_when_none_due(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_returns_zero_when_none_due(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = []
         count = service.trigger_manually()
         assert count == 0
 
-    def test_partial_failures_reflected_in_count(
-        self, service, mock_schedule_repo, mock_sms_service
-    ):
+    def test_partial_failures_reflected_in_count(self, service, mock_schedule_repo, mock_sms_service):
         assignments = [make_due_assignment(), make_due_assignment()]
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = assignments
         # First succeeds, second fails
@@ -151,8 +135,10 @@ class TestTriggerManually:
 
 class TestSchedulerLifecycle:
     def test_start_adds_job_and_starts_scheduler(self, service):
-        with patch.object(service.scheduler, "add_job") as mock_add, \
-             patch.object(service.scheduler, "start") as mock_start:
+        with (
+            patch.object(service.scheduler, "add_job") as mock_add,
+            patch.object(service.scheduler, "start") as mock_start,
+        ):
             service.start()
             mock_add.assert_called_once()
             mock_start.assert_called_once()

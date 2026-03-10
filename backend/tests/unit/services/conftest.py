@@ -20,21 +20,26 @@ from app.schemas.workers.models import WorkerResponse
 # Mock repositories
 # ----------------------------------------------------------------
 
+
 @pytest.fixture
 def mock_worker_repo():
     return MagicMock(spec=WorkerRepository)
+
 
 @pytest.fixture
 def mock_department_repo():
     return MagicMock(spec=DepartmentRepository)
 
+
 @pytest.fixture
 def mock_schedule_repo():
     return MagicMock(spec=ScheduleRepository)
 
+
 @pytest.fixture
 def mock_availability_repo():
     return MagicMock(spec=AvailabilityRepository)
+
 
 @pytest.fixture
 def mock_subteam_repo():
@@ -44,6 +49,7 @@ def mock_subteam_repo():
 # ----------------------------------------------------------------
 # Model factories
 # ----------------------------------------------------------------
+
 
 def make_worker(**kwargs) -> WorkerResponse:
     return WorkerResponse(
