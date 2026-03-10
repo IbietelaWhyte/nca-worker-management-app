@@ -52,14 +52,14 @@ class DepartmentService:
         log.debug("fetched_all_departments", count=len(depts))
         return depts
 
-    def get_department_with_workers(self, department_id: UUID) -> list[DepartmentWithWorkersResponse]:
+    def get_department_with_workers(self, department_id: UUID) -> DepartmentWithWorkersResponse:
         """Retrieve a department with all assigned workers embedded.
         
         Args:
             department_id: Unique identifier of the department.
             
         Returns:
-            list[DepartmentWithWorkersResponse]: Department with worker details.
+            DepartmentWithWorkersResponse: Department with worker details.
             
         Raises:
             ValueError: If department not found.

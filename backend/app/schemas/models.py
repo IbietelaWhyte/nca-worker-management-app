@@ -33,7 +33,7 @@ class AssignmentStatus(StrEnum):
 
 class UserRole(StrEnum):
     ADMIN = "admin"
-    DEPARTMENT_HEAD = "hod"
+    HOD = "hod"
     WORKER = "worker"
 
 

@@ -4,14 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.dependencies import (
     CurrentUser,
-    DepartmentHeadUser,
+    HODUser,
     get_reminder_service,
     get_schedule_service,
 )
 from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
-    ScheduleGenerateRequest,
+    ScheduleCreate,
     ScheduleResponse,
 )
 from app.service.reminders.service import ReminderService
@@ -48,8 +48,8 @@ def get_schedule(
     status_code=status.HTTP_201_CREATED,
 )
 def generate_schedule(
-    data: ScheduleGenerateRequest,
-    token: TokenPayload = DepartmentHeadUser,
+    data: ScheduleCreate,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> ScheduleResponse:
     """
@@ -71,7 +71,7 @@ def generate_schedule(
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(
     schedule_id: UUID,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> None:
     try:
@@ -110,7 +110,7 @@ def update_assignment_status(
 
 @router.post("/reminders/trigger", response_model=MessageResponse)
 def trigger_reminders(
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Manually trigger the reminder job — useful for testing."""

@@ -4,7 +4,7 @@ from supabase import Client
 from app.core.authentication import (
     get_current_user,
     require_admin,
-    require_department_head,
+    require_hod,
 )
 from app.core.supabase import get_supabase
 from app.repository.availabilities.repository import AvailabilityRepository
@@ -227,4 +227,4 @@ def get_subteam_service(
 
 CurrentUser = Depends(get_current_user)
 AdminUser = Depends(require_admin)
-DepartmentHeadUser = Depends(require_department_head)
+HODUser = Depends(require_hod)

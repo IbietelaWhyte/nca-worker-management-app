@@ -10,7 +10,7 @@ from app.repository.workers.repository import WorkerRepository
 from app.schemas.models import AssignmentStatus, AvailabilityType
 from app.schemas.schedules.models import (
     AssignmentResponse,
-    ScheduleGenerateRequest,
+    ScheduleCreate,
     ScheduleResponse,
 )
 from app.schemas.workers.models import Worker
@@ -63,7 +63,7 @@ class ScheduleService:
         return self.schedule_repo.get_assignments_for_worker(worker_id)
 
     def generate_schedule(
-        self, data: ScheduleGenerateRequest, created_by: UUID
+        self, data: ScheduleCreate, created_by: UUID
     ) -> ScheduleResponse | None:
         # bind the method and key parameters for better traceability in logs
         log = self.logger.bind(method="generate_schedule", 
@@ -125,6 +125,7 @@ class ScheduleService:
         log.debug(
             "available_workers_after_filter",
             count=len(available_workers),
+            available_workers=available_workers
         )
 
         if not available_workers:
@@ -133,7 +134,13 @@ class ScheduleService:
 
         # 4. Sort by round-robin fairness
         available_workers = self._sort_by_round_robin(
-            available_workers, data.department_id
+            available_workers
+        )
+
+        log.debug(
+            "available_workers_after_round_robin",
+            count=len(available_workers),
+            available_workers=available_workers
         )
 
         # 5. Pick top N and create schedule + assignments
@@ -224,17 +231,27 @@ class ScheduleService:
 
         return True  # default to available if no record exists
 
-    def _sort_by_round_robin(self, workers: list[Worker], department_id: UUID) -> list[Worker]:
+    def _sort_by_round_robin(self, workers: list[Worker]) -> list[Worker]:
         def last_assigned(worker: Worker) -> date:
+            log = self.logger.bind(method="_sort_by_round_robin.last_assigned", worker_id=str(worker.id))
             assignments = self.schedule_repo.get_assignments_for_worker(
                 worker.id)
+            log.debug("worker_assignments_for_round_robin",
+                      count=len(assignments),
+                      assignments=assignments,
+                      )
             if not assignments:
+                log.debug("worker_never_assigned, returning date.min")
                 return date.min
             dates = [
-                a.schedule_date
+                a.schedules.scheduled_date
                 for a in assignments
-                if hasattr(a, "schedule_date")
+                if hasattr(a, "schedules") and hasattr(a.schedules, "scheduled_date") and a.schedules
             ]
+            log.debug("assignment_dates_for_worker",
+                      count=len(dates),
+                      dates=dates,
+                      )
             return max(dates) if dates else date.min
 
         return sorted(workers, key=last_assigned)

@@ -19,6 +19,7 @@ class DepartmentCreate(BaseModel):
     name: str
     description: str | None = None
     hod_id: UUID | None = None
+    workers_per_slot: int | None = None
 
 
 class DepartmentResponse(Department):
@@ -26,7 +27,7 @@ class DepartmentResponse(Department):
 
 
 class DepartmentWithWorkersResponse(DepartmentResponse):
-    worker: Worker | None = None
+    workers: list[Worker] = []
 
 
 class DepartmentUpdate(BaseModel):

@@ -3,9 +3,12 @@ from uuid import UUID
 
 from supabase import Client
 
+from app.core.logging import get_logger
 from app.repository.departments import queries as q
 from app.repository.repository import BaseRepository
 from app.schemas.departments.models import DepartmentResponse, DepartmentWithWorkersResponse
+
+logger = get_logger(__name__)
 
 
 class DepartmentRepository(BaseRepository[DepartmentResponse]):
@@ -17,6 +20,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             client (Client): The Supabase client instance used for database operations.
         """
         super().__init__(client, q.TABLE, DepartmentResponse)
+        self.logger = logger.bind(repository="DepartmentRepository")
 
     def get_by_name(self, name: str) -> DepartmentResponse | None:
         """
@@ -32,6 +36,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             DepartmentResponse | None: The department if found, None if no department
                                       exists with the given name.
         """
+        log = self.logger.bind(method="get_by_name", name=name)
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
@@ -39,9 +44,14 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             .single()
             .execute()
         )
-        return self._to_model(response.data) if response.data else None
+        department = self._to_model(response.data) if response.data else None
+        if department:
+            log.debug("department_found_by_name", department_id=str(department.id))
+        else:
+            log.debug("department_not_found_by_name")
+        return department
 
-    def get_with_workers(self, department_id: UUID) -> list[DepartmentWithWorkersResponse]:
+    def get_with_workers(self, department_id: UUID) -> DepartmentWithWorkersResponse | None:
         """
         Retrieve a department with all its assigned workers embedded.
 
@@ -52,8 +62,9 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             department_id (UUID): The unique identifier of the department.
 
         Returns:
-            list[DepartmentWithWorkersResponse]: The department with embedded worker data if found,
+            DepartmentWithWorkersResponse | None: The department with embedded worker data if found, None otherwise.
         """
+        log = self.logger.bind(method="get_with_workers", department_id=str(department_id))
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_WORKERS)
@@ -61,7 +72,10 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             .single()
             .execute()
         )
-        return self._to_model_list([response.data], DepartmentWithWorkersResponse) if response.data else []
+        log.debug("fetched_department_with_workers_raw_response", response=response.data)
+        department = self._to_model(response.data, DepartmentWithWorkersResponse) if response.data else None
+        log.debug("fetched_department_with_workers", has_data=bool(department))
+        return department
 
     def get_departments_for_worker(self, worker_id: UUID) -> list[DepartmentResponse]:
         """
@@ -78,6 +92,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
                                      Returns an empty list if the worker is not assigned
                                      to any departments.
         """
+        log = self.logger.bind(method="get_departments_for_worker", worker_id=str(worker_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
             .select("departments(*)")
@@ -89,7 +104,9 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             for row in response.data
             if isinstance(row, dict) and "departments" in row
         ] if response.data else []
-        return self._to_model_list(rows)
+        departments = self._to_model_list(rows)
+        log.debug("fetched_departments_for_worker", count=len(departments))
+        return departments
 
     def assign_worker(self, department_id: UUID, worker_id: UUID) -> dict[str, Any]:
         """
@@ -105,6 +122,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         Returns:
             dict[str, Any]: The created junction record containing department_id and worker_id.
         """
+        log = self.logger.bind(method="assign_worker", department_id=str(department_id), worker_id=str(worker_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
             .insert({
@@ -113,6 +131,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             })
             .execute()
         )
+        log.info("worker_assigned_to_department")
         return cast(dict[str, Any], response.data[0])
 
     def unassign_worker(self, department_id: UUID, worker_id: UUID) -> bool:
@@ -131,6 +150,7 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             bool: True if the assignment was successfully removed, False if no such
                  assignment existed.
         """
+        log = self.logger.bind(method="unassign_worker", department_id=str(department_id), worker_id=str(worker_id))
         response = (
             self.client.table(q.JUNCTION_TABLE)
             .delete()
@@ -138,4 +158,9 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
             .execute()
         )
-        return len(response.data) > 0
+        success = len(response.data) > 0
+        if success:
+            log.info("worker_unassigned_from_department")
+        else:
+            log.debug("no_assignment_to_remove")
+        return success

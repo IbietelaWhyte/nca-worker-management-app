@@ -11,14 +11,16 @@ FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDERS = "get_assignments_due_for_reminders"
 class Columns:
     ID = "id"
     DEPARTMENT_ID = "department_id"
-    START_DATE = "start_date"
-    END_DATE = "end_date"
+    START_TIME = "start_time"
+    END_TIME = "end_time"
 
 
 class AssignmentColumns:
     ID = "id"
     SCHEDULE_ID = "schedule_id"
     WORKER_ID = "worker_id"
+    DEPARTMENT_ROLE_ID = "department_role_id"
     SCHEDULE_DATE = "schedule_date"
     STATUS = "status"
     REMINDER_SENT_AT = "reminder_sent_at"
+    SUBTEAM_ID = "subteam_id"

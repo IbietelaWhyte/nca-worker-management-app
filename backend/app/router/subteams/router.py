@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import (
     AdminUser,
     CurrentUser,
-    DepartmentHeadUser,
+    HODUser,
     get_subteam_service,
 )
 from app.schemas.models import TokenPayload
@@ -31,7 +31,7 @@ def get_subteam(
 @router.post("", response_model=SubteamResponse, status_code=status.HTTP_201_CREATED)
 def create_subteam(
     data: SubteamCreate,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> SubteamResponse:
     try:
@@ -45,7 +45,7 @@ def create_subteam(
 def update_subteam(
     subteam_id: UUID,
     data: SubteamUpdate,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> SubteamResponse:
     try:

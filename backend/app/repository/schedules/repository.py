@@ -4,10 +4,13 @@ from uuid import UUID
 
 from supabase import Client
 
+from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.schedules import queries as q
 from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
+
+logger = get_logger(__name__)
 
 
 class ScheduleRepository(BaseRepository[ScheduleResponse]):
@@ -19,6 +22,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             client (Client): The Supabase client instance used for database operations.
         """
         super().__init__(client, q.TABLE, ScheduleResponse)
+        self.logger = logger.bind(repository="ScheduleRepository")
 
     def get_by_department(self, department_id: UUID) -> list[ScheduleResponse]:
         """
@@ -35,14 +39,17 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
                                    start date (newest first). Returns an empty list if
                                    no schedules exist for the department.
         """
+        log = self.logger.bind(method="get_by_department", department_id=str(department_id))
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
             .eq(q.Columns.DEPARTMENT_ID, str(department_id))
-            .order(q.Columns.START_DATE, desc=True)
+            .order(q.Columns.START_TIME, desc=True)
             .execute()
         )
-        return self._to_model_list(response.data or [])
+        schedules = self._to_model_list(response.data or [])
+        log.debug("fetched_schedules_by_department", count=len(schedules))
+        return schedules
 
     def get_with_assignments(self, schedule_id: UUID) -> ScheduleResponse | None:
         """
@@ -58,6 +65,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             ScheduleResponse | None: The schedule with embedded assignment data if found,
                                     None if the schedule doesn't exist.
         """
+        log = self.logger.bind(method="get_with_assignments", schedule_id=str(schedule_id))
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_ASSIGNMENTS)
@@ -65,7 +73,12 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             .single()
             .execute()
         )
-        return self._to_model(response.data) if response.data else None
+        schedule = self._to_model(response.data) if response.data else None
+        if schedule:
+            log.debug("fetched_schedule_with_assignments")
+        else:
+            log.warning("schedule_not_found")
+        return schedule
 
     def get_assignments_for_worker(
         self, worker_id: UUID
@@ -84,6 +97,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
                                      schedule information, ordered by date (newest first).
                                      Returns an empty list if the worker has no assignments.
         """
+        log = self.logger.bind(method="get_assignments_for_worker", worker_id=str(worker_id))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE)
@@ -91,7 +105,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             .order(q.AssignmentColumns.SCHEDULE_DATE, desc=True)
             .execute()
         )
-        return [AssignmentResponse.model_validate(row) for row in response.data or []]
+        assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
+        log.debug("fetched_assignments_for_worker", count=len(assignments))
+        return assignments
 
     def get_assignments_in_range(
         self, start_date: date, end_date: date
@@ -111,6 +127,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
                                      with embedded worker data. Returns an empty list if
                                      no pending assignments exist in the range.
         """
+        log = self.logger.bind(method="get_assignments_in_range", 
+                               start_date=start_date.isoformat(), 
+                               end_date=end_date.isoformat())
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .select(q.SELECT_ASSIGNMENTS_WITH_WORKERS)
@@ -119,7 +138,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             .eq(q.AssignmentColumns.STATUS, AssignmentStatus.PENDING)
             .execute()
         )
-        return [AssignmentResponse.model_validate(row) for row in response.data or []]
+        assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
+        log.debug("fetched_assignments_in_range", count=len(assignments))
+        return assignments
 
     def create_assignment(self, data: dict[str, Any]) -> AssignmentResponse:
         """
@@ -132,12 +153,15 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         Returns:
             AssignmentResponse: The newly created assignment record.
         """
+        log = self.logger.bind(method="create_assignment")
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .insert(data)
             .execute()
         )
-        return AssignmentResponse.model_validate(response.data[0])
+        assignment = AssignmentResponse.model_validate(response.data[0])
+        log.info("assignment_created", assignment_id=str(assignment.id))
+        return assignment
 
     def bulk_create_assignments(
         self, assignments: list[dict[str, Any]]
@@ -155,12 +179,15 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         Returns:
             list[AssignmentResponse]: A list of all created assignment records.
         """
+        log = self.logger.bind(method="bulk_create_assignments", count=len(assignments))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .insert(assignments)
             .execute()
         )
-        return [AssignmentResponse.model_validate(row) for row in response.data or []]
+        created = [AssignmentResponse.model_validate(row) for row in response.data or []]
+        log.info("bulk_assignments_created", created_count=len(created))
+        return created
 
     def update_assignment_status(
         self, assignment_id: UUID, status: AssignmentStatus
@@ -180,13 +207,21 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             AssignmentResponse | None: The updated assignment if successful, None if the
                                       assignment was not found.
         """
+        log = self.logger.bind(method="update_assignment_status", 
+                               assignment_id=str(assignment_id), 
+                               status=status)
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .update({q.AssignmentColumns.STATUS: status})
             .eq(q.AssignmentColumns.ID, str(assignment_id))
             .execute()
         )
-        return AssignmentResponse.model_validate(response.data[0]) if response.data else None
+        assignment = AssignmentResponse.model_validate(response.data[0]) if response.data else None
+        if assignment:
+            log.info("assignment_status_updated")
+        else:
+            log.warning("assignment_not_found")
+        return assignment
 
     def delete_assignments_for_schedule(self, schedule_id: UUID) -> bool:
         """
@@ -203,13 +238,20 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             bool: True if one or more assignments were deleted, False if no assignments
                  existed for the schedule.
         """
+        log = self.logger.bind(method="delete_assignments_for_schedule", 
+                               schedule_id=str(schedule_id))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .delete()
             .eq(q.AssignmentColumns.SCHEDULE_ID, str(schedule_id))
             .execute()
         )
-        return len(response.data) > 0
+        deleted = len(response.data) > 0
+        if deleted:
+            log.info("assignments_deleted", count=len(response.data))
+        else:
+            log.debug("no_assignments_to_delete")
+        return deleted
     
     def get_assignments_due_for_reminder(self, reminder_date: date) -> list[AssignmentResponse]:
         """
@@ -224,13 +266,17 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         Returns:
             list[AssignmentResponse]: A list of assignments that are due for reminders on the specified date
         """
+        log = self.logger.bind(method="get_assignments_due_for_reminder", 
+                               reminder_date=reminder_date.isoformat())
         # We will be calling the database function directly here since the logic is complex and involves a join
         response = (
             self.client.rpc(q.FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDERS, {"check_date": reminder_date.isoformat()})
             .execute()
         )
         data = response.data if isinstance(response.data, list) else []
-        return [AssignmentResponse.model_validate(row) for row in data]
+        assignments = [AssignmentResponse.model_validate(row) for row in data]
+        log.debug("fetched_assignments_due_for_reminder", count=len(assignments))
+        return assignments
     
     def mark_reminder_sent(self, assignment_id: UUID) -> bool:
         """
@@ -244,10 +290,16 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         Returns:
             bool: True if the assignment was successfully updated, False if the assignment was not found.
         """
+        log = self.logger.bind(method="mark_reminder_sent", assignment_id=str(assignment_id))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .update({q.AssignmentColumns.REMINDER_SENT_AT: datetime.now(timezone.utc).isoformat()})
             .eq(q.AssignmentColumns.ID, str(assignment_id))
             .execute()
         )
-        return len(response.data) > 0
+        success = len(response.data) > 0
+        if success:
+            log.info("reminder_marked_sent")
+        else:
+            log.warning("assignment_not_found")
+        return success

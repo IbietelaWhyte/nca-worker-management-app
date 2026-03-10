@@ -118,13 +118,13 @@ def require_admin(token: TokenPayload = Depends(verify_token)) -> TokenPayload:
     return token
 
 
-def require_department_head(
+def require_hod(
     token: TokenPayload = Depends(verify_token),
 ) -> TokenPayload:
     """FastAPI dependency that requires admin or department head role.
     
     This dependency validates that the authenticated user has either 'admin'
-    or 'department_head' role. If not, a 403 Forbidden error is raised.
+    or 'hod' role. If not, a 403 Forbidden error is raised.
     
     Args:
         token: The verified token payload from verify_token dependency.
@@ -135,11 +135,11 @@ def require_department_head(
     Raises:
         HTTPException: 403 Forbidden if user lacks required role.
     """
-    if token.role not in ("admin", "department_head"):
-        log = logger.bind(method="require_department_head", sub=token.sub)
-        log.warning("Department head access required")
+    if token.role not in ("admin", "hod"):
+        log = logger.bind(method="require_hod", sub=token.sub)
+        log.warning("HOD access required")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Department head access required",
+            detail="HOD access required",
         )
     return token

@@ -72,13 +72,22 @@ class ReminderService:
         failed = 0
 
         for assignment in due_assignments:
+            if not assignment.workers or not assignment.schedules:
+                log.warning(
+                    "reminder_skipped_missing_data",
+                    assignment_id=assignment.id,
+                )
+                continue
+
             worker = self.worker_repo.get_by_id(assignment.worker_id)
             schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
 
             if not worker or not schedule:
                 log.warning(
-                    "reminder_skipped_missing_data",
+                    "reminder_skipped_invalid_worker_or_schedule",
                     assignment_id=assignment.id,
+                    worker_id=assignment.worker_id,
+                    schedule_id=assignment.schedule_id,
                 )
                 continue
 

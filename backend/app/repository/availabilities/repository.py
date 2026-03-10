@@ -3,9 +3,12 @@ from uuid import UUID
 
 from supabase import Client
 
+from app.core.logging import get_logger
 from app.repository.availabilities import queries as q
 from app.repository.repository import BaseRepository
 from app.schemas.availabilities.models import AvailabilityResponse
+
+logger = get_logger(__name__)
 
 
 class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
@@ -17,6 +20,7 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             client (Client): The Supabase client instance used for database operations.
         """
         super().__init__(client, q.TABLE, AvailabilityResponse)
+        self.logger = logger.bind(repository="AvailabilityRepository")
 
     def get_by_worker(self, worker_id: UUID) -> list[AvailabilityResponse]:
         """
@@ -30,13 +34,16 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                                        one for each day they have availability set.
                                        Returns an empty list if no records are found.
         """
+        log = self.logger.bind(method="get_by_worker", worker_id=str(worker_id))
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
             .eq(q.Columns.WORKER_ID, str(worker_id))
             .execute()
         )
-        return self._to_model_list(response.data or [])
+        availabilities = self._to_model_list(response.data or [])
+        log.debug("fetched_availabilities_by_worker", count=len(availabilities))
+        return availabilities
 
     def get_by_worker_and_day(
         self, worker_id: UUID, day_of_week: int
@@ -52,6 +59,9 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             AvailabilityResponse | None: The availability record if found, None if the worker
                                         has no availability set for the specified day.
         """
+        log = self.logger.bind(method="get_by_worker_and_day", 
+                               worker_id=str(worker_id), 
+                               day_of_week=day_of_week)
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
@@ -60,7 +70,12 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             .single()
             .execute()
         )
-        return self._to_model(response.data) if response.data else None
+        availability = self._to_model(response.data) if response.data else None
+        if availability:
+            log.debug("availability_found")
+        else:
+            log.debug("availability_not_found")
+        return availability
     
     def get_by_worker_and_type(
         self, worker_id: UUID, availability_type: str, specific_date: date | None = None
@@ -75,6 +90,10 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             AvailabilityResponse | None: The availability record if found, None if the worker
                                         has no availability set for the specified type.
         """
+        log = self.logger.bind(method="get_by_worker_and_type", 
+                               worker_id=str(worker_id), 
+                               availability_type=availability_type, 
+                               specific_date=specific_date.isoformat() if specific_date else None)
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
@@ -84,7 +103,12 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             .single()
             .execute()
         )
-        return self._to_model(response.data) if response.data else None
+        availability = self._to_model(response.data) if response.data else None
+        if availability:
+            log.debug("availability_found_by_type")
+        else:
+            log.debug("availability_not_found_by_type")
+        return availability
 
     def get_available_workers_on_day(
         self, day_of_week: int
@@ -102,6 +126,7 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                                        data for all workers available on the specified day.
                                        Returns an empty list if no workers are available.
         """
+        log = self.logger.bind(method="get_available_workers_on_day", day_of_week=day_of_week)
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_WORKERS)
@@ -109,7 +134,9 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             .eq(q.Columns.IS_AVAILABLE, True)
             .execute()
         )
-        return self._to_model_list(response.data or [])
+        availabilities = self._to_model_list(response.data or [])
+        log.debug("fetched_available_workers_on_day", count=len(availabilities))
+        return availabilities
 
     def upsert_availability(
         self, worker_id: UUID, day_of_week: int, is_available: bool
@@ -129,6 +156,10 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
         Returns:
             AvailabilityResponse: The created or updated availability record.
         """
+        log = self.logger.bind(method="upsert_availability", 
+                               worker_id=str(worker_id), 
+                               day_of_week=day_of_week, 
+                               is_available=is_available)
         response = (
             self.client.table(q.TABLE)
             .upsert(
@@ -141,7 +172,9 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             )
             .execute()
         )
-        return self._to_model(response.data[0])
+        availability = self._to_model(response.data[0])
+        log.info("availability_upserted", availability_id=str(availability.id))
+        return availability
     
     def upsert_specific_date_availability(
         self, worker_id: UUID, specific_date: date, is_available: bool
@@ -161,6 +194,10 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
         Returns:
             AvailabilityResponse: The created or updated availability record.
         """
+        log = self.logger.bind(method="upsert_specific_date_availability", 
+                               worker_id=str(worker_id), 
+                               specific_date=specific_date.isoformat(), 
+                               is_available=is_available)
         response = (
             self.client.table(q.TABLE)
             .upsert(
@@ -173,7 +210,9 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             )
             .execute()
         )
-        return self._to_model(response.data[0])
+        availability = self._to_model(response.data[0])
+        log.info("specific_date_availability_upserted", availability_id=str(availability.id))
+        return availability
 
     def delete_worker_availability(self, worker_id: UUID) -> bool:
         """
@@ -190,10 +229,16 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
         Returns:
             bool: True if one or more records were deleted, False if no records were found.
         """
+        log = self.logger.bind(method="delete_worker_availability", worker_id=str(worker_id))
         response = (
             self.client.table(q.TABLE)
             .delete()
             .eq(q.Columns.WORKER_ID, str(worker_id))
             .execute()
         )
-        return len(response.data) > 0
+        deleted = len(response.data) > 0
+        if deleted:
+            log.info("worker_availability_deleted", count=len(response.data))
+        else:
+            log.debug("no_availability_to_delete")
+        return deleted

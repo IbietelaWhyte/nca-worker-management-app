@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.dependencies import (
     AdminUser,
     CurrentUser,
-    DepartmentHeadUser,
+    HODUser,
     get_department_service,
     get_subteam_service,
 )
@@ -71,7 +71,7 @@ def get_department_with_workers(
     department_id: UUID,
     _: TokenPayload = CurrentUser,
     service: DepartmentService = Depends(get_department_service),
-) -> list[DepartmentWithWorkersResponse]:
+) -> DepartmentWithWorkersResponse:
     """Retrieve a department with all assigned workers embedded.
     
     Args:
@@ -173,7 +173,7 @@ def delete_department(
 def assign_worker(
     department_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
 ) -> MessageResponse:
     try:
@@ -191,7 +191,7 @@ def assign_worker(
 def unassign_worker(
     department_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = DepartmentHeadUser,
+    _: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
 ) -> None:
     try:

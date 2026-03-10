@@ -98,7 +98,7 @@ class AvailabilityService:
         """
         log = self.logger.bind(worker_id=str(
             data.worker_id), data=data.model_dump(exclude={"worker_id"}))
-        if data.availability_type == AvailabilityType.RECURRING:
+        if data.availability_type == AvailabilityType.RECURRING and data.day_of_week is not None:
             record = self.availability_repo.upsert_availability(
                 worker_id=data.worker_id,
                 day_of_week=data.day_of_week.to_number(),
@@ -113,7 +113,7 @@ class AvailabilityService:
                 raise ValueError("specific_date is required for specific date availability")
             record = self.availability_repo.upsert_specific_date_availability(
                 worker_id=data.worker_id,
-                specific_date=data.specific_date.date(), 
+                specific_date=data.specific_date, 
                 is_available=data.is_available,
             )
             log.info(
