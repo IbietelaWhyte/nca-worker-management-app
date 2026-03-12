@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "supabase": "^2.76.16"
+  },
+  "dependencies": {
+    "prop-types": "^15.8.1"
   }
 }

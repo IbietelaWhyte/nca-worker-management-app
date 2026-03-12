@@ -45,3 +45,12 @@ clean:
 	find . -type d -name .pytest_cache -exec rm -rf {} +
 	find . -type d -name .ruff_cache -exec rm -rf {} +
 	find . -name "*.pyc" -delete
+
+dev-frontend:
+	cd frontend && npm run dev
+
+install-frontend:
+	cd frontend && npm install
+
+build-frontend:
+	cd frontend && npm run build

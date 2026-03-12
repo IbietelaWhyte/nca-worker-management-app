@@ -8,8 +8,8 @@ HOOKS_DIR="$REPO_ROOT/.git/hooks"
 echo "Installing git hooks..."
 
 # Copy pre-commit hook
-cp "$REPO_ROOT/backend/.git-hooks/pre-commit" "$HOOKS_DIR/pre-commit"
+cp "$REPO_ROOT/.git-hooks/pre-commit" "$HOOKS_DIR/pre-commit"
 chmod +x "$HOOKS_DIR/pre-commit"
 
 echo "✓ Git hooks installed successfully!"
-echo "Pre-commit hook will now run: make lint format typecheck"
+echo "Pre-commit hook will now check both backend and frontend code"
