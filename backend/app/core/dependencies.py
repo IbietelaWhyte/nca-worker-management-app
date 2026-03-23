@@ -12,6 +12,7 @@ from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
+from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.departments.service import DepartmentService
 from app.service.reminders.service import ReminderService
@@ -224,6 +225,25 @@ def get_subteam_service(
     """
     return SubteamService(
         subteam_repo=subteam_repo,
+    )
+
+
+def get_authentication_service(
+    client: Client = Depends(get_db),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+) -> AuthenticationService:
+    """FastAPI dependency that provides an AuthenticationService instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+        worker_repo: WorkerRepository dependency.
+
+    Returns:
+        AuthenticationService: Service for authentication business logic operations.
+    """
+    return AuthenticationService(
+        client=client,
+        worker_repo=worker_repo,
     )
 
 
