@@ -37,8 +37,8 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
                           the given email address or if the response contains no data.
         """
         log = self.logger.bind(method="get_by_email", email=email)
-        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.EMAIL, email).single().execute()
-        worker = self._to_model(response.data) if response.data else None
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.EMAIL, email).maybe_single().execute()
+        worker = self._to_model(response.data) if response else None
         if worker:
             log.debug("worker_found_by_email", worker_id=str(worker.id))
         else:
@@ -60,8 +60,8 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
                           the given phone number or if the response contains no data.
         """
         log = self.logger.bind(method="get_by_phone", phone=phone)
-        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.PHONE, phone).single().execute()
-        worker = self._to_model(response.data) if response.data else None
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.PHONE, phone).maybe_single().execute()
+        worker = self._to_model(response.data) if response else None
         if worker:
             log.debug("worker_found_by_phone", worker_id=str(worker.id))
         else:
