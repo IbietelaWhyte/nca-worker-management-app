@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.core.authentication import verify_token
 from app.core.dependencies import (
+    get_authentication_service,
     get_availability_service,
     get_department_service,
     get_reminder_service,
@@ -15,6 +16,7 @@ from app.core.dependencies import (
 )
 from app.main import app
 from app.schemas.models import TokenPayload, UserRole
+from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.departments.service import DepartmentService
 from app.service.reminders.service import ReminderService
@@ -57,6 +59,11 @@ def mock_reminder_service():
     return MagicMock(spec=ReminderService)
 
 
+@pytest.fixture
+def mock_authentication_service():
+    return MagicMock(spec=AuthenticationService)
+
+
 def make_client(
     role: UserRole = UserRole.WORKER,
     worker_service=None,
@@ -65,6 +72,7 @@ def make_client(
     availability_service=None,
     subteam_service=None,
     reminder_service=None,
+    authentication_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
@@ -80,6 +88,8 @@ def make_client(
         app.dependency_overrides[get_subteam_service] = lambda: subteam_service
     if reminder_service:
         app.dependency_overrides[get_reminder_service] = lambda: reminder_service
+    if authentication_service:
+        app.dependency_overrides[get_authentication_service] = lambda: authentication_service
 
     return TestClient(app)
 

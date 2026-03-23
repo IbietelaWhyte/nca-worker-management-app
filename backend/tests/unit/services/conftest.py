@@ -9,12 +9,14 @@ from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
+from app.schemas.authentication.models import RegisterRequest
 from app.schemas.availabilities.models import AvailabilityResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerResponse
+from app.service.authentication.service import AuthenticationService
 
 # ----------------------------------------------------------------
 # Mock repositories
@@ -44,6 +46,19 @@ def mock_availability_repo():
 @pytest.fixture
 def mock_subteam_repo():
     return MagicMock(spec=SubteamRepository)
+
+
+@pytest.fixture
+def mock_supabase_client():
+    client = MagicMock()
+    # Mock the table insert chain for worker_app_roles
+    client.table.return_value.insert.return_value.execute.return_value = MagicMock()
+    return client
+
+
+@pytest.fixture
+def service(mock_supabase_client, mock_worker_repo):
+    return AuthenticationService(client=mock_supabase_client, worker_repo=mock_worker_repo)
 
 
 # ----------------------------------------------------------------
@@ -127,3 +142,19 @@ def make_assignment(**kwargs) -> AssignmentResponse:
         workers=kwargs.get("workers", None),
         schedules=kwargs.get("schedules", None),
     )
+
+
+def make_register_request(**kwargs) -> RegisterRequest:
+    return RegisterRequest(
+        first_name=kwargs.get("first_name", "John"),
+        last_name=kwargs.get("last_name", "Doe"),
+        email=kwargs.get("email", "john.doe@example.com"),
+        phone=kwargs.get("phone", "+14165550101"),
+        password=kwargs.get("password", "securepassword123"),
+    )
+
+
+def make_auth_user(auth_user_id: str | None = None):
+    mock = MagicMock()
+    mock.user.id = auth_user_id or str(uuid4())
+    return mock
