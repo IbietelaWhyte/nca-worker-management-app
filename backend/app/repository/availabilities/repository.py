@@ -58,10 +58,10 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             .select(q.SELECT_ALL)
             .eq(q.Columns.WORKER_ID, str(worker_id))
             .eq(q.Columns.DAY_OF_WEEK, day_of_week)
-            .single()
+            .maybe_single()
             .execute()
         )
-        availability = self._to_model(response.data) if response.data else None
+        availability = self._to_model(response.data) if response else None
         if availability:
             log.debug("availability_found")
         else:
@@ -93,10 +93,10 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             .eq(q.Columns.WORKER_ID, str(worker_id))
             .eq(q.Columns.AVAILABILITY_TYPE, availability_type)
             .eq(q.Columns.SPECIFIC_DATE, specific_date.isoformat() if specific_date else None)
-            .single()
+            .maybe_single()
             .execute()
         )
-        availability = self._to_model(response.data) if response.data else None
+        availability = self._to_model(response.data) if response else None
         if availability:
             log.debug("availability_found_by_type")
         else:

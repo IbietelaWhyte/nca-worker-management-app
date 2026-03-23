@@ -37,8 +37,8 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
                                       exists with the given name.
         """
         log = self.logger.bind(method="get_by_name", name=name)
-        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).single().execute()
-        subteam = self._to_model(response.data) if response.data else None
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).maybe_single().execute()
+        subteam = self._to_model(response.data) if response else None
         if subteam:
             log.debug("subteam_found_by_name", subteam_id=str(subteam.id))
         else:
@@ -85,10 +85,10 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_WORKERS)
             .eq(q.Columns.ID, str(subteam_id))
-            .single()
+            .maybe_single()
             .execute()
         )
-        subteams = self._to_model_list([response.data], SubteamWithWorkersResponse) if response.data else []
+        subteams = self._to_model_list([response.data], SubteamWithWorkersResponse) if response else []
         log.debug("fetched_subteam_with_workers", has_data=bool(subteams))
         return subteams
 

@@ -87,8 +87,8 @@ class BaseRepository(Generic[T]):
         Returns:
             T | None: The model instance if found, None if no record exists with the given ID.
         """
-        response = self.client.table(self.table).select("*").eq("id", str(id)).single().execute()
-        return self._to_model(response.data) if response.data else None
+        response = self.client.table(self.table).select("*").eq("id", str(id)).maybe_single().execute()
+        return self._to_model(response.data) if response else None
 
     def get_all(self, limit: int = 100, offset: int = 0) -> list[T]:
         """

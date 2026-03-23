@@ -70,10 +70,10 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_ASSIGNMENTS)
             .eq(q.Columns.ID, str(schedule_id))
-            .single()
+            .maybe_single()
             .execute()
         )
-        schedule = self._to_model(response.data) if response.data else None
+        schedule = self._to_model(response.data) if response else None
         if schedule:
             log.debug("fetched_schedule_with_assignments")
         else:

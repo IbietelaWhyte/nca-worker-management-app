@@ -37,8 +37,8 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
                                       exists with the given name.
         """
         log = self.logger.bind(method="get_by_name", name=name)
-        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).single().execute()
-        department = self._to_model(response.data) if response.data else None
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.NAME, name).maybe_single().execute()
+        department = self._to_model(response.data) if response else None
         if department:
             log.debug("department_found_by_name", department_id=str(department.id))
         else:
@@ -63,11 +63,11 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             self.client.table(q.TABLE)
             .select(q.SELECT_WITH_WORKERS)
             .eq(q.Columns.ID, str(department_id))
-            .single()
+            .maybe_single()
             .execute()
         )
-        log.debug("fetched_department_with_workers_raw_response", response=response.data)
-        department = self._to_model(response.data, DepartmentWithWorkersResponse) if response.data else None
+        log.debug("fetched_department_with_workers_raw_response", response=response.data if response else None)
+        department = self._to_model(response.data, DepartmentWithWorkersResponse) if response else None
         log.debug("fetched_department_with_workers", has_data=bool(department))
         return department
 
