@@ -11,7 +11,7 @@ export const createWorker = (data) =>
     apiClient.post('/workers', data)
 
 export const updateWorker = (id, data) =>
-    apiClient.put(`/workers/${id}`, data)
+    apiClient.patch(`/workers/${id}`, data)
 
 export const deactivateWorker = (id) =>
     apiClient.delete(`/workers/${id}`)
