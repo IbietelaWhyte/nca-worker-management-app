@@ -11,7 +11,7 @@ class Department(BaseModel):
     name: str
     description: str | None = None
     hod_id: UUID | None = None
-    workers_per_slot: int | None = None
+    workers_per_slot: int
     created_at: datetime
 
 
@@ -19,7 +19,7 @@ class DepartmentCreate(BaseModel):
     name: str
     description: str | None = None
     hod_id: UUID | None = None
-    workers_per_slot: int | None = None
+    workers_per_slot: int = 1
 
 
 class DepartmentResponse(Department):

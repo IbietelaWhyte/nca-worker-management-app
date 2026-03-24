@@ -91,7 +91,6 @@ class DepartmentService:
             log.warning("department_already_exists")
             raise ValueError(f"Department '{data.name}' already exists")
         dept = self.department_repo.create(data.model_dump())
-        log = self.logger.bind(method="create_department", department_id=str(dept.id), name=data.name)
         log.info("department_created")
         return dept
 
