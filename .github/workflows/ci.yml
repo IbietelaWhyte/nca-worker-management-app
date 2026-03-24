@@ -10,10 +10,6 @@ jobs:
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: ./backend
 
     steps:
       - name: Checkout code
@@ -31,12 +27,22 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --all-extras
+        working-directory: ./backend
 
       - name: Install just
         uses: extractions/setup-just@v2
 
-      - name: Run just check (lint, typecheck, test)
-        run: just check
+      - name: Run linting
+        run: cd backend && uv run ruff check . --fix
+
+      - name: Run format check
+        run: cd backend && uv run ruff format . --check
+
+      - name: Run type checking
+        run: cd backend && uv run mypy app
+
+      - name: Run tests
+        run: cd backend && uv run pytest --cov=app --cov-report=term-missing
         env:
           # Mock environment variables for tests
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
