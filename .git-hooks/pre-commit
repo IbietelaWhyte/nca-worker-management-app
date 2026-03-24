@@ -1,0 +1,17 @@
+#!/bin/bash
+# Pre-commit hook to run linting, formatting, and type checking
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "Running pre-commit checks..."
+
+# Run just commands for backend and frontend
+echo "Checking backend..."
+cd backend && uv run ruff check . --fix && uv run ruff format . && uv run mypy app
+
+echo "Checking frontend..."
+cd ../frontend && npm run format
+
+echo "✓ All pre-commit checks passed!"
