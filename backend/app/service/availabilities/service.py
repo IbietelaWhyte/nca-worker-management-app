@@ -93,6 +93,7 @@ class AvailabilityService:
             ValueError: If specific_date is required but not provided.
         """
         log = self.logger.bind(worker_id=str(data.worker_id), data=data.model_dump(exclude={"worker_id"}))
+        log.info("setting_worker_availability")  # Log the intent to set availability
         if data.availability_type == AvailabilityType.RECURRING and data.day_of_week is not None:
             record = self.availability_repo.upsert_availability(
                 worker_id=data.worker_id,

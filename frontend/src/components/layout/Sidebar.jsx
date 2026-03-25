@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, Building2, Calendar } from 'lucide-react'
+import { LayoutDashboard, Users, Building2, Calendar, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/workers', icon: Users, label: 'Workers' },
   { to: '/departments', icon: Building2, label: 'Departments' },
+  { to: '/availability', icon: Clock, label: 'Availability' },
   { to: '/schedules', icon: Calendar, label: 'Schedules' },
 ]
 
