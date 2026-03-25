@@ -7,6 +7,10 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  const role = session?.user?.app_metadata?.role ?? 'worker'
+  const isAdmin = role === 'admin'
+  const isDepartmentHead = role === 'department_head' || role === 'admin'
+
 
   useEffect(() => {
     // Get the current session when the app first loads
@@ -46,6 +50,9 @@ export function AuthProvider({ children }) {
     user,
     session,
     loading,
+    role,
+    isAdmin,
+    isDepartmentHead,
     signIn,
     signOut,
   }
