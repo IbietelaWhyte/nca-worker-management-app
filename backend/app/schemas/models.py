@@ -19,6 +19,11 @@ class DayOfWeek(StrEnum):
         """Convert to 0-6 where Sunday=0"""
         return list(DayOfWeek).index(self)
 
+    @classmethod
+    def from_number(cls, day: int) -> "DayOfWeek":
+        """Convert from 0-6 (Sunday=0) to DayOfWeek enum"""
+        return list(cls)[day]
+
 
 class WorkerStatus(StrEnum):
     ACTIVE = "active"
