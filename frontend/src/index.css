@@ -59,4 +59,18 @@
     @apply bg-background text-foreground;
     font-family: 'Geist Variable', sans-serif;
   }
+
+  /* react-day-picker specific date modifiers */
+  .rdp-day-available {
+    background-color: hsl(var(--primary)) !important;
+    color: hsl(var(--primary-foreground)) !important;
+    border-radius: 4px;
+  }
+
+  .rdp-day-unavailable {
+    background-color: hsl(var(--destructive)) !important;
+    color: hsl(var(--destructive-foreground)) !important;
+    border-radius: 4px;
 }
+}
+

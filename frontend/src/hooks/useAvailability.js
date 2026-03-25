@@ -6,15 +6,16 @@ import {
     clearWorkerAvailability,
 } from '@/api/availability'
 
-const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-
 export function useAvailability(workerId) {
     const [availability, setAvailabilityState] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
 
     const fetchAvailability = useCallback(async () => {
-        if (!workerId) return
+        if (!workerId) {
+        setLoading(false)
+        return
+        }
         try {
         setLoading(true)
         setError(null)
@@ -31,40 +32,36 @@ export function useAvailability(workerId) {
         fetchAvailability()
     }, [fetchAvailability])
 
-    // Returns a map of day_of_week -> availability record for easy lookup
-    const availabilityByDay = DAYS.reduce((acc, day) => {
-        const record = availability.find(
-        a => a.availability_type === 'recurring' && a.day_of_week === day
-        )
-        acc[day] = record ?? null
-        return acc
-    }, {})
+    // Specific date records — array sorted by date
+    const specificDates = availability
+        .filter(a => a.availability_type === 'specific_date')
+        .sort((a, b) => a.specific_date?.localeCompare(b.specific_date))
 
-    const toggleDay = async (day, currentRecord) => {
-        if (currentRecord) {
-        // Already has a record — flip is_available
-        if (currentRecord.is_available) {
-            // Mark unavailable by deleting the record
-            await deleteAvailability(currentRecord.id)
-            setAvailabilityState(prev => prev.filter(a => a.id !== currentRecord.id))
-        } else {
-            // Re-enable
+    const toggleSpecificDate = async (dateStr, existingRecord) => {
+        if (existingRecord) {
+        // Cycle through: available → unavailable → removed
+        if (existingRecord.is_available) {
+            // Flip to unavailable
             const response = await setAvailability({
             worker_id: workerId,
-            availability_type: 'recurring',
-            day_of_week: day,
-            is_available: true,
+            availability_type: 'specific_date',
+            specific_date: dateStr,
+            is_available: false,
             })
             setAvailabilityState(prev =>
-            prev.map(a => a.id === currentRecord.id ? response.data : a)
+            prev.map(a => a.id === existingRecord.id ? response.data : a)
             )
+        } else {
+            // Remove the override entirely
+            await deleteAvailability(existingRecord.id)
+            setAvailabilityState(prev => prev.filter(a => a.id !== existingRecord.id))
         }
         } else {
-        // No record yet — create one marked available
+        // No record — create as available override
         const response = await setAvailability({
             worker_id: workerId,
-            availability_type: 'recurring',
-            day_of_week: day,
+            availability_type: 'specific_date',
+            specific_date: dateStr,
             is_available: true,
         })
         setAvailabilityState(prev => [...prev, response.data])
@@ -78,10 +75,10 @@ export function useAvailability(workerId) {
 
     return {
         availability,
-        availabilityByDay,
+        specificDates,
         loading,
         error,
-        toggleDay,
+        toggleSpecificDate,
         clearAll,
         refetch: fetchAvailability,
     }
