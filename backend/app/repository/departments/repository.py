@@ -67,6 +67,16 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
             .execute()
         )
         log.debug("fetched_department_with_workers_raw_response", response=response.data if response else None)
+
+        # Flatten the nested worker_departments structure
+        if response and response.data and isinstance(response.data, dict):
+            data = cast(dict[str, Any], response.data)
+            if "workers" in data and isinstance(data["workers"], list):
+                # Extract worker objects from the junction table structure
+                data["workers"] = [
+                    item["workers"] for item in data["workers"] if isinstance(item, dict) and "workers" in item
+                ]
+
         department = self._to_model(response.data, DepartmentWithWorkersResponse) if response else None
         log.debug("fetched_department_with_workers", has_data=bool(department))
         return department

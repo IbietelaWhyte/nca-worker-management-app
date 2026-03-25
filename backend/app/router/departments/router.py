@@ -65,7 +65,7 @@ def get_department(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.get("/{department_id}/workers", response_model=list[DepartmentWithWorkersResponse])
+@router.get("/{department_id}/workers", response_model=DepartmentWithWorkersResponse)
 def get_department_with_workers(
     department_id: UUID,
     _: TokenPayload = CurrentUser,
@@ -79,7 +79,7 @@ def get_department_with_workers(
         service: Department service dependency.
 
     Returns:
-        list[DepartmentWithWorkersResponse]: Department with worker details.
+        DepartmentWithWorkersResponse: Department with worker details.
 
     Raises:
         HTTPException: 404 if department not found.
