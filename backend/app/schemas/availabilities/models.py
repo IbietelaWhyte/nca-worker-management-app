@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from app.schemas.models import AvailabilityType, DayOfWeek
 
@@ -35,7 +35,13 @@ class AvailabilityCreate(BaseModel):
 
 
 class AvailabilityResponse(Availability):
-    pass
+    @field_validator("day_of_week", mode="before")
+    @classmethod
+    def convert_day_of_week(cls, v: int | None) -> DayOfWeek | None:
+        """Convert integer day_of_week from database to DayOfWeek enum"""
+        if isinstance(v, int):
+            return DayOfWeek.from_number(v)
+        return v
 
 
 class AvailabilityUpdate(BaseModel):
