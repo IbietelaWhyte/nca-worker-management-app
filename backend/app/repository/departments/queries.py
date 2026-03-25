@@ -2,7 +2,7 @@ TABLE = "departments"
 JUNCTION_TABLE = "worker_departments"
 
 SELECT_ALL = "*"
-SELECT_WITH_WORKERS = "*, worker_departments(workers(*))"
+SELECT_WITH_WORKERS = "*, workers:worker_departments(workers(*))"
 
 
 class Columns:

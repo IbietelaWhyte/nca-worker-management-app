@@ -14,7 +14,7 @@ export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel
   const [form, setForm] = useState({
     name: initial.name ?? '',
     description: initial.description ?? '',
-    workers: initial.workers ?? [],
+    workers_per_slot: initial.workers_per_slot ?? '',
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -71,11 +71,11 @@ export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description">Workers/Slot</Label>
+        <Label htmlFor="workers_per_slot">Workers/Slot</Label>
         <Input
-          id="workers"
-          name="workers"
-          value={form.workers}
+          id="workers_per_slot"
+          name="workers_per_slot"
+          value={form.workers_per_slot}
           onChange={handleChange}
           placeholder="1"
         />
