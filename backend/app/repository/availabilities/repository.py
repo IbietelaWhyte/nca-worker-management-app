@@ -7,6 +7,7 @@ from app.core.logging import get_logger
 from app.repository.availabilities import queries as q
 from app.repository.repository import BaseRepository
 from app.schemas.availabilities.models import AvailabilityResponse
+from app.schemas.models import AvailabilityType
 
 logger = get_logger(__name__)
 
@@ -155,6 +156,7 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                     q.Columns.WORKER_ID: str(worker_id),
                     q.Columns.DAY_OF_WEEK: day_of_week,
                     q.Columns.IS_AVAILABLE: is_available,
+                    q.Columns.AVAILABILITY_TYPE: AvailabilityType.RECURRING.value,
                 },
                 on_conflict=q.UPSERT_CONFLICT_TARGET,
             )
@@ -195,6 +197,7 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                     q.Columns.WORKER_ID: str(worker_id),
                     q.Columns.SPECIFIC_DATE: specific_date.isoformat(),
                     q.Columns.IS_AVAILABLE: is_available,
+                    q.Columns.AVAILABILITY_TYPE: AvailabilityType.SPECIFIC_DATE.value,
                 },
                 on_conflict=q.UPSERT_CONFLICT_TARGET,
             )
