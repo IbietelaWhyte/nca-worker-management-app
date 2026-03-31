@@ -100,7 +100,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             self.client.table(q.ASSIGNMENTS_TABLE)
             .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE)
             .eq(q.AssignmentColumns.WORKER_ID, str(worker_id))
-            .order(q.AssignmentColumns.SCHEDULE_DATE, desc=True)
+            .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", desc=True)
             .execute()
         )
         assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
@@ -129,9 +129,10 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
             .select(q.SELECT_ASSIGNMENTS_WITH_WORKERS)
-            .gte(q.AssignmentColumns.SCHEDULE_DATE, start_date.isoformat())
-            .lte(q.AssignmentColumns.SCHEDULE_DATE, end_date.isoformat())
+            .gte(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", start_date.isoformat())
+            .lte(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", end_date.isoformat())
             .eq(q.AssignmentColumns.STATUS, AssignmentStatus.PENDING)
+            .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", desc=True)
             .execute()
         )
         assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
