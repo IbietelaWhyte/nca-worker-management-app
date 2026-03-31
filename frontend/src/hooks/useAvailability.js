@@ -13,18 +13,18 @@ export function useAvailability(workerId) {
 
     const fetchAvailability = useCallback(async () => {
         if (!workerId) {
-        setLoading(false)
-        return
+            setLoading(false)
+            return
         }
         try {
-        setLoading(true)
-        setError(null)
-        const response = await getWorkerAvailability(workerId)
-        setAvailabilityState(response.data)
+            setLoading(true)
+            setError(null)
+            const response = await getWorkerAvailability(workerId)
+            setAvailabilityState(response.data)
         } catch (err) {
-        setError(err.response?.data?.detail ?? 'Failed to load availability')
+            setError(err.response?.data?.detail ?? 'Failed to load availability')
         } finally {
-        setLoading(false)
+            setLoading(false)
         }
     }, [workerId])
 
@@ -39,32 +39,32 @@ export function useAvailability(workerId) {
 
     const toggleSpecificDate = async (dateStr, existingRecord) => {
         if (existingRecord) {
-        // Cycle through: available → unavailable → removed
-        if (existingRecord.is_available) {
-            // Flip to unavailable
+            // Cycle through: available → unavailable → removed
+            if (existingRecord.is_available) {
+                // Flip to unavailable
+                const response = await setAvailability({
+                    worker_id: workerId,
+                    availability_type: 'specific_date',
+                    specific_date: dateStr,
+                    is_available: false,
+                })
+                setAvailabilityState(prev =>
+                    prev.map(a => (a.id === existingRecord.id ? response.data : a))
+                )
+            } else {
+                // Remove the override entirely
+                await deleteAvailability(existingRecord.id)
+                setAvailabilityState(prev => prev.filter(a => a.id !== existingRecord.id))
+            }
+        } else {
+            // No record — create as available override
             const response = await setAvailability({
-            worker_id: workerId,
-            availability_type: 'specific_date',
-            specific_date: dateStr,
-            is_available: false,
+                worker_id: workerId,
+                availability_type: 'specific_date',
+                specific_date: dateStr,
+                is_available: true,
             })
-            setAvailabilityState(prev =>
-            prev.map(a => a.id === existingRecord.id ? response.data : a)
-            )
-        } else {
-            // Remove the override entirely
-            await deleteAvailability(existingRecord.id)
-            setAvailabilityState(prev => prev.filter(a => a.id !== existingRecord.id))
-        }
-        } else {
-        // No record — create as available override
-        const response = await setAvailability({
-            worker_id: workerId,
-            availability_type: 'specific_date',
-            specific_date: dateStr,
-            is_available: true,
-        })
-        setAvailabilityState(prev => [...prev, response.data])
+            setAvailabilityState(prev => [...prev, response.data])
         }
     }
 

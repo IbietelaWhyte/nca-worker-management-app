@@ -9,28 +9,78 @@ import DepartmentsPage from '@/pages/DepartmentsPage'
 import DepartmentDetailPage from '@/pages/DepartmentDetailPage'
 import SchedulesPage from '@/pages/SchedulesPage'
 import AvailabilityPage from '@/pages/AvailabilityPage'
-
+import ScheduleDetailPage from '@/pages/ScheduleDetailPage'
 
 const ProtectedLayout = ({ children }) => (
-  <ProtectedRoute>
-    <AppLayout>{children}</AppLayout>
-  </ProtectedRoute>
+    <ProtectedRoute>
+        <AppLayout>{children}</AppLayout>
+    </ProtectedRoute>
 )
 
 function App() {
-  return (
-    <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/" element={<ProtectedLayout><DashboardPage /></ProtectedLayout>} />
-        <Route path="/workers" element={<ProtectedLayout><WorkersPage /></ProtectedLayout>} />
-        <Route path="/departments" element={<ProtectedLayout><DepartmentsPage /></ProtectedLayout>} />
-        <Route path="/departments/:id" element={<ProtectedLayout><DepartmentDetailPage /></ProtectedLayout>} />
-        <Route path="/availability" element={<ProtectedLayout><AvailabilityPage /></ProtectedLayout>} />
-        <Route path="/schedules" element={<ProtectedLayout><SchedulesPage /></ProtectedLayout>} />
-      </Routes>
-    </AuthProvider>
-  )
+    return (
+        <AuthProvider>
+            <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                    path="/"
+                    element={
+                        <ProtectedLayout>
+                            <DashboardPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/workers"
+                    element={
+                        <ProtectedLayout>
+                            <WorkersPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/departments"
+                    element={
+                        <ProtectedLayout>
+                            <DepartmentsPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/departments/:id"
+                    element={
+                        <ProtectedLayout>
+                            <DepartmentDetailPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/availability"
+                    element={
+                        <ProtectedLayout>
+                            <AvailabilityPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/schedules"
+                    element={
+                        <ProtectedLayout>
+                            <SchedulesPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/schedules/:id"
+                    element={
+                        <ProtectedLayout>
+                            <ScheduleDetailPage />
+                        </ProtectedLayout>
+                    }
+                />
+            </Routes>
+        </AuthProvider>
+    )
 }
 
 export default App
