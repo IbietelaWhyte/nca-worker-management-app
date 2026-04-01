@@ -229,7 +229,6 @@ export default function SchedulesPage() {
                     </DialogHeader>
                     <GenerateScheduleForm
                         departmentId={selectedDepartmentId}
-                        subteams={selectedDepartment?.subteams ?? []}
                         onSubmit={handleGenerate}
                         onCancel={() => setGenerateOpen(false)}
                     />
