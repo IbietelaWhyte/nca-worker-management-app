@@ -129,15 +129,26 @@ class ReminderService:
         log.info("reminder_manual_trigger")
         today = date.today()
         due_assignments = self.schedule_repo.get_assignments_due_for_reminder(today)
+        logger.debug("manual_reminder_due_assignments", due_assignments=due_assignments)
         sent_count = 0
 
         for assignment in due_assignments:
             worker = self.worker_repo.get_by_id(assignment.worker_id)
             schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
             if not worker or not schedule:
+                logger.debug(
+                    "manual_reminder_skipped_invalid_worker_or_schedule",
+                    assignment_id=assignment.id,
+                    worker_id=assignment.worker_id,
+                    schedule_id=assignment.schedule_id,
+                )
                 continue
             phone = worker.phone
             if not phone:
+                logger.debug(
+                    "manual_reminder_skipped_no_phone",
+                    worker_id=worker.id,
+                )
                 continue
 
             sent = self.sms_service.send_reminder(

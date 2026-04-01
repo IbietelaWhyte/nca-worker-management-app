@@ -38,7 +38,6 @@ class AssignmentResponse(BaseModel):
     department_role_id: UUID | None = None
     subteam_id: UUID | None = None
     status: str
-    created_at: datetime
     reminder_sent_at: datetime | None = None
     workers: WorkerResponse | None = None  # Nested worker object from joined query
     schedules: "Schedule | None" = None  # Nested schedule object from joined query
