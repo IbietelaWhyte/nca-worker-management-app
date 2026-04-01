@@ -60,7 +60,7 @@ class ScheduleService:
         log.info("fetching_worker_assignments")
         return self.schedule_repo.get_assignments_for_worker(worker_id)
 
-    def generate_schedule(self, data: ScheduleCreate, created_by: UUID) -> ScheduleResponse | None:
+    def generate_schedule(self, data: ScheduleCreate, created_by: str) -> ScheduleResponse | None:
         # bind the method and key parameters for better traceability in logs
         log = self.logger.bind(
             method="generate_schedule",
@@ -132,6 +132,11 @@ class ScheduleService:
             worker_ids=[str(w.id) for w in selected],
         )
 
+        # get the created_by user
+        created_by_user = self.worker_repo.get_by_email(created_by)
+        if not created_by_user:
+            raise ValueError(f"User with email {created_by} not found")
+
         schedule_data = {
             "department_id": str(data.department_id),
             "subteam_id": str(data.subteam_id) if data.subteam_id else None,
@@ -141,7 +146,7 @@ class ScheduleService:
             "end_time": data.end_time.isoformat(),
             "notes": data.notes,
             "reminder_days_before": data.reminder_days_before,
-            "created_by": str(created_by),
+            "created_by": str(created_by_user.id),
         }
         schedule = self.schedule_repo.create(schedule_data)
 

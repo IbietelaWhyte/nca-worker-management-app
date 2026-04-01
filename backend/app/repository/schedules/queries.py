@@ -5,7 +5,7 @@ SELECT_ALL = "*"
 SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*))"
 SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 SELECT_ASSIGNMENTS_WITH_WORKERS = "*, workers(*), schedules(*)"
-FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDERS = "get_assignments_due_for_reminders"
+FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 
 
 class Columns:

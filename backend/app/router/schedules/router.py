@@ -56,7 +56,11 @@ def generate_schedule(
     Requires HOD or admin role.
     """
     try:
-        schedule = service.generate_schedule(data, created_by=UUID(token.sub))
+        if token.email is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="User email is required to create schedule"
+            )
+        schedule = service.generate_schedule(data, created_by=token.email)
         if schedule is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule")
         return schedule

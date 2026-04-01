@@ -251,7 +251,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log = self.logger.bind(method="get_assignments_due_for_reminder", reminder_date=reminder_date.isoformat())
         # We will be calling the database function directly here since the logic is complex and involves a join
         response = self.client.rpc(
-            q.FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDERS, {"check_date": reminder_date.isoformat()}
+            q.FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER, {"check_date": reminder_date.isoformat()}
         ).execute()
         data = response.data if isinstance(response.data, list) else []
         assignments = [AssignmentResponse.model_validate(row) for row in data]
