@@ -12,7 +12,9 @@ export const deleteSchedule = scheduleId => apiClient.delete(`/schedules/${sched
 export const getWorkerAssignments = workerId =>
     apiClient.get(`/schedules/workers/${workerId}/assignments`)
 
-export const updateAssignmentStatus = (assignmentId, status) =>
-    apiClient.patch(`/schedules/assignments/${assignmentId}/status`, status)
+export const updateAssignmentStatus = (assignmentId, status_update) =>
+    apiClient.patch(`/schedules/assignments/${assignmentId}/status`, null, {
+        params: { status_update },
+    })
 
 export const triggerReminders = () => apiClient.post('/schedules/reminders/trigger')
