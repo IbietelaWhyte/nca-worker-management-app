@@ -9,7 +9,12 @@ from app.core.dependencies import (
     get_subteam_service,
 )
 from app.schemas.models import MessageResponse, TokenPayload
-from app.schemas.subteams.models import SubteamCreate, SubteamResponse, SubteamUpdate
+from app.schemas.subteams.models import (
+    SubteamCreate,
+    SubteamResponse,
+    SubteamUpdate,
+    SubteamWithWorkersResponse,
+)
 from app.service.subteams.service import SubteamService
 
 router = APIRouter(prefix="/subteams", tags=["subteams"])
@@ -23,6 +28,19 @@ def get_subteam(
 ) -> SubteamResponse:
     try:
         return service.get_subteam(subteam_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/{subteam_id}/workers", response_model=list[SubteamWithWorkersResponse])
+def get_subteam_with_workers(
+    subteam_id: UUID,
+    _: TokenPayload = CurrentUser,
+    service: SubteamService = Depends(get_subteam_service),
+) -> list[SubteamWithWorkersResponse]:
+    """Get subteam with all assigned workers."""
+    try:
+        return service.get_subteam_with_workers(subteam_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 

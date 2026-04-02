@@ -5,6 +5,11 @@ import { useWorkers } from '@/hooks/useWorkers'
 import { useSubteams } from '@/hooks/useSubteams'
 import { useAuth } from '@/context/AuthContext'
 import SubteamForm from '@/components/subteams/SubteamForm'
+import {
+    getSubteamWithWorkers,
+    assignWorkerToSubteam,
+    unassignWorkerFromSubteam,
+} from '@/api/subteams'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -18,7 +23,18 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ArrowLeft, UserPlus, UserMinus, Crown, Plus, Pencil, Trash2, Users } from 'lucide-react'
+import {
+    ArrowLeft,
+    UserPlus,
+    UserMinus,
+    Crown,
+    Plus,
+    Pencil,
+    Trash2,
+    Users,
+    ChevronRight,
+    ChevronDown,
+} from 'lucide-react'
 
 export default function DepartmentDetailPage() {
     const { id } = useParams()
@@ -53,6 +69,14 @@ export default function DepartmentDetailPage() {
     const [subteamDialogOpen, setSubteamDialogOpen] = useState(false)
     const [editingSubteam, setEditingSubteam] = useState(null)
     const [subteamActionLoading, setSubteamActionLoading] = useState(null)
+
+    // Subteam worker management state
+    const [expandedSubteamId, setExpandedSubteamId] = useState(null)
+    const [subteamWorkers, setSubteamWorkers] = useState([])
+    const [loadingSubteamWorkers, setLoadingSubteamWorkers] = useState(false)
+    const [addSubteamMemberOpen, setAddSubteamMemberOpen] = useState(false)
+    const [selectedSubteam, setSelectedSubteam] = useState(null)
+    const [subteamMemberActionLoading, setSubteamMemberActionLoading] = useState(null)
 
     // Workers not already in this department
     const memberIds = new Set(department?.workers?.map(w => w.id) ?? [])
@@ -118,6 +142,72 @@ export default function DepartmentDetailPage() {
             await removeSubteam(subteam.id)
         } finally {
             setSubteamActionLoading(null)
+        }
+    }
+
+    // Subteam worker handlers
+    const handleToggleSubteamExpansion = async subteamId => {
+        if (expandedSubteamId === subteamId) {
+            // Collapse
+            setExpandedSubteamId(null)
+            setSubteamWorkers([])
+        } else {
+            // Expand and fetch workers
+            setExpandedSubteamId(subteamId)
+            setLoadingSubteamWorkers(true)
+            try {
+                const response = await getSubteamWithWorkers(subteamId)
+                setSubteamWorkers(response.data || [])
+            } catch (error) {
+                console.error('Failed to load subteam workers:', error)
+                setSubteamWorkers([])
+            } finally {
+                setLoadingSubteamWorkers(false)
+            }
+        }
+    }
+
+    const handleOpenAddSubteamMember = subteam => {
+        setSelectedSubteam(subteam)
+        setAddSubteamMemberOpen(true)
+    }
+
+    const handleAddSubteamMember = async workerId => {
+        if (!selectedSubteam) return
+        setSubteamMemberActionLoading(workerId)
+        try {
+            await assignWorkerToSubteam(selectedSubteam.id, workerId)
+            // Refresh subteam workers list
+            const response = await getSubteamWithWorkers(selectedSubteam.id)
+            setSubteamWorkers(response.data || [])
+            setAddSubteamMemberOpen(false)
+        } catch (error) {
+            console.error('Failed to add worker to subteam:', error)
+            alert(error.response?.data?.detail || 'Failed to add worker to subteam')
+        } finally {
+            setSubteamMemberActionLoading(null)
+        }
+    }
+
+    const handleRemoveSubteamMember = async worker => {
+        if (!selectedSubteam) return
+        if (
+            !confirm(
+                `Remove ${worker.first_name} ${worker.last_name} from subteam "${selectedSubteam.name}"?`
+            )
+        )
+            return
+        setSubteamMemberActionLoading(worker.id)
+        try {
+            await unassignWorkerFromSubteam(selectedSubteam.id, worker.id)
+            // Refresh subteam workers list
+            const response = await getSubteamWithWorkers(selectedSubteam.id)
+            setSubteamWorkers(response.data || [])
+        } catch (error) {
+            console.error('Failed to remove worker from subteam:', error)
+            alert(error.response?.data?.detail || 'Failed to remove worker from subteam')
+        } finally {
+            setSubteamMemberActionLoading(null)
         }
     }
 
@@ -335,9 +425,11 @@ export default function DepartmentDetailPage() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead className="w-8"></TableHead>
                                             <TableHead>Name</TableHead>
                                             <TableHead>Description</TableHead>
                                             <TableHead>Workers/Slot</TableHead>
+                                            <TableHead>Members</TableHead>
                                             {(isAdmin || isDepartmentHead) && (
                                                 <TableHead className="text-right">
                                                     Actions
@@ -346,62 +438,247 @@ export default function DepartmentDetailPage() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {subteams.map(subteam => (
-                                            <TableRow key={subteam.id}>
-                                                <TableCell className="font-medium">
-                                                    {subteam.name}
-                                                </TableCell>
-                                                <TableCell className="text-muted-foreground">
-                                                    {subteam.description ?? '—'}
-                                                </TableCell>
-                                                <TableCell>
-                                                    {subteam.workers_per_slot ?? (
-                                                        <span className="text-muted-foreground text-xs">
-                                                            dept. default
-                                                        </span>
-                                                    )}
-                                                </TableCell>
-                                                {(isAdmin || isDepartmentHead) && (
-                                                    <TableCell className="text-right">
-                                                        <div className="flex justify-end gap-2">
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={() =>
-                                                                    handleOpenEditSubteam(subteam)
-                                                                }
-                                                            >
-                                                                <Pencil
-                                                                    size={14}
-                                                                    className="mr-1"
-                                                                />{' '}
-                                                                Edit
-                                                            </Button>
-                                                            {isAdmin && (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    disabled={
-                                                                        subteamActionLoading ===
-                                                                        subteam.id
-                                                                    }
-                                                                    onClick={() =>
-                                                                        handleDeleteSubteam(subteam)
-                                                                    }
-                                                                    className="text-destructive hover:text-destructive"
-                                                                >
-                                                                    <Trash2
-                                                                        size={14}
-                                                                        className="mr-1"
-                                                                    />{' '}
-                                                                    Delete
-                                                                </Button>
+                                        {subteams.map(subteam => {
+                                            const isExpanded = expandedSubteamId === subteam.id
+                                            const workerCount =
+                                                isExpanded && !loadingSubteamWorkers
+                                                    ? subteamWorkers.filter(w => w.worker).length
+                                                    : '—'
+
+                                            return (
+                                                <>
+                                                    <TableRow
+                                                        key={subteam.id}
+                                                        className="cursor-pointer hover:bg-accent/50"
+                                                        onClick={() => {
+                                                            handleToggleSubteamExpansion(subteam.id)
+                                                            setSelectedSubteam(subteam)
+                                                        }}
+                                                    >
+                                                        <TableCell>
+                                                            {isExpanded ? (
+                                                                <ChevronDown size={16} />
+                                                            ) : (
+                                                                <ChevronRight size={16} />
                                                             )}
-                                                        </div>
-                                                    </TableCell>
-                                                )}
-                                            </TableRow>
-                                        ))}
+                                                        </TableCell>
+                                                        <TableCell className="font-medium">
+                                                            {subteam.name}
+                                                        </TableCell>
+                                                        <TableCell className="text-muted-foreground">
+                                                            {subteam.description ?? '—'}
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            {subteam.workers_per_slot ?? (
+                                                                <span className="text-muted-foreground text-xs">
+                                                                    dept. default
+                                                                </span>
+                                                            )}
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {loadingSubteamWorkers && isExpanded
+                                                                    ? 'Loading...'
+                                                                    : isExpanded
+                                                                      ? `${workerCount} ${workerCount === 1 ? 'worker' : 'workers'}`
+                                                                      : 'Click to view'}
+                                                            </span>
+                                                        </TableCell>
+                                                        {(isAdmin || isDepartmentHead) && (
+                                                            <TableCell
+                                                                className="text-right"
+                                                                onClick={e => e.stopPropagation()}
+                                                            >
+                                                                <div className="flex justify-end gap-2">
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => {
+                                                                            handleOpenAddSubteamMember(
+                                                                                subteam
+                                                                            )
+                                                                        }}
+                                                                    >
+                                                                        <UserPlus
+                                                                            size={14}
+                                                                            className="mr-1"
+                                                                        />{' '}
+                                                                        Add Member
+                                                                    </Button>
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() =>
+                                                                            handleOpenEditSubteam(
+                                                                                subteam
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Pencil
+                                                                            size={14}
+                                                                            className="mr-1"
+                                                                        />{' '}
+                                                                        Edit
+                                                                    </Button>
+                                                                    {isAdmin && (
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            disabled={
+                                                                                subteamActionLoading ===
+                                                                                subteam.id
+                                                                            }
+                                                                            onClick={() =>
+                                                                                handleDeleteSubteam(
+                                                                                    subteam
+                                                                                )
+                                                                            }
+                                                                            className="text-destructive hover:text-destructive"
+                                                                        >
+                                                                            <Trash2
+                                                                                size={14}
+                                                                                className="mr-1"
+                                                                            />{' '}
+                                                                            Delete
+                                                                        </Button>
+                                                                    )}
+                                                                </div>
+                                                            </TableCell>
+                                                        )}
+                                                    </TableRow>
+
+                                                    {/* Expanded row showing workers */}
+                                                    {isExpanded && (
+                                                        <TableRow>
+                                                            <TableCell colSpan={6} className="p-0">
+                                                                <div className="bg-muted/30 p-4 border-t">
+                                                                    {loadingSubteamWorkers ? (
+                                                                        <div className="flex items-center justify-center py-8">
+                                                                            <p className="text-sm text-muted-foreground">
+                                                                                Loading workers...
+                                                                            </p>
+                                                                        </div>
+                                                                    ) : subteamWorkers.filter(
+                                                                          w => w.worker
+                                                                      ).length === 0 ? (
+                                                                        <div className="flex flex-col items-center justify-center py-8">
+                                                                            <p className="text-sm text-muted-foreground">
+                                                                                No workers assigned
+                                                                                to this subteam yet
+                                                                            </p>
+                                                                            {(isAdmin ||
+                                                                                isDepartmentHead) && (
+                                                                                <Button
+                                                                                    variant="outline"
+                                                                                    size="sm"
+                                                                                    className="mt-3"
+                                                                                    onClick={() =>
+                                                                                        handleOpenAddSubteamMember(
+                                                                                            subteam
+                                                                                        )
+                                                                                    }
+                                                                                >
+                                                                                    <UserPlus
+                                                                                        size={14}
+                                                                                        className="mr-2"
+                                                                                    />
+                                                                                    Add first worker
+                                                                                </Button>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="space-y-2">
+                                                                            <p className="text-sm font-medium mb-3">
+                                                                                Subteam Members
+                                                                            </p>
+                                                                            <div className="bg-background border rounded-lg overflow-hidden">
+                                                                                <Table>
+                                                                                    <TableHeader>
+                                                                                        <TableRow>
+                                                                                            <TableHead>
+                                                                                                Name
+                                                                                            </TableHead>
+                                                                                            <TableHead>
+                                                                                                Email
+                                                                                            </TableHead>
+                                                                                            {(isAdmin ||
+                                                                                                isDepartmentHead) && (
+                                                                                                <TableHead className="text-right">
+                                                                                                    Actions
+                                                                                                </TableHead>
+                                                                                            )}
+                                                                                        </TableRow>
+                                                                                    </TableHeader>
+                                                                                    <TableBody>
+                                                                                        {subteamWorkers
+                                                                                            .filter(
+                                                                                                w =>
+                                                                                                    w.worker
+                                                                                            )
+                                                                                            .map(
+                                                                                                ({
+                                                                                                    worker,
+                                                                                                }) => (
+                                                                                                    <TableRow
+                                                                                                        key={
+                                                                                                            worker.id
+                                                                                                        }
+                                                                                                    >
+                                                                                                        <TableCell>
+                                                                                                            {
+                                                                                                                worker.first_name
+                                                                                                            }{' '}
+                                                                                                            {
+                                                                                                                worker.last_name
+                                                                                                            }
+                                                                                                        </TableCell>
+                                                                                                        <TableCell className="text-muted-foreground text-sm">
+                                                                                                            {
+                                                                                                                worker.email
+                                                                                                            }
+                                                                                                        </TableCell>
+                                                                                                        {(isAdmin ||
+                                                                                                            isDepartmentHead) && (
+                                                                                                            <TableCell className="text-right">
+                                                                                                                <Button
+                                                                                                                    variant="outline"
+                                                                                                                    size="sm"
+                                                                                                                    disabled={
+                                                                                                                        subteamMemberActionLoading ===
+                                                                                                                        worker.id
+                                                                                                                    }
+                                                                                                                    onClick={() =>
+                                                                                                                        handleRemoveSubteamMember(
+                                                                                                                            worker
+                                                                                                                        )
+                                                                                                                    }
+                                                                                                                    className="text-destructive hover:text-destructive"
+                                                                                                                >
+                                                                                                                    <UserMinus
+                                                                                                                        size={
+                                                                                                                            14
+                                                                                                                        }
+                                                                                                                        className="mr-1"
+                                                                                                                    />
+                                                                                                                    Remove
+                                                                                                                </Button>
+                                                                                                            </TableCell>
+                                                                                                        )}
+                                                                                                    </TableRow>
+                                                                                                )
+                                                                                            )}
+                                                                                    </TableBody>
+                                                                                </Table>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    )}
+                                                </>
+                                            )
+                                        })}
                                     </TableBody>
                                 </Table>
                             </div>
@@ -446,6 +723,65 @@ export default function DepartmentDetailPage() {
                             ))}
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Add worker to subteam dialog */}
+            <Dialog open={addSubteamMemberOpen} onOpenChange={setAddSubteamMemberOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Add Member to {selectedSubteam?.name ?? 'Subteam'}
+                        </DialogTitle>
+                        <p className="text-sm text-muted-foreground mt-2">
+                            Only showing members of {department?.name ?? 'this department'}
+                        </p>
+                    </DialogHeader>
+                    {(() => {
+                        // Get workers already in this subteam
+                        const subteamWorkerIds = new Set(
+                            subteamWorkers.filter(w => w.worker).map(w => w.worker.id)
+                        )
+                        // Filter to department members not in subteam
+                        const availableSubteamWorkers = (department?.workers ?? []).filter(
+                            w => !subteamWorkerIds.has(w.id)
+                        )
+
+                        if (availableSubteamWorkers.length === 0) {
+                            return (
+                                <p className="text-sm text-muted-foreground py-4 text-center">
+                                    All department members are already assigned to this subteam.
+                                </p>
+                            )
+                        }
+
+                        return (
+                            <div className="space-y-2 max-h-80 overflow-y-auto">
+                                {availableSubteamWorkers.map(worker => (
+                                    <div
+                                        key={worker.id}
+                                        className="flex items-center justify-between p-3 border rounded-md hover:bg-accent transition-colors"
+                                    >
+                                        <div>
+                                            <p className="text-sm font-medium">
+                                                {worker.first_name} {worker.last_name}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {worker.email}
+                                            </p>
+                                        </div>
+                                        <Button
+                                            size="sm"
+                                            disabled={subteamMemberActionLoading === worker.id}
+                                            onClick={() => handleAddSubteamMember(worker.id)}
+                                        >
+                                            Add
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        )
+                    })()}
                 </DialogContent>
             </Dialog>
 

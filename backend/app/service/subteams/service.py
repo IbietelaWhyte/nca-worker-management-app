@@ -33,11 +33,11 @@ class SubteamService:
             ValueError: If subteam not found.
         """
         log = self.logger.bind(method="get_subteam", subteam_id=str(subteam_id))
-        dept = self.subteam_repo.get_by_id(subteam_id)
-        if not dept:
+        subteam = self.subteam_repo.get_by_id(subteam_id)
+        if not subteam:
             log.warning("subteam_not_found")
             raise ValueError(f"subteam {subteam_id} not found")
-        return dept
+        return subteam
 
     def get_all_subteams(self) -> list[SubteamResponse]:
         """Retrieve all subteams.
@@ -46,9 +46,9 @@ class SubteamService:
             list[SubteamResponse]: List of all subteams in the system.
         """
         log = self.logger.bind(method="get_all_subteams")
-        depts = self.subteam_repo.get_all()
-        log.debug("fetched_all_subteams", count=len(depts))
-        return depts
+        subteams = self.subteam_repo.get_all()
+        log.debug("fetched_all_subteams", count=len(subteams))
+        return subteams
 
     def get_subteam_with_workers(self, subteam_id: UUID) -> list[SubteamWithWorkersResponse]:
         """Retrieve a subteam with all assigned workers embedded.
@@ -57,17 +57,22 @@ class SubteamService:
             subteam_id: Unique identifier of the subteam.
 
         Returns:
-            list[SubteamWithWorkersResponse]: Subteam with worker details.
+            list[SubteamWithWorkersResponse]: Subteam with worker details (can be empty list).
 
         Raises:
             ValueError: If subteam not found.
         """
         log = self.logger.bind(method="get_subteam_with_workers", subteam_id=str(subteam_id))
-        dept = self.subteam_repo.get_with_workers(subteam_id)
-        if not dept:
+
+        # First validate that the subteam exists
+        subteam_exists = self.subteam_repo.get_by_id(subteam_id)
+        if not subteam_exists:
             log.warning("subteam_not_found")
             raise ValueError(f"subteam {subteam_id} not found")
-        return dept
+
+        # Then get workers (can be empty list if no workers assigned)
+        workers = self.subteam_repo.get_with_workers(subteam_id)
+        return workers
 
     def create_subteam(self, data: SubteamCreate) -> SubteamResponse:
         """Create a new subteam.
@@ -90,10 +95,10 @@ class SubteamService:
             raise ValueError(f"subteam '{data.name}' already exists")
         subteam_data = data.model_dump()
         subteam_data["department_id"] = str(data.department_id)
-        dept = self.subteam_repo.create(subteam_data)
-        log = self.logger.bind(method="create_subteam", subteam_id=str(dept.id), name=data.name)
+        subteam = self.subteam_repo.create(subteam_data)
+        log = self.logger.bind(method="create_subteam", subteam_id=str(subteam.id), name=data.name)
         log.info("subteam_created")
-        return dept
+        return subteam
 
     def update_subteam(self, subteam_id: UUID, data: SubteamUpdate) -> SubteamResponse:
         """Update a subteam's information.
@@ -152,8 +157,8 @@ class SubteamService:
         subteam = self.get_subteam(subteam_id)
 
         # Validate worker is assigned to the subteam's parent department
-        worker_depts = self.department_repo.get_departments_for_worker(worker_id)
-        is_in_department = any(d.id == subteam.department_id for d in worker_depts)
+        worker_subteams = self.department_repo.get_departments_for_worker(worker_id)
+        is_in_department = any(d.id == subteam.department_id for d in worker_subteams)
 
         if not is_in_department:
             log.warning("worker_not_in_parent_department", department_id=str(subteam.department_id))
