@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from app.core.logging import get_logger
+from app.repository.departments.repository import DepartmentRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.schemas.subteams.models import SubteamCreate, SubteamResponse, SubteamUpdate, SubteamWithWorkersResponse
 
@@ -8,13 +9,15 @@ logger = get_logger(__name__)
 
 
 class SubteamService:
-    def __init__(self, subteam_repo: SubteamRepository) -> None:
-        """Initialize the SubteamService with required repository.
+    def __init__(self, subteam_repo: SubteamRepository, department_repo: DepartmentRepository) -> None:
+        """Initialize the SubteamService with required repositories.
 
         Args:
             subteam_repo: Repository for subteam database operations.
+            department_repo: Repository for department database operations.
         """
         self.subteam_repo = subteam_repo
+        self.department_repo = department_repo
         self.logger = logger.bind(service="SubteamService")
 
     def get_subteam(self, subteam_id: UUID) -> SubteamResponse:
@@ -85,7 +88,9 @@ class SubteamService:
         if existing:
             log.warning("subteam_already_exists")
             raise ValueError(f"subteam '{data.name}' already exists")
-        dept = self.subteam_repo.create(data.model_dump())
+        subteam_data = data.model_dump()
+        subteam_data["department_id"] = str(data.department_id)
+        dept = self.subteam_repo.create(subteam_data)
         log = self.logger.bind(method="create_subteam", subteam_id=str(dept.id), name=data.name)
         log.info("subteam_created")
         return dept
@@ -131,15 +136,29 @@ class SubteamService:
     def assign_worker(self, subteam_id: UUID, worker_id: UUID) -> None:
         """Assign a worker to a subteam.
 
+        Validates that the worker is already assigned to the subteam's parent department
+        before allowing the assignment.
+
         Args:
             subteam_id: Unique identifier of the subteam.
             worker_id: Unique identifier of the worker to assign.
 
         Raises:
-            ValueError: If subteam not found.
+            ValueError: If subteam not found or worker not assigned to parent department.
         """
         log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
-        self.get_subteam(subteam_id)
+
+        # Get subteam and validate it exists
+        subteam = self.get_subteam(subteam_id)
+
+        # Validate worker is assigned to the subteam's parent department
+        worker_depts = self.department_repo.get_departments_for_worker(worker_id)
+        is_in_department = any(d.id == subteam.department_id for d in worker_depts)
+
+        if not is_in_department:
+            log.warning("worker_not_in_parent_department", department_id=str(subteam.department_id))
+            raise ValueError(f"Worker {worker_id} is not assigned to department {subteam.department_id}")
+
         self.subteam_repo.assign_worker(subteam_id, worker_id)
         log.info("worker_assigned_to_subteam")
 
