@@ -78,7 +78,7 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
             subteam_id (UUID): The unique identifier of the subteam.
 
         Returns:
-            list[SubteamWithWorkersResponse]: The subteam with embedded worker data if found,
+            list[SubteamWithWorkersResponse]: List of subteam records with embedded worker data.
         """
         log = self.logger.bind(method="get_with_workers", subteam_id=str(subteam_id))
         response = (
@@ -88,9 +88,43 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
             .maybe_single()
             .execute()
         )
-        subteams = self._to_model_list([response.data], SubteamWithWorkersResponse) if response else []
-        log.debug("fetched_subteam_with_workers", has_data=bool(subteams))
-        return subteams
+        log.debug("fetched_subteam_with_workers_raw_response", response=response.data if response else None)
+
+        # Flatten the nested worker_departments structure
+        if response and response.data and isinstance(response.data, dict):
+            data = cast(dict[str, Any], response.data)
+            if "workers" in data and isinstance(data["workers"], list):
+                # Extract and enhance worker data from junction table
+                data["workers"] = [
+                    {**item["workers"], "subteam_id": str(subteam_id)}
+                    if isinstance(item, dict) and "workers" in item and item["workers"]
+                    else None
+                    for item in data["workers"]
+                ]
+                # Filter out None values (workers that were deleted)
+                data["workers"] = [w for w in data["workers"] if w is not None]
+
+        # Convert to list of SubteamWithWorkersResponse (one per worker, or empty list if no workers)
+        if response and response.data and isinstance(response.data, dict):
+            data = cast(dict[str, Any], response.data)
+            workers = data.get("workers", [])
+
+            if not workers:
+                # Return empty list if no workers
+                log.debug("fetched_subteam_with_workers", worker_count=0)
+                return []
+
+            # Create one SubteamWithWorkersResponse per worker
+            result = []
+            for worker in workers:
+                subteam_with_worker = {**{k: v for k, v in data.items() if k != "workers"}, "worker": worker}
+                result.append(SubteamWithWorkersResponse(**subteam_with_worker))
+
+            log.debug("fetched_subteam_with_workers", worker_count=len(result))
+            return result
+
+        log.debug("fetched_subteam_with_workers", worker_count=0)
+        return []
 
     def get_subteams_for_worker(self, worker_id: UUID) -> list[SubteamResponse]:
         """
@@ -127,25 +161,31 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         """
         Assign a worker to a subteam.
 
-        This method creates a new association in the junction table, linking a worker
-        to a subteam. A worker can be assigned to multiple subteams.
+        This method updates the existing worker_departments association to add the
+        subteam_id. The worker must already be assigned to the parent department.
 
         Args:
             subteam_id (UUID): The unique identifier of the subteam.
             worker_id (UUID): The unique identifier of the worker to assign.
 
         Returns:
-            dict[str, Any]: The created junction record containing subteam_id and worker_id.
+            dict[str, Any]: The updated junction record containing subteam_id and worker_id.
         """
         log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
+
+        # Get the subteam to find its department_id
+        subteam_response = (
+            self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.ID, str(subteam_id)).single().execute()
+        )
+        subteam_data = cast(dict[str, Any], subteam_response.data)
+        department_id = subteam_data["department_id"]
+
+        # Update the existing worker_departments row to set the subteam_id
         response = (
             self.client.table(q.JUNCTION_TABLE)
-            .insert(
-                {
-                    q.JunctionColumns.SUBTEAM_ID: str(subteam_id),
-                    q.JunctionColumns.WORKER_ID: str(worker_id),
-                }
-            )
+            .update({q.JunctionColumns.SUBTEAM_ID: str(subteam_id)})
+            .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
+            .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
             .execute()
         )
         log.info("worker_assigned_to_subteam")
@@ -155,9 +195,9 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         """
         Remove a worker's assignment from a specific subteam.
 
-        This method deletes the association record from the junction table, effectively
-        unassigning the worker from the subteam. The worker and subteam records
-        themselves remain unchanged.
+        This method updates the worker_departments row to set subteam_id to NULL,
+        keeping the worker assigned to the parent department but removing them from
+        the subteam.
 
         Args:
             subteam_id (UUID): The unique identifier of the subteam.
@@ -168,11 +208,21 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
                  assignment existed.
         """
         log = self.logger.bind(method="unassign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
+
+        # Get the subteam to find its department_id
+        subteam_response = (
+            self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.ID, str(subteam_id)).single().execute()
+        )
+        subteam_data = cast(dict[str, Any], subteam_response.data)
+        department_id = subteam_data["department_id"]
+
+        # Update the worker_departments row to set subteam_id to NULL
         response = (
             self.client.table(q.JUNCTION_TABLE)
-            .delete()
-            .eq(q.JunctionColumns.SUBTEAM_ID, str(subteam_id))
+            .update({q.JunctionColumns.SUBTEAM_ID: None})
             .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
+            .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
+            .eq(q.JunctionColumns.SUBTEAM_ID, str(subteam_id))
             .execute()
         )
         success = len(response.data) > 0

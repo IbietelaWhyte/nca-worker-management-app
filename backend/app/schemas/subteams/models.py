@@ -17,6 +17,7 @@ class Subteam(BaseModel):
 
 class SubteamCreate(BaseModel):
     name: str
+    department_id: UUID
     description: str | None = None
     workers_per_slot: int | None = None
 

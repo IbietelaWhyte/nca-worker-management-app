@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
+import { useSubteams } from '@/hooks/useSubteams'
 
 const defaultForm = {
     title: '',
@@ -18,7 +19,8 @@ const defaultForm = {
     reminder_days_before: 1,
 }
 
-export default function GenerateScheduleForm({ departmentId, subteams = [], onSubmit, onCancel }) {
+export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel }) {
+    const { subteams } = useSubteams(departmentId)
     const [form, setForm] = useState(defaultForm)
     const [selectedSubteamId, setSelectedSubteamId] = useState('')
     const [loading, setLoading] = useState(false)
