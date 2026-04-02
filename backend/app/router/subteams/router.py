@@ -8,7 +8,7 @@ from app.core.dependencies import (
     HODUser,
     get_subteam_service,
 )
-from app.schemas.models import TokenPayload
+from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.subteams.models import SubteamCreate, SubteamResponse, SubteamUpdate
 from app.service.subteams.service import SubteamService
 
@@ -60,5 +60,40 @@ def delete_subteam(
 ) -> None:
     try:
         service.delete_subteam(subteam_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post("/{subteam_id}/workers/{worker_id}", response_model=MessageResponse)
+def assign_worker_to_subteam(
+    subteam_id: UUID,
+    worker_id: UUID,
+    _: TokenPayload = HODUser,
+    service: SubteamService = Depends(get_subteam_service),
+) -> MessageResponse:
+    """Assign a worker to a subteam.
+
+    Requires the worker to already be assigned to the subteam's parent department.
+    """
+    try:
+        service.assign_worker(subteam_id, worker_id)
+        return MessageResponse(message="Worker assigned to subteam successfully")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete(
+    "/{subteam_id}/workers/{worker_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def unassign_worker_from_subteam(
+    subteam_id: UUID,
+    worker_id: UUID,
+    _: TokenPayload = HODUser,
+    service: SubteamService = Depends(get_subteam_service),
+) -> None:
+    """Remove a worker's assignment from a subteam."""
+    try:
+        service.unassign_worker(subteam_id, worker_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

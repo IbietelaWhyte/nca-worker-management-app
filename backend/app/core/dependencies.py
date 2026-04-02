@@ -214,17 +214,20 @@ def get_availability_service(
 
 def get_subteam_service(
     subteam_repo: SubteamRepository = Depends(get_subteam_repository),
+    department_repo: DepartmentRepository = Depends(get_department_repository),
 ) -> SubteamService:
     """FastAPI dependency that provides a SubteamService instance.
 
     Args:
         subteam_repo: SubteamRepository dependency.
+        department_repo: DepartmentRepository dependency.
 
     Returns:
         SubteamService: Service for subteam business logic operations.
     """
     return SubteamService(
         subteam_repo=subteam_repo,
+        department_repo=department_repo,
     )
 
 
