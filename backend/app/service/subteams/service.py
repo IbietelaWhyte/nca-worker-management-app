@@ -93,9 +93,7 @@ class SubteamService:
         if existing:
             log.warning("subteam_already_exists")
             raise ValueError(f"subteam '{data.name}' already exists")
-        subteam_data = data.model_dump()
-        subteam_data["department_id"] = str(data.department_id)
-        subteam = self.subteam_repo.create(subteam_data)
+        subteam = self.subteam_repo.create(data.model_dump(mode="json"))
         log = self.logger.bind(method="create_subteam", subteam_id=str(subteam.id), name=data.name)
         log.info("subteam_created")
         return subteam

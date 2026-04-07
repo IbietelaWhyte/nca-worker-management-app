@@ -13,17 +13,17 @@ export default function ScheduleDetailPage() {
     const { id } = useParams()
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead } = useAuth()
-    const { schedule, loading, error, changeAssignmentStatus, sendReminders } =
+    const { schedule, loading, error, changeAssignmentStatus, sendRemindersForSchedule } =
         useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
 
-    const handleSendReminders = async () => {
+    const handleSendReminders = async schedule => {
         if (!confirm('Send SMS reminders to all assigned workers now?')) return
         setReminderLoading(true)
         setReminderMessage(null)
         try {
-            const result = await sendReminders()
+            const result = await sendRemindersForSchedule(schedule.id)
             setReminderMessage(result.message)
         } catch (err) {
             setReminderMessage(`Failed to send reminders: ${err.message}`)
@@ -79,7 +79,7 @@ export default function ScheduleDetailPage() {
                 {(isAdmin || isDepartmentHead) && (
                     <Button
                         variant="outline"
-                        onClick={handleSendReminders}
+                        onClick={() => handleSendReminders(schedule)}
                         disabled={reminderLoading}
                     >
                         <Bell size={16} className="mr-2" />

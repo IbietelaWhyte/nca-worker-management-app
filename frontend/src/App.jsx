@@ -10,6 +10,7 @@ import DepartmentDetailPage from '@/pages/DepartmentDetailPage'
 import SchedulesPage from '@/pages/SchedulesPage'
 import AvailabilityPage from '@/pages/AvailabilityPage'
 import ScheduleDetailPage from '@/pages/ScheduleDetailPage'
+import ConfirmPage from '@/pages/ConfirmPage'
 
 const ProtectedLayout = ({ children }) => (
     <ProtectedRoute>
@@ -78,6 +79,8 @@ function App() {
                         </ProtectedLayout>
                     }
                 />
+                {/* Public route — no auth required, accessible by workers via SMS link */}
+                <Route path="/confirm/:token" element={<ConfirmPage />} />
             </Routes>
         </AuthProvider>
     )
