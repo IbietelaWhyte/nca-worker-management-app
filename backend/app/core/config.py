@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     secret_key: str
     allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    frontend_url: str = "http://localhost:5173"
 
     @property
     def is_production(self) -> bool:

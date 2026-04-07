@@ -114,3 +114,14 @@ def trigger_reminders(
     """Manually trigger the reminder job — useful for testing."""
     sent = reminder_service.trigger_manually()
     return MessageResponse(message=f"Sent {sent} reminder(s)")
+
+
+@router.post("/{schedule_id}/reminders/trigger", response_model=MessageResponse)
+def send_reminders_for_schedule(
+    schedule_id: UUID,
+    _: TokenPayload = HODUser,
+    reminder_service: ReminderService = Depends(get_reminder_service),
+) -> MessageResponse:
+    """Manually trigger reminders for a specific schedule."""
+    sent = reminder_service.trigger_for_schedule(schedule_id)
+    return MessageResponse(message=f"Sent {sent} reminder(s) for schedule {schedule_id}")

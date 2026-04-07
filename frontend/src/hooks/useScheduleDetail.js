@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getSchedule, updateAssignmentStatus, triggerReminders } from '@/api/schedules'
+import {
+    getSchedule,
+    updateAssignmentStatus,
+    triggerReminders,
+    triggerRemindersForSchedule,
+} from '@/api/schedules'
 
 export function useScheduleDetail(scheduleId) {
     const [schedule, setSchedule] = useState(null)
@@ -40,6 +45,11 @@ export function useScheduleDetail(scheduleId) {
         return response.data
     }
 
+    const sendRemindersForSchedule = async () => {
+        const response = await triggerRemindersForSchedule(scheduleId)
+        return response.data
+    }
+
     return {
         schedule,
         loading,
@@ -47,5 +57,6 @@ export function useScheduleDetail(scheduleId) {
         refetch: fetchSchedule,
         changeAssignmentStatus,
         sendReminders,
+        sendRemindersForSchedule,
     }
 }

@@ -11,7 +11,7 @@ from app.core.logging import get_logger, setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.supabase import get_supabase
 from app.repository.schedules.repository import ScheduleRepository
-from app.router import authentication, availabilities, departments, schedules, subteams, workers
+from app.router import authentication, availabilities, confirmation_tokens, departments, schedules, subteams, workers
 from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
 
@@ -28,13 +28,22 @@ def create_reminder_service() -> ReminderService:
     Returns:
         ReminderService: Configured reminder service instance ready to send notifications.
     """
+    from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
     from app.repository.workers.repository import WorkerRepository
+    from app.service.confirmation_tokens.service import ConfirmationTokenService
 
     client = get_supabase()
+    token_repo = ConfirmationTokenRepository(client)
+    token_service = ConfirmationTokenService(
+        token_repo=token_repo,
+        schedule_repo=ScheduleRepository(client),
+        worker_repo=WorkerRepository(client),
+    )
     return ReminderService(
         schedule_repo=ScheduleRepository(client),
         sms_service=SMSService(),
         worker_repo=WorkerRepository(client),
+        token_service=token_service,
     )
 
 
@@ -84,6 +93,7 @@ app.include_router(schedules.router, prefix="/api/v1")
 app.include_router(availabilities.router, prefix="/api/v1")
 app.include_router(subteams.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
+app.include_router(confirmation_tokens.router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["health"])

@@ -8,12 +8,14 @@ from app.core.authentication import (
 )
 from app.core.supabase import get_supabase
 from app.repository.availabilities.repository import AvailabilityRepository
+from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
+from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.departments.service import DepartmentService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
@@ -99,6 +101,18 @@ def get_subteam_repository(client: Client = Depends(get_db)) -> SubteamRepositor
     return SubteamRepository(client)
 
 
+def get_confirmation_token_repository(client: Client = Depends(get_db)) -> ConfirmationTokenRepository:
+    """FastAPI dependency that provides a ConfirmationTokenRepository instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+
+    Returns:
+        ConfirmationTokenRepository: Repository for confirmation token database operations.
+    """
+    return ConfirmationTokenRepository(client)
+
+
 # --- Services ---
 
 
@@ -139,10 +153,33 @@ def get_sms_service() -> SMSService:
     return SMSService()
 
 
+def get_confirmation_token_service(
+    token_repo: ConfirmationTokenRepository = Depends(get_confirmation_token_repository),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+) -> ConfirmationTokenService:
+    """FastAPI dependency that provides a ConfirmationTokenService instance.
+
+    Args:
+        token_repo: ConfirmationTokenRepository dependency.
+        schedule_repo: ScheduleRepository dependency.
+        worker_repo: WorkerRepository dependency.
+
+    Returns:
+        ConfirmationTokenService: Service for one-time confirmation token operations.
+    """
+    return ConfirmationTokenService(
+        token_repo=token_repo,
+        schedule_repo=schedule_repo,
+        worker_repo=worker_repo,
+    )
+
+
 def get_reminder_service(
     schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
     sms_service: SMSService = Depends(get_sms_service),
     worker_repo: WorkerRepository = Depends(get_worker_repository),
+    token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> ReminderService:
     """FastAPI dependency that provides a ReminderService instance.
 
@@ -150,6 +187,7 @@ def get_reminder_service(
         schedule_repo: ScheduleRepository dependency.
         sms_service: SMSService dependency.
         worker_repo: WorkerRepository dependency.
+        token_service: ConfirmationTokenService dependency for embedding links in SMS.
 
     Returns:
         ReminderService: Service for sending scheduled reminders to workers.
@@ -158,6 +196,7 @@ def get_reminder_service(
         schedule_repo=schedule_repo,
         sms_service=sms_service,
         worker_repo=worker_repo,
+        token_service=token_service,
     )
 
 

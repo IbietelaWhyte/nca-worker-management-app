@@ -54,11 +54,13 @@ class SMSService:
         schedule_title: str,
         scheduled_date: str,
         start_time: str,
+        confirmation_url: str | None = None,
     ) -> bool:
         """Send a schedule reminder SMS to a worker.
 
-        Formats and sends a reminder message with schedule details asking
-        the worker to confirm or decline the assignment.
+        Formats and sends a reminder message with schedule details. When a
+        confirmation_url is provided the message includes a link for the worker
+        to confirm or decline; otherwise it falls back to a plain-text prompt.
 
         Args:
             to: Recipient phone number in E.164 format.
@@ -66,15 +68,23 @@ class SMSService:
             schedule_title: Title/name of the scheduled event.
             scheduled_date: Date of the scheduled event.
             start_time: Start time of the scheduled event.
+            confirmation_url: Optional one-time confirmation link to embed in the SMS.
 
         Returns:
             bool: True if reminder sent successfully, False if sending failed.
         """
-        body = (
-            f"Hi {worker_name}, this is a reminder that you are scheduled for "
-            f"'{schedule_title}' on {scheduled_date} at {start_time}. "
-            f"Please reply CONFIRM or DECLINE."
-        )
+        if confirmation_url:
+            body = (
+                f"Hi {worker_name}, you are scheduled for '{schedule_title}' "
+                f"on {scheduled_date} at {start_time}. "
+                f"Confirm or decline here: {confirmation_url}"
+            )
+        else:
+            body = (
+                f"Hi {worker_name}, this is a reminder that you are scheduled for "
+                f"'{schedule_title}' on {scheduled_date} at {start_time}. "
+                f"Please reply CONFIRM or DECLINE."
+            )
         self.logger.debug(
             "sending_reminder",
             to=to,

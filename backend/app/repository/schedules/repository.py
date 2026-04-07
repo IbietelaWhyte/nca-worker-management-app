@@ -176,6 +176,29 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.info("bulk_assignments_created", created_count=len(created))
         return created
 
+    def get_assignment_by_id(self, assignment_id: UUID) -> AssignmentResponse | None:
+        """
+        Retrieve a single schedule assignment by its unique identifier.
+
+        Args:
+            assignment_id (UUID): The unique identifier of the assignment.
+
+        Returns:
+            AssignmentResponse | None: The assignment if found, None otherwise.
+        """
+        log = self.logger.bind(method="get_assignment_by_id", assignment_id=str(assignment_id))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .select("*")
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .maybe_single()
+            .execute()
+        )
+        assignment = AssignmentResponse.model_validate(response.data) if response else None
+        if not assignment:
+            log.warning("assignment_not_found")
+        return assignment
+
     def update_assignment_status(self, assignment_id: UUID, status: AssignmentStatus) -> AssignmentResponse | None:
         """
         Update the status of a schedule assignment.

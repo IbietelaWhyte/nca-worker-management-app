@@ -18,3 +18,6 @@ export const updateAssignmentStatus = (assignmentId, status_update) =>
     })
 
 export const triggerReminders = () => apiClient.post('/schedules/reminders/trigger')
+
+export const triggerRemindersForSchedule = scheduleId =>
+    apiClient.post(`/schedules/${scheduleId}/reminders/trigger`)

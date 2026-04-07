@@ -1,10 +1,12 @@
 from datetime import date
+from uuid import UUID
 
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore
 
 from app.core.logging import get_logger
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
+from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.sms.service import SMSService
 
 logger = get_logger(__name__)
@@ -16,6 +18,7 @@ class ReminderService:
         schedule_repo: ScheduleRepository,
         sms_service: SMSService,
         worker_repo: WorkerRepository,
+        token_service: ConfirmationTokenService | None = None,
     ) -> None:
         """Initialize the ReminderService with required dependencies.
 
@@ -23,10 +26,13 @@ class ReminderService:
             schedule_repo: Repository for schedule database operations.
             sms_service: Service for sending SMS notifications.
             worker_repo: Repository for worker database operations.
+            token_service: Optional service for creating one-time confirmation tokens.
+                           When provided, SMS reminders will include a confirmation link.
         """
         self.schedule_repo = schedule_repo
         self.sms_service = sms_service
         self.worker_repo = worker_repo
+        self.token_service = token_service
         self.scheduler = BackgroundScheduler()
 
         # bind the logger to the service name for structured logging
@@ -98,12 +104,27 @@ class ReminderService:
                 )
                 continue
 
+            confirmation_url: str | None = None
+            if self.token_service:
+                try:
+                    confirmation_url = self.token_service.create_token(
+                        assignment_id=assignment.id,
+                        worker_id=worker.id,
+                    )
+                except Exception as token_err:
+                    log.warning(
+                        "confirmation_token_creation_failed",
+                        assignment_id=assignment.id,
+                        error=str(token_err),
+                    )
+
             success = self.sms_service.send_reminder(
                 to=phone,
                 worker_name=f"{worker.first_name} {worker.last_name}".strip(),
                 schedule_title=schedule.title,
                 scheduled_date=schedule.scheduled_date.strftime("%Y-%m-%d"),
                 start_time=schedule.start_time.strftime("%H:%M"),
+                confirmation_url=confirmation_url,
             )
 
             if success:
@@ -151,16 +172,99 @@ class ReminderService:
                 )
                 continue
 
+            confirmation_url: str | None = None
+            if self.token_service:
+                try:
+                    confirmation_url = self.token_service.create_token(
+                        assignment_id=assignment.id,
+                        worker_id=worker.id,
+                    )
+                except Exception as token_err:
+                    log.warning(
+                        "confirmation_token_creation_failed",
+                        assignment_id=assignment.id,
+                        error=str(token_err),
+                    )
+
             sent = self.sms_service.send_reminder(
                 to=phone,
                 worker_name=f"{worker.first_name} {worker.last_name}".strip(),
                 schedule_title=schedule.title,
                 scheduled_date=schedule.scheduled_date.strftime("%Y-%m-%d"),
                 start_time=schedule.start_time.strftime("%H:%M"),
+                confirmation_url=confirmation_url,
             )
             if sent:
                 self.schedule_repo.mark_reminder_sent(assignment.id)
                 sent_count += 1
 
         log.info("reminder_manual_trigger_completed", sent=sent_count)
+        return sent_count
+
+    def trigger_for_schedule(self, schedule_id: UUID) -> int:
+        """Manually trigger reminders for a specific schedule.
+
+        Args:
+            schedule_id: The UUID of the schedule to send reminders for.
+        Returns:
+            int: Number of reminders successfully sent for the specified schedule.
+        """
+        log = self.logger.bind(method="trigger_for_schedule", schedule_id=schedule_id)
+        log.info("reminder_trigger_for_schedule_manual_trigger")
+        sent_count = 0
+
+        schedule = self.schedule_repo.get_with_assignments(schedule_id)
+
+        if not schedule:
+            log.warning("schedule_not_found", schedule_id=schedule_id)
+            return sent_count
+
+        log.info("assignments_for_schedule", schedule_id=schedule_id, count=len(schedule.schedule_assignments))
+
+        for assignment in schedule.schedule_assignments:
+            worker = self.worker_repo.get_by_id(assignment.worker_id)
+            schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
+            if not worker or not schedule:
+                logger.debug(
+                    "reminder_skipped_invalid_worker_or_schedule",
+                    assignment_id=assignment.id,
+                    worker_id=assignment.worker_id,
+                    schedule_id=assignment.schedule_id,
+                )
+                continue
+            phone = worker.phone
+            if not phone:
+                logger.debug(
+                    "reminder_skipped_no_phone",
+                    worker_id=worker.id,
+                )
+                continue
+
+            confirmation_url: str | None = None
+            if self.token_service:
+                try:
+                    confirmation_url = self.token_service.create_token(
+                        assignment_id=assignment.id,
+                        worker_id=worker.id,
+                    )
+                except Exception as token_err:
+                    log.warning(
+                        "confirmation_token_creation_failed",
+                        assignment_id=assignment.id,
+                        error=str(token_err),
+                    )
+
+            sent = self.sms_service.send_reminder(
+                to=phone,
+                worker_name=f"{worker.first_name} {worker.last_name}".strip(),
+                schedule_title=schedule.title,
+                scheduled_date=schedule.scheduled_date.strftime("%Y-%m-%d"),
+                start_time=schedule.start_time.strftime("%H:%M"),
+                confirmation_url=confirmation_url,
+            )
+            if sent:
+                self.schedule_repo.mark_reminder_sent(assignment.id)
+                sent_count += 1
+
+        log.info("reminder_trigger_for_schedule_completed", sent=sent_count, schedule_id=schedule_id)
         return sent_count
