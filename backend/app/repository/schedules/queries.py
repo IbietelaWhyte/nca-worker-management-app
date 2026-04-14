@@ -2,7 +2,7 @@ TABLE = "schedules"
 ASSIGNMENTS_TABLE = "schedule_assignments"
 
 SELECT_ALL = "*"
-SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*))"
+SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*), subteams(*))"
 SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 SELECT_ASSIGNMENTS_WITH_WORKERS = "*, workers(*), schedules(*)"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"

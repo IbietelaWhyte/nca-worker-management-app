@@ -5,9 +5,11 @@ import AssignmentsList from '@/components/schedules/AssignmentsList'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
+import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell } from 'lucide-react'
 import { format } from 'date-fns'
-import { useState } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { getSubteamsByDepartment } from '@/api/subteams'
 
 export default function ScheduleDetailPage() {
     const { id } = useParams()
@@ -17,6 +19,75 @@ export default function ScheduleDetailPage() {
         useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
+    const [showEmptySubteams, setShowEmptySubteams] = useState(true)
+    const [allSubteams, setAllSubteams] = useState([])
+    const [subteamsLoading, setSubteamsLoading] = useState(false)
+
+    // Fetch all subteams for the department
+    useEffect(() => {
+        const fetchSubteams = async () => {
+            if (!schedule?.department_id) return
+            setSubteamsLoading(true)
+            try {
+                const response = await getSubteamsByDepartment(schedule.department_id)
+                setAllSubteams(response.data || [])
+            } catch (err) {
+                console.error('Failed to fetch subteams:', err)
+                setAllSubteams([])
+            } finally {
+                setSubteamsLoading(false)
+            }
+        }
+        fetchSubteams()
+    }, [schedule?.department_id])
+
+    // Group and filter assignments by subteam
+    const groupedAssignments = useMemo(() => {
+        if (!schedule) return []
+
+        const assignments = schedule?.schedule_assignments ?? []
+
+        // Group assignments by subteam
+        const grouped = {}
+
+        // Group by subteam_id (null = unassigned)
+        assignments.forEach(assignment => {
+            const key = assignment.subteam_id || 'unassigned'
+            if (!grouped[key]) {
+                grouped[key] = {
+                    subteamId: assignment.subteam_id,
+                    subteamName: assignment.subteams?.name || 'Unassigned',
+                    assignments: [],
+                }
+            }
+            grouped[key].assignments.push(assignment)
+        })
+
+        // Add empty subteams if toggle is on
+        if (showEmptySubteams) {
+            allSubteams.forEach(subteam => {
+                const key = subteam.id
+                if (!grouped[key]) {
+                    grouped[key] = {
+                        subteamId: subteam.id,
+                        subteamName: subteam.name,
+                        assignments: [],
+                    }
+                }
+            })
+        }
+
+        // Convert to array and sort
+        const result = Object.values(grouped).sort((a, b) => {
+            // Unassigned first
+            if (a.subteamName === 'Unassigned') return -1
+            if (b.subteamName === 'Unassigned') return 1
+            // Then alphabetical
+            return a.subteamName.localeCompare(b.subteamName)
+        })
+
+        return result
+    }, [schedule, showEmptySubteams, allSubteams])
 
     const handleSendReminders = async schedule => {
         if (!confirm('Send SMS reminders to all assigned workers now?')) return
@@ -129,12 +200,31 @@ export default function ScheduleDetailPage() {
 
             {/* Assignments */}
             <div className="space-y-3">
-                <h3 className="font-semibold">Assigned Workers</h3>
-                <AssignmentsList
-                    assignments={assignments}
-                    onStatusChange={changeAssignmentStatus}
-                    canManage={isAdmin || isDepartmentHead}
-                />
+                <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Assigned Workers</h3>
+                    <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
+                        <input
+                            type="checkbox"
+                            checked={showEmptySubteams}
+                            onChange={e => setShowEmptySubteams(e.target.checked)}
+                            className="cursor-pointer"
+                        />
+                        Show subteams with no assignments
+                    </Label>
+                </div>
+                {subteamsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                        <p className="text-sm text-muted-foreground">
+                            Loading subteam information...
+                        </p>
+                    </div>
+                ) : (
+                    <AssignmentsList
+                        groupedAssignments={groupedAssignments}
+                        onStatusChange={changeAssignmentStatus}
+                        canManage={isAdmin || isDepartmentHead}
+                    />
+                )}
             </div>
         </div>
     )
