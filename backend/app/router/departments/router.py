@@ -8,6 +8,7 @@ from app.core.dependencies import (
     HODUser,
     get_department_service,
     get_subteam_service,
+    get_worker_service,
 )
 from app.schemas.departments.models import (
     DepartmentCreate,
@@ -19,24 +20,51 @@ from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.subteams.models import SubteamResponse
 from app.service.departments.service import DepartmentService
 from app.service.subteams.service import SubteamService
+from app.service.workers.service import WorkerService
 
 router = APIRouter(prefix="/departments", tags=["departments"])
 
 
 @router.get("", response_model=list[DepartmentResponse])
 def list_departments(
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = CurrentUser,
     service: DepartmentService = Depends(get_department_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[DepartmentResponse]:
-    """List all departments.
+    """List departments - filtered by HOD role if applicable.
 
     Args:
-        _: Current authenticated user token.
+        current_user: Current authenticated user token.
         service: Department service dependency.
+        worker_service: Worker service dependency.
 
     Returns:
-        list[DepartmentResponse]: List of all departments.
+        list[DepartmentResponse]: List of departments (all for admin, filtered for HOD).
+
+    Raises:
+        HTTPException: 404 if HOD's worker profile not found.
     """
+    # Admin sees all departments
+    if current_user.role == "admin":
+        return service.get_all_departments()
+
+    # HOD sees only their departments
+    if current_user.role == "hod":
+        # Get worker record from email in JWT token
+        if not current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email not found in authentication token",
+            )
+        worker = worker_service.worker_repo.get_by_email(current_user.email)
+        if not worker:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Worker profile not found for authenticated user",
+            )
+        return service.get_departments_by_hod(worker.id)
+
+    # Regular workers see all departments (for assignment purposes)
     return service.get_all_departments()
 
 

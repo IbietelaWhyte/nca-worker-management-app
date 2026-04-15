@@ -19,20 +19,73 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 def list_workers(
     active_only: bool = Query(default=False),
     search: str | None = Query(default=None),
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = CurrentUser,
     service: WorkerService = Depends(get_worker_service),
 ) -> list[WorkerResponse]:
-    """List all workers with optional filtering.
+    """List workers - filtered by HOD role if applicable.
 
     Args:
         active_only: If True, return only active workers.
         search: Optional search query to filter by worker name.
-        _: Current authenticated user token.
+        current_user: Current authenticated user token.
         service: Worker service dependency.
 
     Returns:
-        list[WorkerResponse]: List of workers matching the criteria.
+        list[WorkerResponse]: List of workers (all for admin, department-filtered for HOD).
+
+    Raises:
+        HTTPException: 404 if HOD's worker profile not found.
     """
+    # Admin sees all workers (with filters)
+    if current_user.role == "admin":
+        if search:
+            return service.search_workers(search)
+        if active_only:
+            return service.get_active_workers()
+        return service.get_all_workers()
+
+    # HOD sees only workers in their departments
+    if current_user.role == "hod":
+        # Get worker record from email in JWT token
+        if not current_user.email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email not found in authentication token",
+            )
+        worker = service.worker_repo.get_by_email(current_user.email)
+        if not worker:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Worker profile not found for authenticated user",
+            )
+
+        # Get departments where this worker is HOD
+        hod_departments = service.department_repo.get_departments_by_hod(worker.id)
+
+        if not hod_departments:
+            return []
+
+        # Collect all workers from HOD's departments (with deduplication)
+        workers_dict = {}
+        for dept in hod_departments:
+            dept_workers = service.get_workers_by_department(dept.id)
+            for w in dept_workers:
+                workers_dict[w.id] = w
+
+        workers = list(workers_dict.values())
+
+        # Apply filters
+        if search:
+            search_lower = search.lower()
+            workers = [
+                w for w in workers if search_lower in w.first_name.lower() or search_lower in w.last_name.lower()
+            ]
+        if active_only:
+            workers = [w for w in workers if w.is_active]
+
+        return workers
+
+    # Regular workers see all workers (for collaboration purposes)
     if search:
         return service.search_workers(search)
     if active_only:
