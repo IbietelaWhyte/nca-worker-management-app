@@ -52,6 +52,20 @@ class DepartmentService:
         log.debug("fetched_all_departments", count=len(depts))
         return depts
 
+    def get_departments_by_hod(self, hod_id: UUID) -> list[DepartmentResponse]:
+        """Retrieve all departments where a worker is the Head of Department (HOD).
+
+        Args:
+            hod_id: Unique identifier of the worker who is an HOD.
+
+        Returns:
+            list[DepartmentResponse]: List of departments where the worker is HOD.
+        """
+        log = self.logger.bind(method="get_departments_by_hod", hod_id=str(hod_id))
+        depts = self.department_repo.get_departments_by_hod(hod_id)
+        log.debug("fetched_departments_by_hod", count=len(depts))
+        return depts
+
     def get_department_with_workers(self, department_id: UUID) -> DepartmentWithWorkersResponse:
         """Retrieve a department with all assigned workers embedded.
 

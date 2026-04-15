@@ -112,6 +112,28 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         log.debug("fetched_departments_for_worker", count=len(departments))
         return departments
 
+    def get_departments_by_hod(self, hod_id: UUID) -> list[DepartmentResponse]:
+        """
+        Retrieve all departments where a worker is the Head of Department (HOD).
+
+        This method queries the departments table to find all departments where the
+        hod_id field matches the given worker_id. This is different from
+        get_departments_for_worker which returns departments where the worker is a member.
+
+        Args:
+            hod_id (UUID): The unique identifier of the worker who is an HOD.
+
+        Returns:
+            list[DepartmentResponse]: A list of all departments where the worker is HOD.
+                                     Returns an empty list if the worker is not HOD of
+                                     any departments.
+        """
+        log = self.logger.bind(method="get_departments_by_hod", hod_id=str(hod_id))
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq("hod_id", str(hod_id)).execute()
+        departments = self._to_model_list(response.data or [])
+        log.debug("fetched_departments_by_hod", count=len(departments))
+        return departments
+
     def assign_worker(self, department_id: UUID, worker_id: UUID) -> dict[str, Any]:
         """
         Assign a worker to a department.
