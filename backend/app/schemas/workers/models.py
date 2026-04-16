@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.models import UserRole
+
 
 class Worker(BaseModel):
     id: UUID
@@ -23,7 +25,7 @@ class WorkerCreate(BaseModel):
 
 
 class WorkerResponse(Worker):
-    pass  # Now auth_user_id is already excluded in the parent class
+    roles: list[UserRole] = Field(default_factory=list)
 
 
 class WorkerUpdate(BaseModel):
@@ -31,3 +33,4 @@ class WorkerUpdate(BaseModel):
     last_name: str | None = None
     phone: str | None = None
     email: str | None = None
+    roles: list[UserRole] | None = Field(default=None, min_length=1, description="Must include at least one role")

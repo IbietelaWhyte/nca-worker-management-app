@@ -57,8 +57,12 @@ def mock_supabase_client():
 
 
 @pytest.fixture
-def service(mock_supabase_client, mock_worker_repo):
-    return AuthenticationService(client=mock_supabase_client, worker_repo=mock_worker_repo)
+def service(mock_supabase_client, mock_worker_repo, mock_department_repo):
+    return AuthenticationService(
+        client=mock_supabase_client,
+        worker_repo=mock_worker_repo,
+        department_repo=mock_department_repo,
+    )
 
 
 # ----------------------------------------------------------------

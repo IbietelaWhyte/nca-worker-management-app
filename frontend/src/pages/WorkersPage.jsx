@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useWorkers } from '@/hooks/useWorkers'
+import { useAuth } from '@/context/AuthContext'
 import WorkerForm from '@/components/workers/WorkerForm'
+import RoleEditor from '@/components/workers/RoleEditor'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -13,21 +16,43 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, UserX } from 'lucide-react'
+import { Plus, Pencil, UserX, UserPlus, Shield } from 'lucide-react'
 
 export default function WorkersPage() {
-    const { workers, loading, error, addWorker, editWorker, removeWorker } = useWorkers()
+    const navigate = useNavigate()
+    const { isAdmin } = useAuth()
+    const { workers, loading, error, addWorker, editWorker, removeWorker, refetch } = useWorkers()
 
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingWorker, setEditingWorker] = useState(null)
+    const [roleDialogOpen, setRoleDialogOpen] = useState(false)
+    const [editingRoles, setEditingRoles] = useState(null)
 
-    const handleOpenCreate = () => {
-        setEditingWorker(null)
-        setDialogOpen(true)
+    const handleRegisterNewUser = () => {
+        navigate('/workers/register')
     }
 
     const handleOpenEdit = worker => {
         setEditingWorker(worker)
+        setDialogOpen(true)
+    }
+
+    const handleOpenRoleEdit = worker => {
+        setEditingRoles(worker)
+        setRoleDialogOpen(true)
+    }
+
+    const handleCloseRoleDialog = () => {
+        setRoleDialogOpen(false)
+        setEditingRoles(null)
+    }
+
+    const handleRoleUpdateSuccess = () => {
+        refetch()
+    }
+
+    const handleOpenCreate = () => {
+        setEditingWorker(null)
         setDialogOpen(true)
     }
 
@@ -68,10 +93,18 @@ export default function WorkersPage() {
                         {workers.length} total workers
                     </p>
                 </div>
-                <Button onClick={handleOpenCreate}>
-                    <Plus size={16} className="mr-2" />
-                    Add Worker
-                </Button>
+                <div className="flex gap-2">
+                    {isAdmin && (
+                        <Button onClick={handleRegisterNewUser} variant="default">
+                            <UserPlus size={16} className="mr-2" />
+                            Register New User
+                        </Button>
+                    )}
+                    <Button onClick={handleOpenCreate} variant="outline">
+                        <Plus size={16} className="mr-2" />
+                        Add Worker Profile
+                    </Button>
+                </div>
             </div>
 
             {/* Error state */}
@@ -100,6 +133,7 @@ export default function WorkersPage() {
                                 <TableHead>Name</TableHead>
                                 <TableHead>Email</TableHead>
                                 <TableHead>Phone</TableHead>
+                                {isAdmin && <TableHead>Roles</TableHead>}
                                 <TableHead>Status</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
@@ -112,6 +146,36 @@ export default function WorkersPage() {
                                     </TableCell>
                                     <TableCell>{worker.email}</TableCell>
                                     <TableCell>{worker.phone}</TableCell>
+                                    {isAdmin && (
+                                        <TableCell>
+                                            {worker.roles && worker.roles.length > 0 ? (
+                                                <div className="flex gap-1 flex-wrap">
+                                                    {worker.roles.map(role => (
+                                                        <Badge
+                                                            key={role}
+                                                            variant={
+                                                                role === 'admin'
+                                                                    ? 'destructive'
+                                                                    : role === 'hod'
+                                                                      ? 'default'
+                                                                      : 'secondary'
+                                                            }
+                                                            className="text-xs"
+                                                        >
+                                                            {role === 'hod'
+                                                                ? 'HOD'
+                                                                : role.charAt(0).toUpperCase() +
+                                                                  role.slice(1)}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">
+                                                    —
+                                                </span>
+                                            )}
+                                        </TableCell>
+                                    )}
                                     <TableCell>
                                         <Badge variant={worker.is_active ? 'default' : 'secondary'}>
                                             {worker.is_active ? 'Active' : 'Inactive'}
@@ -127,6 +191,16 @@ export default function WorkersPage() {
                                                 <Pencil size={14} className="mr-1" />
                                                 Edit
                                             </Button>
+                                            {isAdmin && worker.roles && worker.roles.length > 0 && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleOpenRoleEdit(worker)}
+                                                >
+                                                    <Shield size={14} className="mr-1" />
+                                                    Roles
+                                                </Button>
+                                            )}
                                             {worker.is_active && (
                                                 <Button
                                                     variant="outline"
@@ -160,6 +234,25 @@ export default function WorkersPage() {
                     />
                 </DialogContent>
             </Dialog>
+
+            {/* Role Editor dialog */}
+            {isAdmin && (
+                <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Manage User Roles</DialogTitle>
+                        </DialogHeader>
+                        {editingRoles && (
+                            <RoleEditor
+                                workerId={editingRoles.id}
+                                workerName={`${editingRoles.first_name} ${editingRoles.last_name}`}
+                                onClose={handleCloseRoleDialog}
+                                onSuccess={handleRoleUpdateSuccess}
+                            />
+                        )}
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     )
 }

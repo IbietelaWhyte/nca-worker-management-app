@@ -4,6 +4,7 @@ from supabase import Client
 from supabase_auth.errors import AuthApiError
 
 from app.core.logging import get_logger
+from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.authentication.models import RegisterRequest, RegisterResponse
 from app.schemas.models import UserRole
@@ -13,9 +14,10 @@ logger = get_logger(__name__)
 
 
 class AuthenticationService:
-    def __init__(self, client: Client, worker_repo: WorkerRepository) -> None:
+    def __init__(self, client: Client, worker_repo: WorkerRepository, department_repo: DepartmentRepository) -> None:
         self.client = client
         self.worker_repo = worker_repo
+        self.department_repo = department_repo
 
     def register_worker(self, data: RegisterRequest) -> RegisterResponse:
         """
@@ -24,19 +26,26 @@ class AuthenticationService:
         Steps:
         1. Create auth.users entry via Supabase Admin API
         2. Create workers row linked via auth_user_id
-        3. Assign default 'worker' role in worker_app_roles
-        4. On any failure, attempt to clean up the auth user to avoid orphans
+        3. Assign specified role (from data.role) in worker_app_roles
+        4. Assign to departments if provided
+        5. On any failure, attempt to clean up the auth user to avoid orphans
         """
-        logger.info("worker_registration_started", email=data.email)
+        logger.info("worker_registration_started", email=data.email, role=data.role)
 
         # 1. Create Supabase auth user
         auth_user_id = self._create_auth_user(data)
 
-        # 2 & 3. Create worker row + assign role
+        # 2, 3 & 4. Create worker row + assign role + assign departments
         # If this fails we clean up the auth user
         try:
             worker = self._create_worker_record(auth_user_id, data)
-            self._assign_default_role(worker.id)
+            self._assign_role(worker.id, data.role)
+
+            # Assign to departments if provided
+            if data.department_ids:
+                for department_id in data.department_ids:
+                    self.department_repo.assign_worker(UUID(department_id), worker.id)
+                logger.info("departments_assigned", worker_id=str(worker.id), department_ids=data.department_ids)
         except Exception as e:
             logger.error(
                 "worker_record_creation_failed",
@@ -51,6 +60,7 @@ class AuthenticationService:
             "worker_registration_completed",
             worker_id=str(worker.id),
             email=data.email,
+            role=data.role,
         )
 
         return RegisterResponse(
@@ -67,11 +77,11 @@ class AuthenticationService:
                     "email": data.email,
                     "password": data.password,
                     "email_confirm": True,  # skip confirmation email for admin-created accounts
-                    "app_metadata": {"role": UserRole.WORKER},
+                    "app_metadata": {"role": data.role},
                 }
             )
             auth_user_id = response.user.id
-            logger.info("auth_user_created", auth_user_id=auth_user_id, email=data.email)
+            logger.info("auth_user_created", auth_user_id=auth_user_id, email=data.email, role=data.role)
             return UUID(auth_user_id)
         except AuthApiError as e:
             logger.warning("auth_user_creation_failed", email=data.email, error=str(e))
@@ -92,15 +102,15 @@ class AuthenticationService:
             }
         )
 
-    def _assign_default_role(self, worker_id: UUID) -> None:
-        """Inserts the default worker role into worker_app_roles."""
+    def _assign_role(self, worker_id: UUID, role: UserRole) -> None:
+        """Inserts the specified role into worker_app_roles."""
         self.client.table("worker_app_roles").insert(
             {
                 "worker_id": str(worker_id),
-                "role": UserRole.WORKER,
+                "role": role,
             }
         ).execute()
-        logger.info("default_role_assigned", worker_id=str(worker_id))
+        logger.info("role_assigned", worker_id=str(worker_id), role=role)
 
     def _cleanup_auth_user(self, auth_user_id: UUID) -> None:
         """

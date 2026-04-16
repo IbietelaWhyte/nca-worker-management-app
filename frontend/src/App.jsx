@@ -5,6 +5,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import LoginPage from '@/pages/LoginPage'
 import DashboardPage from '@/pages/DashboardPage'
 import WorkersPage from '@/pages/WorkersPage'
+import RegisterUser from '@/components/workers/RegisterUser'
 import DepartmentsPage from '@/pages/DepartmentsPage'
 import DepartmentDetailPage from '@/pages/DepartmentDetailPage'
 import SchedulesPage from '@/pages/SchedulesPage'
@@ -36,6 +37,14 @@ function App() {
                     element={
                         <ProtectedLayout>
                             <WorkersPage />
+                        </ProtectedLayout>
+                    }
+                />
+                <Route
+                    path="/workers/register"
+                    element={
+                        <ProtectedLayout>
+                            <RegisterUser />
                         </ProtectedLayout>
                     }
                 />

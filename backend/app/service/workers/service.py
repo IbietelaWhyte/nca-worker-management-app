@@ -34,7 +34,7 @@ class WorkerService:
             worker_id: Unique identifier of the worker.
 
         Returns:
-            WorkerResponse: The worker data.
+            WorkerResponse: The worker data with roles.
 
         Raises:
             ValueError: If worker not found.
@@ -45,17 +45,25 @@ class WorkerService:
         if not worker:
             log.warning("worker_not_found")
             raise ValueError(f"Worker {worker_id} not found")
+
+        # Load roles for the worker
+        worker.roles = self.worker_repo.get_worker_roles(worker_id)
         return worker
 
     def get_all_workers(self) -> list[WorkerResponse]:
         """Retrieve all workers.
 
         Returns:
-            list[WorkerResponse]: List of all workers in the system.
+            list[WorkerResponse]: List of all workers in the system with their roles.
         """
         # bind the method for better traceability in logs
         log = self.logger.bind(method="get_all_workers")
         workers = self.worker_repo.get_all()
+
+        # Load roles for each worker
+        for worker in workers:
+            worker.roles = self.worker_repo.get_worker_roles(worker.id)
+
         log.debug("fetched_all_workers", count=len(workers))
         return workers
 
@@ -63,11 +71,16 @@ class WorkerService:
         """Retrieve all active workers.
 
         Returns:
-            list[WorkerResponse]: List of workers with active status.
+            list[WorkerResponse]: List of workers with active status and their roles.
         """
         # bind the method for better traceability in logs
         log = self.logger.bind(method="get_active_workers")
         workers = self.worker_repo.get_active_workers()
+
+        # Load roles for each worker
+        for worker in workers:
+            worker.roles = self.worker_repo.get_worker_roles(worker.id)
+
         log.debug("fetched_active_workers", count=len(workers))
         return workers
 
@@ -125,10 +138,10 @@ class WorkerService:
 
         Args:
             worker_id: Unique identifier of the worker to update.
-            data: Partial worker data with fields to update.
+            data: Partial worker data with fields to update (including optional roles).
 
         Returns:
-            WorkerResponse: The updated worker data.
+            WorkerResponse: The updated worker data with roles.
 
         Raises:
             ValueError: If worker not found or update fails.
@@ -137,13 +150,42 @@ class WorkerService:
         log = self.logger.bind(
             method="update_worker", worker_id=str(worker_id), data=data.model_dump(exclude_none=True)
         )
-        self.get_worker(worker_id)
-        updated = self.worker_repo.update(worker_id, data.model_dump(exclude_none=True))
-        if not updated:
-            log.error("worker_update_failed")
-            raise ValueError(f"Failed to update worker {worker_id}")
+
+        # Get existing worker
+        worker = self.worker_repo.get_by_id(worker_id)
+        if not worker:
+            log.warning("worker_not_found")
+            raise ValueError(f"Worker {worker_id} not found")
+
+        # Extract roles from update data if present
+        update_dict = data.model_dump(exclude_none=True)
+        new_roles = update_dict.pop("roles", None)
+
+        # Update worker profile fields if any were provided
+        if update_dict:
+            updated = self.worker_repo.update(worker_id, update_dict)
+            if not updated:
+                log.error("worker_update_failed")
+                raise ValueError(f"Failed to update worker {worker_id}")
+            worker = updated
+
+        # Update roles if provided
+        if new_roles is not None:
+            # Delete all existing roles
+            self.worker_repo.delete_worker_roles(worker_id)
+            log.debug("deleted_existing_roles")
+
+            # Insert new roles
+            for role in new_roles:
+                self.worker_repo.create_worker_role(worker_id, role)
+
+            log.info("roles_updated", new_roles=new_roles)
+
+        # Load current roles for response
+        worker.roles = self.worker_repo.get_worker_roles(worker_id)
+
         log.info("worker_updated")
-        return updated
+        return worker
 
     def deactivate_worker(self, worker_id: UUID) -> WorkerResponse:
         """Deactivate a worker (set is_active to False).
