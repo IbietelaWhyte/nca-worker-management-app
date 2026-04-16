@@ -273,12 +273,14 @@ def get_subteam_service(
 def get_authentication_service(
     client: Client = Depends(get_db),
     worker_repo: WorkerRepository = Depends(get_worker_repository),
+    department_repo: DepartmentRepository = Depends(get_department_repository),
 ) -> AuthenticationService:
     """FastAPI dependency that provides an AuthenticationService instance.
 
     Args:
         client: Supabase client from get_db dependency.
         worker_repo: WorkerRepository dependency.
+        department_repo: DepartmentRepository dependency.
 
     Returns:
         AuthenticationService: Service for authentication business logic operations.
@@ -286,6 +288,7 @@ def get_authentication_service(
     return AuthenticationService(
         client=client,
         worker_repo=worker_repo,
+        department_repo=department_repo,
     )
 
 

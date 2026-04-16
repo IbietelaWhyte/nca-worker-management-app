@@ -5,7 +5,7 @@ from supabase import Client
 from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
-from app.schemas.models import WorkerStatus
+from app.schemas.models import UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerResponse
 
 logger = get_logger(__name__)
@@ -175,3 +175,42 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         workers = self._to_model_list(response.data or [])
         log.debug("search_completed", count=len(workers))
         return workers
+
+    def get_worker_roles(self, worker_id: UUID) -> list[UserRole]:
+        """Retrieve all roles assigned to a worker from worker_app_roles table.
+
+        Args:
+            worker_id: Unique identifier of the worker.
+
+        Returns:
+            list[UserRole]: List of roles assigned to the worker.
+        """
+        log = self.logger.bind(method="get_worker_roles", worker_id=str(worker_id))
+        response = self.client.table("worker_app_roles").select("role").eq("worker_id", str(worker_id)).execute()
+
+        # Type assertion for mypy - response.data is a list of dicts
+        role_data: list[dict[str, str]] = response.data  # type: ignore[assignment]
+        roles = [UserRole(row["role"]) for row in role_data]
+        log.debug("fetched_worker_roles", roles=roles)
+        return roles
+
+    def delete_worker_roles(self, worker_id: UUID) -> None:
+        """Delete all roles for a worker from worker_app_roles table.
+
+        Args:
+            worker_id: Unique identifier of the worker.
+        """
+        log = self.logger.bind(method="delete_worker_roles", worker_id=str(worker_id))
+        self.client.table("worker_app_roles").delete().eq("worker_id", str(worker_id)).execute()
+        log.debug("deleted_worker_roles")
+
+    def create_worker_role(self, worker_id: UUID, role: UserRole) -> None:
+        """Create a single role assignment for a worker in worker_app_roles table.
+
+        Args:
+            worker_id: Unique identifier of the worker.
+            role: The role to assign.
+        """
+        log = self.logger.bind(method="create_worker_role", worker_id=str(worker_id), role=role)
+        self.client.table("worker_app_roles").insert({"worker_id": str(worker_id), "role": role}).execute()
+        log.debug("created_worker_role")
