@@ -49,7 +49,7 @@ class DepartmentService:
         """
         log = self.logger.bind(method="get_all_departments")
         depts = self.department_repo.get_all()
-        log.debug("fetched_all_departments", count=len(depts))
+        log.info("fetched_all_departments", count=len(depts))
         return depts
 
     def get_departments_by_hod(self, hod_id: UUID) -> list[DepartmentResponse]:
@@ -63,7 +63,7 @@ class DepartmentService:
         """
         log = self.logger.bind(method="get_departments_by_hod", hod_id=str(hod_id))
         depts = self.department_repo.get_departments_by_hod(hod_id)
-        log.debug("fetched_departments_by_hod", count=len(depts))
+        log.info("fetched_departments_by_hod", count=len(depts))
         return depts
 
     def get_department_with_workers(self, department_id: UUID) -> DepartmentWithWorkersResponse:

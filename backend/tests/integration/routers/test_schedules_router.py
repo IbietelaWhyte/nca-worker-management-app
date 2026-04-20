@@ -47,6 +47,7 @@ class TestGenerateSchedule:
             "/api/v1/schedules/generate",
             json={
                 "department_id": str(uuid4()),
+                "scope": "department_only",
                 "title": "Sunday Service",
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
@@ -67,6 +68,7 @@ class TestGenerateSchedule:
             "/api/v1/schedules/generate",
             json={
                 "department_id": str(uuid4()),
+                "scope": "department_all",
                 "title": "Sunday Service",
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
@@ -85,6 +87,8 @@ class TestGenerateSchedule:
             "/api/v1/schedules/generate",
             json={
                 "department_id": str(uuid4()),
+                "scope": "subteam",
+                "subteam_id": str(uuid4()),
                 "title": "Sunday Service",
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
@@ -93,6 +97,30 @@ class TestGenerateSchedule:
             },
         )
         assert response.status_code == 403
+
+    def test_returns_400_when_duplicate_schedule_exists(self, mock_schedule_service):
+        mock_schedule_service.generate_schedule.side_effect = ValueError(
+            "A schedule already exists for this department on 2026-03-15"
+        )
+        client = make_client(
+            role=UserRole.HOD,
+            schedule_service=mock_schedule_service,
+        )
+
+        response = client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "scope": "department_only",
+                "title": "Sunday Service",
+                "scheduled_date": "2026-03-15",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": 1,
+            },
+        )
+        assert response.status_code == 400
+        assert "already exists" in response.json()["detail"]
 
 
 class TestUpdateAssignmentStatus:

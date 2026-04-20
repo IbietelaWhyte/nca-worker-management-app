@@ -121,6 +121,38 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log.debug("fetched_workers_by_department", count=len(workers))
         return workers
 
+    def get_department_only_workers(self, department_id: UUID) -> list[WorkerResponse]:
+        """
+        Get workers assigned to a department but NOT assigned to any subteam.
+
+        This method retrieves workers from the worker_departments junction table where
+        the department_id matches and subteam_id is NULL, indicating department-level
+        workers who are not part of any specific subteam.
+
+        Args:
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            list[WorkerResponse]: A list of Worker model instances assigned to the department
+                                  but not to any subteam. Returns an empty list if no such workers exist.
+        """
+        log = self.logger.bind(method="get_department_only_workers", department_id=str(department_id))
+        response = (
+            self.client.table(q.JUNCTION_TABLE)
+            .select("workers(*)")
+            .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
+            .is_("subteam_id", "null")
+            .execute()
+        )
+
+        if not response.data:
+            return []
+
+        rows = [row["workers"] for row in response.data if isinstance(row, dict) and "workers" in row]
+        workers = self._to_model_list(rows)
+        log.debug("fetched_department_only_workers", count=len(workers))
+        return workers
+
     def update_status(self, id: UUID, status: WorkerStatus) -> WorkerResponse | None:
         """
         Update the status of a worker.

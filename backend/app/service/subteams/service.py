@@ -47,7 +47,7 @@ class SubteamService:
         """
         log = self.logger.bind(method="get_all_subteams")
         subteams = self.subteam_repo.get_all()
-        log.debug("fetched_all_subteams", count=len(subteams))
+        log.info("fetched_all_subteams", count=len(subteams))
         return subteams
 
     def get_subteam_with_workers(self, subteam_id: UUID) -> list[SubteamWithWorkersResponse]:
@@ -215,5 +215,5 @@ class SubteamService:
         """
         log = self.logger.bind(method="get_subteams_by_department", department_id=str(department_id))
         subteams = self.subteam_repo.get_by_department(department_id)
-        log.debug("fetched_subteams_by_department", count=len(subteams))
+        log.info("fetched_subteams_by_department", count=len(subteams))
         return subteams

@@ -149,13 +149,44 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
             .execute()
         )
         rows = (
-            [row["subteams"] for row in response.data if isinstance(row, dict) and "subteams" in row]
-            if response.data
+            [
+                row["subteams"]
+                for row in response.data
+                if isinstance(row, dict) and "subteams" in row and row["subteams"] is not None
+            ]
+            if response and response.data
             else []
         )
         subteams = self._to_model_list(rows)
         log.debug("fetched_subteams_for_worker", count=len(subteams))
         return subteams
+
+    def get_subteam_for_worker_in_department(self, worker_id: UUID, department_id: UUID) -> SubteamResponse | None:
+        """
+        Retrieve the subteam that a specific worker is assigned to within a given department.
+
+        This method queries the junction table to find the subteam association for a
+        worker within a specific department, handling the many-to-many relationship
+        between workers and subteams.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            SubteamResponse | None: The subteam the worker is assigned to within the department,
+                                    or None if the worker is not assigned to any subteam in the department.
+        """
+        log = self.logger.bind(
+            method="get_subteam_for_worker_in_department", worker_id=str(worker_id), department_id=str(department_id)
+        )
+        subteams = self.get_subteams_for_worker(worker_id)
+        for subteam in subteams:
+            if subteam.department_id == department_id:
+                log.debug("fetched_subteam_for_worker_in_department", subteam_id=str(subteam.id))
+                return subteam
+        log.debug("fetched_subteam_for_worker_in_department", subteam_id=None)
+        return None
 
     def assign_worker(self, subteam_id: UUID, worker_id: UUID) -> dict[str, Any]:
         """

@@ -51,6 +51,52 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.debug("fetched_schedules_by_department", count=len(schedules))
         return schedules
 
+    def get_existing_schedule(
+        self, department_id: UUID, scheduled_date: date, subteam_id: UUID | None = None
+    ) -> ScheduleResponse | None:
+        """
+        Check if a schedule already exists for a department/subteam on a specific date.
+
+        This prevents duplicate schedules from being created for the same date.
+
+        Args:
+            department_id (UUID): The unique identifier of the department.
+            scheduled_date (date): The date to check for existing schedules.
+            subteam_id (UUID | None): Optional subteam ID. If provided, checks for that subteam;
+                                     if None, checks for department-level schedules (subteam_id IS NULL).
+
+        Returns:
+            ScheduleResponse | None: The existing schedule if found, None otherwise.
+        """
+        log = self.logger.bind(
+            method="get_existing_schedule",
+            department_id=str(department_id),
+            scheduled_date=scheduled_date.isoformat(),
+            subteam_id=str(subteam_id) if subteam_id else None,
+        )
+        query = (
+            self.client.table(q.TABLE)
+            .select(q.SELECT_ALL)
+            .eq(q.Columns.DEPARTMENT_ID, str(department_id))
+            .eq(q.Columns.SCHEDULED_DATE, scheduled_date.isoformat())
+        )
+
+        # Filter by subteam: specific subteam or department-level (null)
+        if subteam_id is not None:
+            query = query.eq(q.Columns.SUBTEAM_ID, str(subteam_id))
+        else:
+            query = query.is_(q.Columns.SUBTEAM_ID, "null")
+
+        response = query.execute()
+        schedules = self._to_model_list(response.data or [])
+
+        if schedules:
+            log.info("existing_schedule_found", schedule_id=str(schedules[0].id))
+            return schedules[0]
+
+        log.debug("no_existing_schedule_found")
+        return None
+
     def get_with_assignments(self, schedule_id: UUID) -> ScheduleResponse | None:
         """
         Retrieve a schedule with all its worker assignments embedded.
@@ -106,6 +152,38 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
         log.debug("fetched_assignments_for_worker", count=len(assignments))
         return assignments
+
+    def get_workers_scheduled_on_date(self, scheduled_date: date) -> list[UUID]:
+        """
+        Retrieve worker IDs who have schedule assignments on a specific date.
+
+        This method checks for any existing assignments (regardless of status) on the
+        given date to prevent double-scheduling workers. It queries the schedule_assignments
+        table and filters using the related schedules table's scheduled_date field.
+
+        Args:
+            scheduled_date (date): The date to check for existing assignments.
+
+        Returns:
+            list[UUID]: A list of worker IDs who have assignments on the given date.
+                       Returns an empty list if no workers are scheduled on that date.
+        """
+        log = self.logger.bind(method="get_workers_scheduled_on_date", scheduled_date=scheduled_date.isoformat())
+        # Query schedule_assignments with schedules join, filter by schedules.scheduled_date
+        # Must include schedules!inner(*) in SELECT to create the inner join and enable filtering on schedules table
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .select(f"{q.AssignmentColumns.WORKER_ID}, {q.TABLE}!inner(*)")
+            .eq(f"{q.TABLE}.{q.Columns.SCHEDULED_DATE}", scheduled_date.isoformat())
+            .execute()
+        )
+        worker_ids = [
+            UUID(str(row[q.AssignmentColumns.WORKER_ID]))
+            for row in (response.data or [])
+            if isinstance(row, dict) and q.AssignmentColumns.WORKER_ID in row
+        ]
+        log.debug("found_workers_scheduled_on_date", count=len(worker_ids), worker_ids=[str(wid) for wid in worker_ids])
+        return worker_ids
 
     def get_assignments_in_range(self, start_date: date, end_date: date) -> list[AssignmentResponse]:
         """

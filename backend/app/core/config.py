@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     secret_key: str
     allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     frontend_url: str = "http://localhost:5173"
+    log_level: str = "INFO"  # Defaults to INFO; can be DEBUG, INFO, WARNING, ERROR
 
     @property
     def is_production(self) -> bool:

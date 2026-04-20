@@ -64,7 +64,7 @@ class WorkerService:
         for worker in workers:
             worker.roles = self.worker_repo.get_worker_roles(worker.id)
 
-        log.debug("fetched_all_workers", count=len(workers))
+        log.info("fetched_all_workers", count=len(workers))
         return workers
 
     def get_active_workers(self) -> list[WorkerResponse]:
@@ -81,7 +81,7 @@ class WorkerService:
         for worker in workers:
             worker.roles = self.worker_repo.get_worker_roles(worker.id)
 
-        log.debug("fetched_active_workers", count=len(workers))
+        log.info("fetched_active_workers", count=len(workers))
         return workers
 
     def get_workers_by_department(self, department_id: UUID) -> list[WorkerResponse]:
@@ -96,7 +96,7 @@ class WorkerService:
         # bind the method and department_id for better traceability in logs
         log = self.logger.bind(method="get_workers_by_department", department_id=str(department_id))
         workers = self.worker_repo.get_workers_by_department(department_id)
-        log.debug(
+        log.info(
             "fetched_workers_by_department",
             count=len(workers),
         )
@@ -173,7 +173,7 @@ class WorkerService:
         if new_roles is not None:
             # Delete all existing roles
             self.worker_repo.delete_worker_roles(worker_id)
-            log.debug("deleted_existing_roles")
+            log.info("deleted_existing_roles")
 
             # Insert new roles
             for role in new_roles:
@@ -223,7 +223,7 @@ class WorkerService:
         # bind the method and query for better traceability in logs
         log = self.logger.bind(method="search_workers", query=query)
         workers = self.worker_repo.search(query)
-        log.debug("worker_search", results=len(workers), workers=workers)
+        log.info("worker_search", results=len(workers), workers=workers)
         return workers
 
     def get_worker_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
@@ -237,5 +237,5 @@ class WorkerService:
         """
         log = self.logger.bind(method="get_worker_departments", worker_id=str(worker_id))
         departments = self.department_repo.get_departments_for_worker(worker_id)
-        log.debug("fetched_worker_departments", count=len(departments))
+        log.info("fetched_worker_departments", count=len(departments))
         return [DepartmentResponse.model_validate(dept) for dept in departments]

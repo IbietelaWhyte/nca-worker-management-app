@@ -36,7 +36,7 @@ class AvailabilityService:
         # bind worker_id to logger for all calls in this method
         log = self.logger.bind(worker_id=str(worker_id))
         records = self.availability_repo.get_by_worker(worker_id)
-        log.debug(
+        log.info(
             "fetched_worker_availability",
             count=len(records),
         )
@@ -54,7 +54,7 @@ class AvailabilityService:
         """
         record = self.availability_repo.get_by_worker_and_day(worker_id, day_of_week.to_number())
         log = self.logger.bind(worker_id=str(worker_id), day_of_week=day_of_week)
-        log.debug(
+        log.info(
             "fetched_availability_by_day",
             found=record is not None,
         )
@@ -71,7 +71,7 @@ class AvailabilityService:
         """
         records = self.availability_repo.get_available_workers_on_day(day_of_week.to_number())
         log = self.logger.bind(day_of_week=day_of_week)
-        log.debug(
+        log.info(
             "fetched_available_workers_on_day",
             count=len(records),
         )
