@@ -36,6 +36,7 @@ def make_generate_request(**kwargs) -> ScheduleCreate:
     dept_id = kwargs.get("department_id", uuid4())
     return ScheduleCreate(
         department_id=dept_id,
+        scope=kwargs.get("scope", "department_only"),
         subteam_id=kwargs.get("subteam_id", None),
         title=kwargs.get("title", "Sunday Service"),
         scheduled_date=kwargs.get("scheduled_date", date(2026, 3, 15)),  # Sunday
@@ -72,9 +73,10 @@ class TestGenerateSchedule:
         schedule = make_schedule(department_id=dept.id)
 
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = workers
+        mock_worker_repo.get_department_only_workers.return_value = workers
         mock_availability_repo.get_by_worker_and_type.return_value = None
         mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
         mock_schedule_repo.create.return_value = schedule
         mock_schedule_repo.bulk_create_assignments.return_value = []
         mock_schedule_repo.get_with_assignments.return_value = schedule
@@ -92,12 +94,14 @@ class TestGenerateSchedule:
     def test_raises_when_no_workers_in_department(
         self,
         service,
+        mock_schedule_repo,
         mock_department_repo,
         mock_worker_repo,
     ):
         dept = make_department()
+        mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = []
+        mock_worker_repo.get_department_only_workers.return_value = []
 
         with pytest.raises(ValueError, match="No workers found"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
@@ -105,6 +109,7 @@ class TestGenerateSchedule:
     def test_raises_when_no_available_workers(
         self,
         service,
+        mock_schedule_repo,
         mock_department_repo,
         mock_worker_repo,
         mock_availability_repo,
@@ -114,8 +119,9 @@ class TestGenerateSchedule:
         # All workers marked unavailable via specific date override
         unavailable = make_availability(is_available=False)
 
+        mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = workers
+        mock_worker_repo.get_department_only_workers.return_value = workers
         mock_availability_repo.get_by_worker_and_type.return_value = unavailable
 
         with pytest.raises(ValueError, match="No available workers"):
@@ -124,6 +130,7 @@ class TestGenerateSchedule:
     def test_specific_date_overrides_recurring(
         self,
         service,
+        mock_schedule_repo,
         mock_department_repo,
         mock_worker_repo,
         mock_availability_repo,
@@ -134,8 +141,9 @@ class TestGenerateSchedule:
         # Recurring says available, specific date says unavailable
         specific_unavailable = make_availability(is_available=False)
 
+        mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = [worker]
+        mock_worker_repo.get_department_only_workers.return_value = [worker]
         # Specific date override returns unavailable — recurring should be ignored
         mock_availability_repo.get_by_worker_and_type.return_value = specific_unavailable
 
@@ -144,7 +152,8 @@ class TestGenerateSchedule:
         # Verify recurring availability was never checked
         mock_availability_repo.get_by_worker_and_day.assert_not_called()
 
-    def test_raises_when_department_not_found(self, service, mock_department_repo):
+    def test_raises_when_department_not_found(self, service, mock_schedule_repo, mock_department_repo):
+        mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = None
         with pytest.raises(ValueError, match="not found"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
@@ -167,13 +176,16 @@ class TestRoundRobin:
         prior_assignment = make_assignment(
             worker_id=recently_assigned.id,
             schedule_id=schedule_id,
-            schedules=make_schedule(schedule_id=schedule_id, scheduled_date=date(2026, 3, 1)),  # Recent past date
+            schedules=make_schedule(
+                schedule_id=schedule_id, department_id=dept.id, scheduled_date=date(2026, 3, 1)
+            ),  # Recent past date
         )
 
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_workers_by_department.return_value = [recently_assigned, never_assigned]
+        mock_worker_repo.get_department_only_workers.return_value = [recently_assigned, never_assigned]
         mock_availability_repo.get_by_worker_and_type.return_value = None
         mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
 
         def get_assignments(worker_id):
             if worker_id == recently_assigned.id:

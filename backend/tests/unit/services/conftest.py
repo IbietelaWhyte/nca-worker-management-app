@@ -141,7 +141,6 @@ def make_assignment(**kwargs) -> AssignmentResponse:
         department_role_id=kwargs.get("department_role_id", None),
         subteam_id=kwargs.get("subteam_id", None),
         status=kwargs.get("status", AssignmentStatus.PENDING),
-        created_at=kwargs.get("created_at", date.today()),
         reminder_sent_at=kwargs.get("reminder_sent_at", None),
         workers=kwargs.get("workers", None),
         schedules=kwargs.get("schedules", None),

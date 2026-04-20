@@ -7,8 +7,21 @@ import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
 import { Calendar } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { useSubteams } from '@/hooks/useSubteams'
+
+const SCOPE_OPTIONS = {
+    DEPARTMENT_ONLY: 'department_only',
+    DEPARTMENT_ALL: 'department_all',
+    SUBTEAM: 'subteam',
+}
 
 const defaultForm = {
     title: '',
@@ -22,6 +35,7 @@ const defaultForm = {
 export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel }) {
     const { subteams } = useSubteams(departmentId)
     const [form, setForm] = useState(defaultForm)
+    const [scope, setScope] = useState(SCOPE_OPTIONS.DEPARTMENT_ONLY)
     const [selectedSubteamId, setSelectedSubteamId] = useState('')
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
@@ -32,10 +46,21 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
         setForm(prev => ({ ...prev, [name]: value }))
     }
 
+    const handleScopeChange = value => {
+        setScope(value)
+        // Reset subteam selection when switching away from subteam scope
+        if (value !== SCOPE_OPTIONS.SUBTEAM) {
+            setSelectedSubteamId('')
+        }
+    }
+
     const handleSubmit = async () => {
         if (!form.title.trim()) return setError('Title is required')
         if (!form.scheduled_date) return setError('Date is required')
         if (!form.start_time || !form.end_time) return setError('Start and end time are required')
+        if (scope === SCOPE_OPTIONS.SUBTEAM && !selectedSubteamId) {
+            return setError('Please select a subteam')
+        }
 
         setError(null)
         setLoading(true)
@@ -43,7 +68,8 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
         try {
             await onSubmit({
                 department_id: departmentId,
-                subteam_id: selectedSubteamId || null,
+                scope: scope,
+                subteam_id: scope === SCOPE_OPTIONS.SUBTEAM ? selectedSubteamId : null,
                 title: form.title,
                 scheduled_date: format(form.scheduled_date, 'yyyy-MM-dd'),
                 start_time: form.start_time + ':00',
@@ -135,23 +161,58 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
                 </div>
             </div>
 
-            {/* Subteam selector — only shown if department has subteams */}
-            {subteams.length > 0 && (
+            {/* Scope selector */}
+            <div className="space-y-2">
+                <Label htmlFor="scope">Schedule scope</Label>
+                <Select value={scope} onValueChange={handleScopeChange}>
+                    <SelectTrigger id="scope">
+                        <SelectValue placeholder="Select scope" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value={SCOPE_OPTIONS.DEPARTMENT_ONLY}>
+                            Department only (workers not in subteams)
+                        </SelectItem>
+                        {subteams.length > 0 && (
+                            <>
+                                <SelectItem value={SCOPE_OPTIONS.DEPARTMENT_ALL}>
+                                    All workers (entire department)
+                                </SelectItem>
+                                <SelectItem value={SCOPE_OPTIONS.SUBTEAM}>
+                                    Specific subteam
+                                </SelectItem>
+                            </>
+                        )}
+                    </SelectContent>
+                </Select>
+                {scope === SCOPE_OPTIONS.DEPARTMENT_ONLY && (
+                    <p className="text-xs text-muted-foreground">
+                        Schedules only workers assigned to the department (not in any subteam)
+                    </p>
+                )}
+                {scope === SCOPE_OPTIONS.DEPARTMENT_ALL && (
+                    <p className="text-xs text-muted-foreground">
+                        Includes all workers in the department (both subteam and department-only
+                        workers)
+                    </p>
+                )}
+            </div>
+
+            {/* Subteam selector — only shown when scope is SUBTEAM */}
+            {scope === SCOPE_OPTIONS.SUBTEAM && subteams.length > 0 && (
                 <div className="space-y-2">
-                    <Label htmlFor="subteam">Subteam (optional)</Label>
-                    <select
-                        id="subteam"
-                        value={selectedSubteamId}
-                        onChange={e => setSelectedSubteamId(e.target.value)}
-                        className="w-full px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                    >
-                        <option value="">— Whole department —</option>
-                        {subteams.map(s => (
-                            <option key={s.id} value={s.id}>
-                                {s.name}
-                            </option>
-                        ))}
-                    </select>
+                    <Label htmlFor="subteam">Subteam</Label>
+                    <Select value={selectedSubteamId} onValueChange={setSelectedSubteamId}>
+                        <SelectTrigger id="subteam">
+                            <SelectValue placeholder="Select a subteam" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {subteams.map(s => (
+                                <SelectItem key={s.id} value={s.id}>
+                                    {s.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
             )}
 

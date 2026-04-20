@@ -1,6 +1,7 @@
 from datetime import date
 from uuid import UUID
 
+from postgrest.exceptions import APIError
 from supabase import Client
 
 from app.core.logging import get_logger
@@ -54,15 +55,24 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                                         has no availability set for the specified day.
         """
         log = self.logger.bind(method="get_by_worker_and_day", worker_id=str(worker_id), day_of_week=day_of_week)
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.WORKER_ID, str(worker_id))
-            .eq(q.Columns.DAY_OF_WEEK, day_of_week)
-            .maybe_single()
-            .execute()
-        )
-        availability = self._to_model(response.data) if response else None
+        try:
+            response = (
+                self.client.table(q.TABLE)
+                .select(q.SELECT_ALL)
+                .eq(q.Columns.WORKER_ID, str(worker_id))
+                .eq(q.Columns.DAY_OF_WEEK, day_of_week)
+                .maybe_single()
+                .execute()
+            )
+            availability = self._to_model(response.data) if (response and response.data) else None
+        except APIError as e:
+            # 204 means no content found - this is a valid case for no availability record
+            if e.code == "204":
+                log.debug("availability_not_found_by_day_204")
+                availability = None
+            else:
+                raise
+
         if availability:
             log.debug("availability_found")
         else:
@@ -88,16 +98,25 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
             availability_type=availability_type,
             specific_date=specific_date.isoformat() if specific_date else None,
         )
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.WORKER_ID, str(worker_id))
-            .eq(q.Columns.AVAILABILITY_TYPE, availability_type)
-            .eq(q.Columns.SPECIFIC_DATE, specific_date.isoformat() if specific_date else None)
-            .maybe_single()
-            .execute()
-        )
-        availability = self._to_model(response.data) if response else None
+        try:
+            response = (
+                self.client.table(q.TABLE)
+                .select(q.SELECT_ALL)
+                .eq(q.Columns.WORKER_ID, str(worker_id))
+                .eq(q.Columns.AVAILABILITY_TYPE, availability_type)
+                .eq(q.Columns.SPECIFIC_DATE, specific_date.isoformat() if specific_date else None)
+                .maybe_single()
+                .execute()
+            )
+            availability = self._to_model(response.data) if (response and response.data) else None
+        except APIError as e:
+            # 204 means no content found - this is a valid case for no availability record
+            if e.code == "204":
+                log.debug("availability_not_found_by_type_204")
+                availability = None
+            else:
+                raise
+
         if availability:
             log.debug("availability_found_by_type")
         else:

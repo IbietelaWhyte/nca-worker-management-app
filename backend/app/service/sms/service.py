@@ -34,7 +34,7 @@ class SMSService:
         """
         # bind the method and recipient for better traceability in logs
         log = self.logger.bind(method="send_sms", to=to)
-        log.debug("attempting_to_send_sms", body=body)
+        log.info("attempting_to_send_sms", body=body)
         try:
             message = self.client.messages.create(  # type: ignore[no-untyped-call]
                 to=to,
@@ -85,7 +85,7 @@ class SMSService:
                 f"'{schedule_title}' on {scheduled_date} at {start_time}. "
                 f"Please reply CONFIRM or DECLINE."
             )
-        self.logger.debug(
+        self.logger.info(
             "sending_reminder",
             to=to,
             worker_name=worker_name,
