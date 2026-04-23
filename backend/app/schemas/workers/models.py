@@ -34,3 +34,4 @@ class WorkerUpdate(BaseModel):
     phone: str | None = None
     email: str | None = None
     roles: list[UserRole] | None = Field(default=None, min_length=1, description="Must include at least one role")
+    assistant_hod_departments: list[UUID] | None = Field(default=None, description="Departments for assistant_hod role")

@@ -45,6 +45,8 @@ class AuthenticationService:
             if data.department_ids:
                 for department_id in data.department_ids:
                     self.department_repo.assign_worker(UUID(department_id), worker.id)
+                    if data.role == UserRole.ASSISTANT_HOD:
+                        self.department_repo.assign_assistant_hod(worker.id, UUID(department_id))
                 logger.info("departments_assigned", worker_id=str(worker.id), department_ids=data.department_ids)
         except Exception as e:
             logger.error(

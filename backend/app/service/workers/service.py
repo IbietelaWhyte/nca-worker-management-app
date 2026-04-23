@@ -157,9 +157,10 @@ class WorkerService:
             log.warning("worker_not_found")
             raise ValueError(f"Worker {worker_id} not found")
 
-        # Extract roles from update data if present
+        # Extract roles and assistant_hod_departments from update data if present
         update_dict = data.model_dump(exclude_none=True)
         new_roles = update_dict.pop("roles", None)
+        new_assistant_hod_departments = update_dict.pop("assistant_hod_departments", None)
 
         # Update worker profile fields if any were provided
         if update_dict:
@@ -180,6 +181,22 @@ class WorkerService:
                 self.worker_repo.create_worker_role(worker_id, role)
 
             log.info("roles_updated", new_roles=new_roles)
+
+        # Update assistant_hod department assignments if provided
+        if new_assistant_hod_departments is not None:
+            # Get current assistant_hod departments
+            current_dept_ids = set(self.department_repo.get_assistant_hod_departments(worker_id))
+            new_dept_ids = set(new_assistant_hod_departments)
+
+            # Remove old assignments
+            for dept in current_dept_ids - new_dept_ids:
+                self.department_repo.remove_assistant_hod(worker_id, dept.id)
+
+            # Add new assignments
+            for dept_id in new_dept_ids - current_dept_ids:
+                self.department_repo.assign_assistant_hod(worker_id, dept_id)
+
+            log.info("assistant_hod_departments_updated", departments=new_assistant_hod_departments)
 
         # Load current roles for response
         worker.roles = self.worker_repo.get_worker_roles(worker_id)
@@ -239,3 +256,47 @@ class WorkerService:
         departments = self.department_repo.get_departments_for_worker(worker_id)
         log.info("fetched_worker_departments", count=len(departments))
         return [DepartmentResponse.model_validate(dept) for dept in departments]
+
+    def can_manage_worker(self, manager_id: UUID, worker_id: UUID) -> bool:
+        """Check if a manager (HOD or Assistant HOD) can manage a specific worker.
+
+        A manager can manage a worker if the worker belongs to at least one department
+        that the manager oversees (either as HOD or assistant_hod).
+
+        Args:
+            manager_id: Unique identifier of the manager (HOD or assistant_hod).
+            worker_id: Unique identifier of the worker to check.
+
+        Returns:
+            bool: True if manager oversees at least one department containing the worker.
+        """
+        log = self.logger.bind(method="can_manage_worker", manager_id=str(manager_id), worker_id=str(worker_id))
+
+        # Get departments where this user is HOD
+        hod_departments = self.department_repo.get_departments_by_hod(manager_id)
+
+        # Get departments where this user is assistant_hod
+        assistant_hod_dept_ids = self.department_repo.get_assistant_hod_departments(manager_id)
+        assistant_hod_departments = [self.department_repo.get_by_id(dept.id) for dept in assistant_hod_dept_ids]
+        assistant_hod_departments = [d for d in assistant_hod_departments if d is not None]
+
+        # Combine all managed departments
+        all_managed_departments = hod_departments + assistant_hod_departments
+
+        if not all_managed_departments:
+            log.info("manager_has_no_departments")
+            return False
+
+        # Get departments the worker belongs to
+        worker_departments = self.department_repo.get_departments_for_worker(worker_id)
+        if not worker_departments:
+            log.info("worker_has_no_departments")
+            return False
+
+        # Check for overlap
+        managed_dept_ids = {dept.id for dept in all_managed_departments}  # type: ignore
+        worker_dept_ids = {dept.id for dept in worker_departments}
+        can_manage = bool(managed_dept_ids & worker_dept_ids)
+
+        log.info("can_manage_check", can_manage=can_manage)
+        return can_manage

@@ -199,3 +199,62 @@ class DepartmentService:
             raise ValueError(f"Failed to set HOD for department {department_id}")
         log.info("hod_assigned")
         return updated
+
+    def assign_assistant_hod(self, department_id: UUID, worker_id: UUID) -> None:
+        """Assign an Assistant Head of Department (Assistant HOD) to a department.
+
+        Args:
+            department_id: Unique identifier of the department.
+            worker_id: Unique identifier of the worker to set as Assistant HOD.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: If department not found or Assistant HOD assignment fails.
+        """
+        log = self.logger.bind(
+            method="assign_assistant_hod", department_id=str(department_id), worker_id=str(worker_id)
+        )
+        self.get_department(department_id)
+        updated = self.department_repo.assign_assistant_hod(department_id, worker_id)
+        if not updated:
+            log.error("assign_assistant_hod_failed")
+            raise ValueError(f"Failed to assign Assistant HOD for department {department_id}")
+        log.info("assistant_hod_assigned")
+
+    def remove_assistant_hod(self, department_id: UUID, worker_id: UUID) -> None:
+        """Remove an Assistant Head of Department (Assistant HOD) assignment from a department.
+
+        Args:
+            department_id: Unique identifier of the department.
+            worker_id: Unique identifier of the worker to remove as Assistant HOD.
+
+        Raises:
+            ValueError: If department not found or Assistant HOD removal fails.
+        """
+        log = self.logger.bind(
+            method="remove_assistant_hod", department_id=str(department_id), worker_id=str(worker_id)
+        )
+        self.get_department(department_id)
+        removed = self.department_repo.remove_assistant_hod(department_id, worker_id)
+        if not removed:
+            log.error("remove_assistant_hod_failed")
+            raise ValueError(f"Failed to remove Assistant HOD for department {department_id}")
+        log.info("assistant_hod_removed")
+
+    def get_assistant_hod_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
+        """Retrieve all departments where a worker is an Assistant Head of Department (Assistant HOD).
+
+        Args:
+            worker_id: Unique identifier of the worker who is an Assistant HOD.
+
+        Returns:
+            list[DepartmentResponse]: A list of all departments where the worker is an Assistant HOD.
+                                     Returns an empty list if the worker is not an Assistant HOD of
+                                     any departments.
+        """
+        log = self.logger.bind(method="get_assistant_hod_departments", worker_id=str(worker_id))
+        departments = self.department_repo.get_assistant_hod_departments(worker_id)
+        log.debug("fetched_assistant_hod_departments", count=len(departments))
+        return departments

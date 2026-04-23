@@ -39,6 +39,7 @@ class AssignmentStatus(StrEnum):
 class UserRole(StrEnum):
     ADMIN = "admin"
     HOD = "hod"
+    ASSISTANT_HOD = "assistant_hod"
     WORKER = "worker"
 
 

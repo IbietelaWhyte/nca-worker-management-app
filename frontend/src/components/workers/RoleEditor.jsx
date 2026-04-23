@@ -9,14 +9,27 @@ import { Badge } from '@/components/ui/badge'
 const AVAILABLE_ROLES = [
     { value: 'worker', label: 'Worker', description: 'Standard worker access' },
     { value: 'hod', label: 'Head of Department', description: 'Can manage their departments' },
+    {
+        value: 'assistant_hod',
+        label: 'Assistant Head of Department',
+        description: 'Can manage their departments',
+    },
     { value: 'admin', label: 'Administrator', description: 'Full system access' },
 ]
 
-export default function RoleEditor({ workerId, workerName, onClose, onSuccess }) {
+export default function RoleEditor({ workerId, workerName, currentUserRole, onClose, onSuccess }) {
     const [roles, setRoles] = useState([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
+
+    // Filter roles based on current user's permissions
+    const availableRoles =
+        currentUserRole === 'admin'
+            ? AVAILABLE_ROLES
+            : AVAILABLE_ROLES.filter(
+                  role => role.value === 'worker' || role.value === 'assistant_hod'
+              )
 
     const loadRoles = useCallback(async () => {
         setLoading(true)
@@ -89,12 +102,14 @@ export default function RoleEditor({ workerId, workerName, onClose, onSuccess })
             <div>
                 <Label className="text-base">Manage roles for {workerName}</Label>
                 <p className="text-xs text-muted-foreground mt-1">
-                    Select one or more roles. Workers can have multiple roles.
+                    {currentUserRole === 'admin'
+                        ? 'Select one or more roles. Workers can have multiple roles.'
+                        : 'You can assign Worker and Assistant HOD roles only.'}
                 </p>
             </div>
 
             <div className="space-y-3">
-                {AVAILABLE_ROLES.map(role => (
+                {availableRoles.map(role => (
                     <div
                         key={role.value}
                         className="flex items-start space-x-3 rounded-lg border p-3 hover:bg-accent/50 transition-colors"
