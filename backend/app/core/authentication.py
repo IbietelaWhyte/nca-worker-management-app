@@ -121,8 +121,8 @@ def require_hod(
 ) -> TokenPayload:
     """FastAPI dependency that requires admin or department head role.
 
-    This dependency validates that the authenticated user has either 'admin'
-    or 'hod' role. If not, a 403 Forbidden error is raised.
+    This dependency validates that the authenticated user has either 'admin',
+    'hod', or 'assistant_hod' role. If not, a 403 Forbidden error is raised.
 
     Args:
         token: The verified token payload from verify_token dependency.
@@ -133,7 +133,7 @@ def require_hod(
     Raises:
         HTTPException: 403 Forbidden if user lacks required role.
     """
-    if token.role not in ("admin", "hod"):
+    if token.role not in ("admin", "hod", "assistant_hod"):
         log = logger.bind(method="require_hod", sub=token.sub)
         log.warning("HOD access required")
         raise HTTPException(

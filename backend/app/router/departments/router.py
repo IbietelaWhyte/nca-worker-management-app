@@ -31,7 +31,7 @@ def list_departments(
     service: DepartmentService = Depends(get_department_service),
     worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[DepartmentResponse]:
-    """List departments - filtered by HOD role if applicable.
+    """List departments - filtered by HOD or Assistant HOD role if applicable.
 
     Args:
         current_user: Current authenticated user token.
@@ -39,7 +39,7 @@ def list_departments(
         worker_service: Worker service dependency.
 
     Returns:
-        list[DepartmentResponse]: List of departments (all for admin, filtered for HOD).
+        list[DepartmentResponse]: List of departments (all for admin, filtered for HOD or Assistant HOD).
 
     Raises:
         HTTPException: 404 if HOD's worker profile not found.
@@ -48,8 +48,8 @@ def list_departments(
     if current_user.role == "admin":
         return service.get_all_departments()
 
-    # HOD sees only their departments
-    if current_user.role == "hod":
+    # HOD or Assistant HOD sees only their departments
+    if current_user.role == "hod" or current_user.role == "assistant_hod":
         # Get worker record from email in JWT token
         if not current_user.email:
             raise HTTPException(
@@ -62,7 +62,13 @@ def list_departments(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Worker profile not found for authenticated user",
             )
-        return service.get_departments_by_hod(worker.id)
+
+        # Get departments where this worker is HOD
+        if current_user.role == "hod":
+            hod_departments = service.get_departments_by_hod(worker.id)
+        else:  # assistant_hod
+            hod_departments = service.get_assistant_hod_departments(worker.id)
+        return hod_departments
 
     # Regular workers see all departments (for assignment purposes)
     return service.get_all_departments()

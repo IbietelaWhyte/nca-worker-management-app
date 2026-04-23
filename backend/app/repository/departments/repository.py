@@ -192,3 +192,118 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         else:
             log.debug("no_assignment_to_remove")
         return success
+
+    def assign_assistant_hod(self, worker_id: UUID, department_id: UUID) -> dict[str, Any]:
+        """
+        Assign a worker as an assistant HOD for a specific department.
+
+        This method creates an entry in the department_assistant_hods table, granting
+        the worker assistant HOD permissions for the specified department. The worker
+        must also have the 'assistant_hod' role in worker_app_roles.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            dict[str, Any]: The created assistant HOD assignment record containing worker_id and department_id.
+        """
+        log = self.logger.bind(
+            method="assign_assistant_hod", worker_id=str(worker_id), department_id=str(department_id)
+        )
+        response = (
+            self.client.table(q.ASSISTANT_HOD_JUNCTION_TABLE)
+            .insert(
+                {
+                    "worker_id": str(worker_id),
+                    "department_id": str(department_id),
+                }
+            )
+            .execute()
+        )
+        success = len(response.data) > 0
+        if success:
+            log.info("assistant_hod_assigned")
+        else:
+            log.error("assign_assistant_hod_failed")
+        return cast(dict[str, Any], response.data[0])
+
+    def remove_assistant_hod(self, worker_id: UUID, department_id: UUID) -> bool:
+        """
+        Remove a worker's assistant HOD assignment from a specific department.
+
+        This method deletes the association record from the department_assistant_hods table,
+        effectively removing the worker's assistant HOD permissions for the department.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            bool: True if the assignment was successfully removed, False if no such assignment existed.
+        """
+        log = self.logger.bind(
+            method="remove_assistant_hod", worker_id=str(worker_id), department_id=str(department_id)
+        )
+        response = (
+            self.client.table("department_assistant_hods")
+            .delete()
+            .eq("worker_id", str(worker_id))
+            .eq("department_id", str(department_id))
+            .execute()
+        )
+        success = len(response.data) > 0
+        if success:
+            log.info("assistant_hod_removed")
+        else:
+            log.debug("no_assistant_hod_assignment_to_remove")
+        return success
+
+    def get_assistant_hod_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
+        """
+        Get all department IDs where the worker is an assistant HOD.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+
+        Returns:
+            list[DepartmentResponse]: List of departments where worker is assistant HOD.
+        """
+        log = self.logger.bind(method="get_assistant_hod_departments", worker_id=str(worker_id))
+        response = (
+            self.client.table(q.ASSISTANT_HOD_JUNCTION_TABLE)
+            .select(q.SELECT_ASSISTANT_HOD_DEPARTMENTS)
+            .eq("worker_id", str(worker_id))
+            .execute()
+        )
+        log.info("raw_assistant_hod_departments_fetched", response=response)
+        rows = (
+            [row["departments"] for row in response.data if isinstance(row, dict) and "departments" in row]
+            if response.data
+            else []
+        )
+        departments = self._to_model_list(rows)
+        log.debug("fetched_assistant_hod_departments", count=len(departments))
+        return departments
+
+    def get_department_assistant_hods(self, department_id: UUID) -> list[UUID]:
+        """
+        Get all worker IDs who are assistant HODs for a specific department.
+
+        Args:
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            list[UUID]: List of worker IDs who are assistant HODs for this department.
+        """
+        log = self.logger.bind(method="get_department_assistant_hods", department_id=str(department_id))
+        response = (
+            self.client.table("department_assistant_hods")
+            .select("worker_id")
+            .eq("department_id", str(department_id))
+            .execute()
+        )
+        rows: list[dict[str, Any]] = response.data or []  # type: ignore[assignment]
+        worker_ids = [UUID(row["worker_id"]) for row in rows]
+        log.debug("fetched_department_assistant_hods", count=len(worker_ids))
+        return worker_ids

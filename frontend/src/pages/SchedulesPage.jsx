@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDepartments } from '@/hooks/useDepartments'
 import { useSchedules } from '@/hooks/useSchedules'
@@ -27,10 +27,20 @@ const STATUS_SUMMARY = schedule_assignments => {
 
 export default function SchedulesPage() {
     const navigate = useNavigate()
-    const { isAdmin, isDepartmentHead } = useAuth()
+    const { isAdmin, isDepartmentHead, role } = useAuth()
     const { departments } = useDepartments()
     const [selectedDepartmentId, setSelectedDepartmentId] = useState('')
     const [generateOpen, setGenerateOpen] = useState(false)
+
+    // For assistant_hod users, auto-select first department if only one available
+    const isAssistantHod = role === 'assistant_hod'
+
+    // Auto-select department for assistant_hod if they only have one
+    useEffect(() => {
+        if (isAssistantHod && departments.length === 1 && !selectedDepartmentId) {
+            setSelectedDepartmentId(departments[0].id)
+        }
+    }, [departments, isAssistantHod, selectedDepartmentId])
 
     const { schedules, loading, error, createSchedule, removeSchedule } =
         useSchedules(selectedDepartmentId)
@@ -64,22 +74,37 @@ export default function SchedulesPage() {
                 )}
             </div>
 
-            {/* Department selector */}
-            <div className="flex items-center gap-3">
-                <label className="text-sm font-medium whitespace-nowrap">Department</label>
-                <select
-                    value={selectedDepartmentId}
-                    onChange={e => setSelectedDepartmentId(e.target.value)}
-                    className="w-full max-w-sm px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                >
-                    <option value="">— Select a department —</option>
-                    {departments.map(d => (
-                        <option key={d.id} value={d.id}>
-                            {d.name}
-                        </option>
+            {/* Department selector - dropdown for admins/HODs, tabs for assistant_hod */}
+            {!isAssistantHod ? (
+                <div className="flex items-center gap-3">
+                    <label className="text-sm font-medium whitespace-nowrap">Department</label>
+                    <select
+                        value={selectedDepartmentId}
+                        onChange={e => setSelectedDepartmentId(e.target.value)}
+                        className="w-full max-w-sm px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                        <option value="">— Select a department —</option>
+                        {departments.map(d => (
+                            <option key={d.id} value={d.id}>
+                                {d.name}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            ) : (
+                <div className="flex gap-2 flex-wrap">
+                    {departments.map(dept => (
+                        <Button
+                            key={dept.id}
+                            variant={selectedDepartmentId === dept.id ? 'default' : 'outline'}
+                            onClick={() => setSelectedDepartmentId(dept.id)}
+                            size="sm"
+                        >
+                            {dept.name}
+                        </Button>
                     ))}
-                </select>
-            </div>
+                </div>
+            )}
 
             {/* No department selected */}
             {!selectedDepartmentId && (

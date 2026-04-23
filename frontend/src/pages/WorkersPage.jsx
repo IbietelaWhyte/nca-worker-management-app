@@ -20,7 +20,7 @@ import { Plus, Pencil, UserX, UserPlus, Shield } from 'lucide-react'
 
 export default function WorkersPage() {
     const navigate = useNavigate()
-    const { isAdmin } = useAuth()
+    const { isAdmin, isDepartmentHead, role } = useAuth()
     const { workers, loading, error, addWorker, editWorker, removeWorker, refetch } = useWorkers()
 
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -156,7 +156,8 @@ export default function WorkersPage() {
                                                             variant={
                                                                 role === 'admin'
                                                                     ? 'destructive'
-                                                                    : role === 'hod'
+                                                                    : role === 'hod' ||
+                                                                        role === 'assistant_hod'
                                                                       ? 'default'
                                                                       : 'secondary'
                                                             }
@@ -164,8 +165,10 @@ export default function WorkersPage() {
                                                         >
                                                             {role === 'hod'
                                                                 ? 'HOD'
-                                                                : role.charAt(0).toUpperCase() +
-                                                                  role.slice(1)}
+                                                                : role === 'assistant_hod'
+                                                                  ? 'Assistant HOD'
+                                                                  : role.charAt(0).toUpperCase() +
+                                                                    role.slice(1)}
                                                         </Badge>
                                                     ))}
                                                 </div>
@@ -191,16 +194,18 @@ export default function WorkersPage() {
                                                 <Pencil size={14} className="mr-1" />
                                                 Edit
                                             </Button>
-                                            {isAdmin && worker.roles && worker.roles.length > 0 && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleOpenRoleEdit(worker)}
-                                                >
-                                                    <Shield size={14} className="mr-1" />
-                                                    Roles
-                                                </Button>
-                                            )}
+                                            {isDepartmentHead &&
+                                                worker.roles &&
+                                                worker.roles.length > 0 && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => handleOpenRoleEdit(worker)}
+                                                    >
+                                                        <Shield size={14} className="mr-1" />
+                                                        Roles
+                                                    </Button>
+                                                )}
                                             {worker.is_active && (
                                                 <Button
                                                     variant="outline"
@@ -246,6 +251,7 @@ export default function WorkersPage() {
                             <RoleEditor
                                 workerId={editingRoles.id}
                                 workerName={`${editingRoles.first_name} ${editingRoles.last_name}`}
+                                currentUserRole={role}
                                 onClose={handleCloseRoleDialog}
                                 onSuccess={handleRoleUpdateSuccess}
                             />

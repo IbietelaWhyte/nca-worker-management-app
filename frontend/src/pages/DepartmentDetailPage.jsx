@@ -39,7 +39,7 @@ import {
 export default function DepartmentDetailPage() {
     const { id } = useParams()
     const navigate = useNavigate()
-    const { isAdmin, isDepartmentHead } = useAuth()
+    const { isAdmin, isDepartmentHead, role } = useAuth()
 
     // Members
     const {
@@ -333,7 +333,7 @@ export default function DepartmentDetailPage() {
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
                                                             {!isHod &&
-                                                                (isAdmin || isDepartmentHead) && (
+                                                                (isAdmin || role === 'hod') && (
                                                                     <Button
                                                                         variant="outline"
                                                                         size="sm"

@@ -201,6 +201,9 @@ export default function RegisterUser() {
                             <SelectGroup>
                                 <SelectItem value="worker">Worker</SelectItem>
                                 <SelectItem value="hod">Head of Department (HOD)</SelectItem>
+                                <SelectItem value="assistant_hod">
+                                    Assistant Head of Department
+                                </SelectItem>
                                 <SelectItem value="admin">Administrator</SelectItem>
                             </SelectGroup>
                         </SelectContent>
