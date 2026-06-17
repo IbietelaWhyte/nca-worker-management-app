@@ -72,7 +72,8 @@ class ConfirmationTokenService:
             assignment_id=assignment_id,
             expires_at=expires_at,
         )
-        log.info("creating_confirmation_token", token_data=token_data.model_dump())
+        # Log the assignment linkage only — never the token id/value itself (it's the link credential).
+        log.info("creating_confirmation_token", assignment_id=str(assignment_id))
         token = self.token_repo.create(token_data.model_dump(mode="json"))
         log.info("confirmation_token_created", token_id=str(token.id), expires_at=expires_at.isoformat())
         return f"{settings.frontend_url}/confirm/{token.id}"

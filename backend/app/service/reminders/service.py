@@ -150,7 +150,7 @@ class ReminderService:
         log.info("reminder_manual_trigger")
         today = date.today()
         due_assignments = self.schedule_repo.get_assignments_due_for_reminder(today)
-        logger.info("manual_reminder_due_assignments", due_assignments=due_assignments)
+        logger.info("manual_reminder_due_assignments", count=len(due_assignments))
         sent_count = 0
 
         for assignment in due_assignments:

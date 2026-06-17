@@ -2,6 +2,7 @@ from twilio.rest import Client as TwilioClient
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.redaction import mask_phone
 
 logger = get_logger(__name__)
 
@@ -32,9 +33,9 @@ class SMSService:
         Returns:
             bool: True if message sent successfully, False if sending failed.
         """
-        # bind the method and recipient for better traceability in logs
-        log = self.logger.bind(method="send_sms", to=to)
-        log.info("attempting_to_send_sms", body=body)
+        # bind the method and masked recipient for better traceability in logs
+        log = self.logger.bind(method="send_sms", to=mask_phone(to))
+        log.info("attempting_to_send_sms", body_length=len(body))
         try:
             message = self.client.messages.create(  # type: ignore[no-untyped-call]
                 to=to,
@@ -87,8 +88,7 @@ class SMSService:
             )
         self.logger.info(
             "sending_reminder",
-            to=to,
-            worker_name=worker_name,
+            to=mask_phone(to),
             scheduled_date=scheduled_date,
         )
         return self.send_sms(to, body)
