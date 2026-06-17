@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { DayPicker } from 'react-day-picker'
+import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import 'react-day-picker/dist/style.css'
 
@@ -18,7 +19,9 @@ export default function SpecificDatesCalendar({ specificDates = [], onDateClick,
     // Find record for a given date click
     const handleDayClick = date => {
         if (!date || loading) return
-        const dateStr = date.toISOString().split('T')[0]
+        // Format from local date parts — toISOString() would convert to UTC and
+        // roll back a day in UTC-positive timezones.
+        const dateStr = format(date, 'yyyy-MM-dd')
         const existing = specificDates.find(r => r.specific_date === dateStr)
         onDateClick(dateStr, existing)
     }
@@ -59,7 +62,7 @@ export default function SpecificDatesCalendar({ specificDates = [], onDateClick,
                 <div className="space-y-2">
                     <p className="text-sm font-medium">Active date overrides</p>
                     <div className="space-y-1 max-h-48 overflow-y-auto">
-                        {specificDates
+                        {[...specificDates]
                             .sort((a, b) => a.specific_date.localeCompare(b.specific_date))
                             .map(record => (
                                 <div

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDepartmentDetail } from '@/hooks/useDepartmentDetail'
 import { useWorkers } from '@/hooks/useWorkers'
@@ -446,9 +446,8 @@ export default function DepartmentDetailPage() {
                                                     : '—'
 
                                             return (
-                                                <>
+                                                <Fragment key={subteam.id}>
                                                     <TableRow
-                                                        key={subteam.id}
                                                         className="cursor-pointer hover:bg-accent/50"
                                                         onClick={() => {
                                                             handleToggleSubteamExpansion(subteam.id)
@@ -676,7 +675,7 @@ export default function DepartmentDetailPage() {
                                                             </TableCell>
                                                         </TableRow>
                                                     )}
-                                                </>
+                                                </Fragment>
                                             )
                                         })}
                                     </TableBody>

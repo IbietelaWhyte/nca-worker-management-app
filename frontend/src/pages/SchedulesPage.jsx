@@ -162,7 +162,7 @@ export default function SchedulesPage() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    {schedules
+                                    {[...schedules]
                                         .sort((a, b) =>
                                             b.scheduled_date.localeCompare(a.scheduled_date)
                                         )
