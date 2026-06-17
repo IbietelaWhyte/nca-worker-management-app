@@ -377,6 +377,31 @@ class WorkerService:
             if not set(data.assistant_hod_departments) <= managed:
                 raise PermissionDeniedError("You can only assign assistant_hod for departments you manage")
 
+    def authorize_view_worker(self, token: TokenPayload, worker_id: UUID) -> None:
+        """Ensure the requesting user may read the given worker's record.
+
+        Admins may read any worker. HODs and assistant HODs may read workers in departments they
+        manage. A regular worker may read only their own record.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            worker_id: The worker being read.
+
+        Raises:
+            PermissionDeniedError: If the user is not allowed to view the worker.
+            BadRequestError/NotFoundError: If the actor's worker profile cannot be resolved.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
+            if self.can_manage_worker(actor.id, worker_id):
+                return
+            raise PermissionDeniedError("You can only view workers in departments you manage")
+        # Regular workers may only view their own record.
+        if worker_id != actor.id:
+            raise PermissionDeniedError("You can only view your own worker record")
+
     def authorize_create_assignment(self, token: TokenPayload, department_id: UUID) -> None:
         """Ensure the requesting user may assign a worker to the given department.
 
@@ -403,9 +428,9 @@ class WorkerService:
     ) -> list[WorkerResponse]:
         """List the workers visible to the requesting user, applying optional filters.
 
-        Admins and regular workers see all workers; HODs and assistant HODs see only workers in the
-        departments they manage. The ``active_only`` and ``search`` filters apply to either result.
-        ``limit``/``offset`` page the unfiltered admin/worker listing.
+        Admins see all workers; HODs and assistant HODs see only workers in the departments they
+        manage; a regular worker sees only their own record. The ``active_only`` and ``search``
+        filters apply to every result. ``limit``/``offset`` page the unfiltered admin listing.
 
         Args:
             token: The verified token payload of the requesting user.
@@ -417,25 +442,29 @@ class WorkerService:
         Returns:
             list[WorkerResponse]: The filtered, deduplicated workers visible to the user.
         """
-        if token.role not in (UserRole.HOD, UserRole.ASSISTANT_HOD):
-            # Admins and regular workers see everyone.
+        if token.role == UserRole.ADMIN:
+            # Admins see everyone.
             if search:
                 return self.search_workers(search)
             if active_only:
                 return self.get_active_workers()
             return self.get_all_workers(limit=limit, offset=offset)
 
-        # HOD / assistant HOD: only workers in departments they manage.
-        actor = self.get_worker_for_token(token)
-        managed_dept_ids = self.get_managed_department_ids(actor.id)
-        if not managed_dept_ids:
-            return []
+        if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
+            # HOD / assistant HOD: only workers in departments they manage.
+            actor = self.get_worker_for_token(token)
+            managed_dept_ids = self.get_managed_department_ids(actor.id)
+            if not managed_dept_ids:
+                return []
 
-        workers_by_id: dict[UUID, WorkerResponse] = {}
-        for dept_id in managed_dept_ids:
-            for worker in self.get_workers_by_department(dept_id):
-                workers_by_id[worker.id] = worker
-        workers = list(workers_by_id.values())
+            workers_by_id: dict[UUID, WorkerResponse] = {}
+            for dept_id in managed_dept_ids:
+                for worker in self.get_workers_by_department(dept_id):
+                    workers_by_id[worker.id] = worker
+            workers = list(workers_by_id.values())
+        else:
+            # Regular workers see only their own record.
+            workers = self._attach_roles([self.get_worker_for_token(token)])
 
         if search:
             needle = search.lower()

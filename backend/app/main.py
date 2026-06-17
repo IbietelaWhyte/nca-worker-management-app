@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from supabase import Client
@@ -139,22 +139,25 @@ async def health_check() -> dict[str, str]:
 
 
 @app.get("/health/db", tags=["health"])
-async def db_health_check(client: Client = Depends(get_supabase)) -> dict[str, str]:
+async def db_health_check(response: Response, client: Client = Depends(get_supabase)) -> dict[str, str]:
     """Database health check endpoint to verify database connectivity.
 
     Performs a simple query to the workers table to ensure the database
     connection is working properly.
 
     Args:
+        response: The outgoing response, used to set a 503 status when the DB is unreachable.
         client: Supabase client injected via dependency injection.
 
     Returns:
-        dict[str, str]: Status dictionary with 'ok' and 'connected' if healthy,
-                       or 'error' with error message if database is unreachable.
+        dict[str, str]: Status dictionary with 'ok'/'connected' if healthy, or 'error'/'unavailable'
+                       with a 503 status if the database is unreachable. The underlying error is
+                       logged, never returned to the caller.
     """
     try:
         client.table("workers").select("id").limit(1).execute()
         return {"status": "ok", "database": "connected"}
     except Exception as e:
         logger.error("db_health_check_failed", error=str(e))
-        return {"status": "error", "database": str(e)}
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"status": "error", "database": "unavailable"}

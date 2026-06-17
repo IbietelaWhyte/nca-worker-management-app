@@ -7,7 +7,7 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.schemas.models import TokenPayload
+from app.schemas.models import TokenPayload, UserRole
 
 bearer_scheme = HTTPBearer()
 logger = get_logger(__name__)
@@ -136,7 +136,7 @@ def require_admin(token: TokenPayload = Depends(verify_token)) -> TokenPayload:
     Raises:
         HTTPException: 403 Forbidden if user lacks admin role.
     """
-    if token.role != "admin":
+    if token.role != UserRole.ADMIN:
         log = logger.bind(method="require_admin", sub=token.sub)
         log.warning("Admin access required")
         raise HTTPException(
@@ -163,7 +163,7 @@ def require_hod(
     Raises:
         HTTPException: 403 Forbidden if user lacks required role.
     """
-    if token.role not in ("admin", "hod", "assistant_hod"):
+    if token.role not in (UserRole.ADMIN, UserRole.HOD, UserRole.ASSISTANT_HOD):
         log = logger.bind(method="require_hod", sub=token.sub)
         log.warning("HOD access required")
         raise HTTPException(
