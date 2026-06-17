@@ -185,12 +185,12 @@ class WorkerService:
         # Update assistant_hod department assignments if provided
         if new_assistant_hod_departments is not None:
             # Get current assistant_hod departments
-            current_dept_ids = set(self.department_repo.get_assistant_hod_departments(worker_id))
+            current_dept_ids = set(self.department_repo.get_assistant_hod_department_ids(worker_id))
             new_dept_ids = set(new_assistant_hod_departments)
 
             # Remove old assignments
-            for dept in current_dept_ids - new_dept_ids:
-                self.department_repo.remove_assistant_hod(worker_id, dept.id)
+            for dept_id in current_dept_ids - new_dept_ids:
+                self.department_repo.remove_assistant_hod(worker_id, dept_id)
 
             # Add new assignments
             for dept_id in new_dept_ids - current_dept_ids:
@@ -272,18 +272,11 @@ class WorkerService:
         """
         log = self.logger.bind(method="can_manage_worker", manager_id=str(manager_id), worker_id=str(worker_id))
 
-        # Get departments where this user is HOD
-        hod_departments = self.department_repo.get_departments_by_hod(manager_id)
+        # Collect the IDs of all departments this user oversees, as HOD or as assistant_hod
+        managed_dept_ids = {dept.id for dept in self.department_repo.get_departments_by_hod(manager_id)}
+        managed_dept_ids |= set(self.department_repo.get_assistant_hod_department_ids(manager_id))
 
-        # Get departments where this user is assistant_hod
-        assistant_hod_dept_ids = self.department_repo.get_assistant_hod_departments(manager_id)
-        assistant_hod_departments = [self.department_repo.get_by_id(dept.id) for dept in assistant_hod_dept_ids]
-        assistant_hod_departments = [d for d in assistant_hod_departments if d is not None]
-
-        # Combine all managed departments
-        all_managed_departments = hod_departments + assistant_hod_departments
-
-        if not all_managed_departments:
+        if not managed_dept_ids:
             log.info("manager_has_no_departments")
             return False
 
@@ -294,7 +287,6 @@ class WorkerService:
             return False
 
         # Check for overlap
-        managed_dept_ids = {dept.id for dept in all_managed_departments}  # type: ignore
         worker_dept_ids = {dept.id for dept in worker_departments}
         can_manage = bool(managed_dept_ids & worker_dept_ids)
 

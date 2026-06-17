@@ -242,12 +242,11 @@ def update_worker(
 
             # For assistant_hod departments, ensure they manage those departments
             if data.assistant_hod_departments is not None:
-                # Get departments this manager oversees
+                # Get departments this manager oversees (as HOD or assistant_hod)
                 hod_departments = department_service.get_departments_by_hod(manager_worker.id)
-                assistant_hod_dept_ids = department_service.department_repo.get_assistant_hod_departments(
-                    manager_worker.id
+                managed_dept_ids = {dept.id for dept in hod_departments} | set(
+                    department_service.get_assistant_hod_department_ids(manager_worker.id)
                 )
-                managed_dept_ids = {dept.id for dept in hod_departments} | set(assistant_hod_dept_ids)
 
                 for dept_id in data.assistant_hod_departments:
                     if dept_id not in managed_dept_ids:

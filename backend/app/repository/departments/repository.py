@@ -261,7 +261,10 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
 
     def get_assistant_hod_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
         """
-        Get all department IDs where the worker is an assistant HOD.
+        Get all departments where the worker is an assistant HOD.
+
+        Use this when full department objects are needed (e.g. returning them to the client).
+        When only the department identifiers are required, use get_assistant_hod_department_ids.
 
         Args:
             worker_id (UUID): The unique identifier of the worker.
@@ -285,6 +288,31 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         departments = self._to_model_list(rows)
         log.debug("fetched_assistant_hod_departments", count=len(departments))
         return departments
+
+    def get_assistant_hod_department_ids(self, worker_id: UUID) -> list[UUID]:
+        """
+        Get the IDs of all departments where the worker is an assistant HOD.
+
+        This is the identifier-only counterpart to get_assistant_hod_departments. It avoids
+        fetching full department rows when callers only need to compare or set department IDs.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+
+        Returns:
+            list[UUID]: List of department IDs where the worker is an assistant HOD.
+        """
+        log = self.logger.bind(method="get_assistant_hod_department_ids", worker_id=str(worker_id))
+        response = (
+            self.client.table(q.ASSISTANT_HOD_JUNCTION_TABLE)
+            .select("department_id")
+            .eq("worker_id", str(worker_id))
+            .execute()
+        )
+        rows: list[dict[str, Any]] = response.data or []  # type: ignore[assignment]
+        department_ids = [UUID(row["department_id"]) for row in rows]
+        log.debug("fetched_assistant_hod_department_ids", count=len(department_ids))
+        return department_ids
 
     def get_department_assistant_hods(self, department_id: UUID) -> list[UUID]:
         """
