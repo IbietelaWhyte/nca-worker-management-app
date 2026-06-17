@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.subteams.repository import SubteamRepository
@@ -36,7 +37,7 @@ class SubteamService:
         subteam = self.subteam_repo.get_by_id(subteam_id)
         if not subteam:
             log.warning("subteam_not_found")
-            raise ValueError(f"subteam {subteam_id} not found")
+            raise NotFoundError(f"subteam {subteam_id} not found")
         return subteam
 
     def get_all_subteams(self) -> list[SubteamResponse]:
@@ -68,7 +69,7 @@ class SubteamService:
         subteam_exists = self.subteam_repo.get_by_id(subteam_id)
         if not subteam_exists:
             log.warning("subteam_not_found")
-            raise ValueError(f"subteam {subteam_id} not found")
+            raise NotFoundError(f"subteam {subteam_id} not found")
 
         # Then get workers (can be empty list if no workers assigned)
         workers = self.subteam_repo.get_with_workers(subteam_id)
@@ -92,7 +93,7 @@ class SubteamService:
         existing = self.subteam_repo.get_by_name(data.name)
         if existing:
             log.warning("subteam_already_exists")
-            raise ValueError(f"subteam '{data.name}' already exists")
+            raise ConflictError(f"subteam '{data.name}' already exists")
         subteam = self.subteam_repo.create(data.model_dump(mode="json"))
         log = self.logger.bind(method="create_subteam", subteam_id=str(subteam.id), name=data.name)
         log.info("subteam_created")
@@ -118,7 +119,7 @@ class SubteamService:
         updated = self.subteam_repo.update(subteam_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("subteam_update_failed")
-            raise ValueError(f"Failed to update subteam {subteam_id}")
+            raise AppError(f"Failed to update subteam {subteam_id}")
         log.info("subteam_updated")
         return updated
 
@@ -160,7 +161,7 @@ class SubteamService:
 
         if not is_in_department:
             log.warning("worker_not_in_parent_department", department_id=str(subteam.department_id))
-            raise ValueError(f"Worker {worker_id} is not assigned to department {subteam.department_id}")
+            raise BadRequestError(f"Worker {worker_id} is not assigned to department {subteam.department_id}")
 
         self.subteam_repo.assign_worker(subteam_id, worker_id)
         log.info("worker_assigned_to_subteam")
@@ -200,7 +201,7 @@ class SubteamService:
         updated = self.subteam_repo.update(subteam_id, {"hod_id": str(worker_id)})
         if not updated:
             log.error("set_hod_failed")
-            raise ValueError(f"Failed to set HOD for subteam {subteam_id}")
+            raise AppError(f"Failed to set HOD for subteam {subteam_id}")
         log.info("hod_assigned")
         return updated
 

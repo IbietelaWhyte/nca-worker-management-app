@@ -1,6 +1,7 @@
 from datetime import date
 from uuid import UUID
 
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.availabilities.repository import AvailabilityRepository
 from app.repository.departments.repository import DepartmentRepository
@@ -43,7 +44,7 @@ class ScheduleService:
         schedule = self.schedule_repo.get_with_assignments(schedule_id)
         if not schedule:
             log.warning("schedule_not_found")
-            raise ValueError(f"Schedule {schedule_id} not found")
+            raise NotFoundError(f"Schedule {schedule_id} not found")
         return schedule
 
     def get_schedules_by_department(self, department_id: UUID) -> list[ScheduleResponse]:
@@ -81,7 +82,7 @@ class ScheduleService:
         )
         if existing_schedule:
             scope_description = "subteam" if existing_schedule.subteam_id else "department"
-            raise ValueError(
+            raise ConflictError(
                 f"A schedule already exists for this {scope_description} on {data.scheduled_date.isoformat()}. "
                 f"Please edit or delete the existing schedule (ID: {existing_schedule.id}) instead."
             )
@@ -89,7 +90,7 @@ class ScheduleService:
         # 1. Resolve workers needed based on scope
         department = self.department_repo.get_by_id(data.department_id)
         if not department:
-            raise ValueError(f"Department {data.department_id} not found")
+            raise NotFoundError(f"Department {data.department_id} not found")
 
         if data.scope == ScopeType.SUBTEAM:
             # Get the subteam and its workers_per_slot
@@ -97,7 +98,7 @@ class ScheduleService:
             assert data.subteam_id is not None
             subteam = self.subteam_repo.get_by_id(data.subteam_id)
             if not subteam:
-                raise ValueError(f"Subteam {data.subteam_id} not found")
+                raise NotFoundError(f"Subteam {data.subteam_id} not found")
             workers_needed = subteam.workers_per_slot if subteam.workers_per_slot else department.workers_per_slot
             log.info("workers_needed_from_subteam", count=workers_needed)
         elif data.scope == ScopeType.DEPARTMENT_ONLY:
@@ -138,7 +139,7 @@ class ScheduleService:
                 ScopeType.DEPARTMENT_ONLY: "department (department-only workers)",
                 ScopeType.DEPARTMENT_ALL: "department",
             }
-            raise ValueError(f"No workers found for this {scope_msg.get(data.scope, 'scope')}")
+            raise BadRequestError(f"No workers found for this {scope_msg.get(data.scope, 'scope')}")
 
         # 3. Filter by availability — day_of_week in DB is 0=Sunday, Python is 0=Monday
         day_of_week = data.scheduled_date.weekday()
@@ -162,12 +163,12 @@ class ScheduleService:
 
         if not available_workers:
             if already_scheduled_worker_ids:
-                raise ValueError(
+                raise BadRequestError(
                     f"No available workers found for {data.scheduled_date}. "
                     f"{len(already_scheduled_worker_ids)} worker(s) already scheduled on this date."
                 )
             else:
-                raise ValueError(f"No available workers found for {data.scheduled_date}")
+                raise BadRequestError(f"No available workers found for {data.scheduled_date}")
 
         # 5. Sort by round-robin fairness (scoped to department/subteam)
         available_workers = self._sort_by_round_robin(
@@ -196,7 +197,7 @@ class ScheduleService:
         # get the created_by user
         created_by_user = self.worker_repo.get_by_email(created_by)
         if not created_by_user:
-            raise ValueError(f"User with email {created_by} not found")
+            raise NotFoundError(f"User with email {created_by} not found")
 
         # Set subteam_id based on scope: only SUBTEAM scope has subteam_id, others are None
         schedule_subteam_id = str(data.subteam_id) if data.scope == ScopeType.SUBTEAM else None
@@ -249,7 +250,7 @@ class ScheduleService:
         updated = self.schedule_repo.update_assignment_status(assignment_id, status)
         if not updated:
             log.warning("assignment_not_found", assignment_id=str(assignment_id))
-            raise ValueError(f"Assignment {assignment_id} not found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
         log.info(
             "assignment_status_updated",
             assignment_id=str(assignment_id),

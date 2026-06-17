@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.models import DayOfWeek
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_availability
@@ -47,7 +48,7 @@ class TestSetAvailability:
         assert response.status_code == 201
 
     def test_returns_400_on_invalid_data(self, mock_availability_service):
-        mock_availability_service.set_availability.side_effect = ValueError("invalid")
+        mock_availability_service.set_availability.side_effect = BadRequestError("invalid")
         client = make_client(availability_service=mock_availability_service)
 
         # Missing day_of_week for recurring type
@@ -76,7 +77,7 @@ class TestUpdateAvailability:
         assert response.json()["is_available"] is False
 
     def test_returns_404_when_not_found(self, mock_availability_service):
-        mock_availability_service.update_availability.side_effect = ValueError("not found")
+        mock_availability_service.update_availability.side_effect = NotFoundError("not found")
         client = make_client(availability_service=mock_availability_service)
 
         response = client.patch(

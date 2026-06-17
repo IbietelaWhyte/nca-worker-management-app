@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from app.core.config import settings
+from app.core.exceptions import BadRequestError, GoneError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
 from app.repository.schedules.repository import ScheduleRepository
@@ -96,7 +97,7 @@ class ConfirmationTokenService:
         token = self.token_repo.get_by_token(token_id)
         if not token:
             log.warning("confirmation_token_not_found")
-            raise ValueError("Token not found")
+            raise NotFoundError("Token not found")
 
         now = datetime.now(timezone.utc)
         expires_at = token.expires_at
@@ -109,14 +110,14 @@ class ConfirmationTokenService:
         assignment = self.schedule_repo.get_assignment_by_id(token.assignment_id)
         if not assignment:
             log.warning("confirmation_token_assignment_not_found", assignment_id=str(token.assignment_id))
-            raise ValueError("Assignment not found")
+            raise NotFoundError("Assignment not found")
 
         schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
         worker = self.worker_repo.get_by_id(token.worker_id)
 
         if not schedule or not worker:
             log.warning("confirmation_token_missing_schedule_or_worker")
-            raise ValueError("Schedule or worker data not found")
+            raise NotFoundError("Schedule or worker data not found")
 
         return ConfirmationDetailsResponse(
             worker_name=f"{worker.first_name} {worker.last_name}".strip(),
@@ -145,16 +146,16 @@ class ConfirmationTokenService:
         log = self.logger.bind(method="confirm", token_id=str(token_id), action=action)
 
         if action not in ("confirmed", "declined"):
-            raise ValueError("Action must be 'confirmed' or 'declined'")
+            raise BadRequestError("Action must be 'confirmed' or 'declined'")
 
         token = self.token_repo.get_by_token(token_id)
         if not token:
             log.warning("confirmation_token_not_found")
-            raise ValueError("Token not found")
+            raise NotFoundError("Token not found")
 
         if token.used_at is not None:
             log.warning("confirmation_token_already_used")
-            raise ValueError("This link has already been used")
+            raise GoneError("This link has already been used")
 
         now = datetime.now(timezone.utc)
         expires_at = token.expires_at
@@ -163,11 +164,11 @@ class ConfirmationTokenService:
 
         if expires_at <= now:
             log.warning("confirmation_token_expired")
-            raise ValueError("This link has expired")
+            raise GoneError("This link has expired")
 
         updated = self.schedule_repo.update_assignment_status(token.assignment_id, AssignmentStatus(action))
         if not updated:
-            raise ValueError(f"Assignment {token.assignment_id} not found")
+            raise NotFoundError(f"Assignment {token.assignment_id} not found")
 
         self.token_repo.mark_used(token_id)
         log.info("assignment_status_updated", assignment_id=str(token.assignment_id), action=action)

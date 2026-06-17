@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 
 from app.core.dependencies import get_confirmation_token_service
 from app.schemas.confirmation_tokens.models import ConfirmationDetailsResponse
@@ -24,13 +24,7 @@ def get_confirmation_details(
     token: UUID,
     service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> ConfirmationDetailsResponse:
-    try:
-        return service.get_confirmation_details(token)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(e),
-        )
+    return service.get_confirmation_details(token)
 
 
 @router.post(
@@ -48,16 +42,4 @@ def submit_confirmation(
     action: str,
     service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> AssignmentResponse:
-    try:
-        return service.confirm(token, action)
-    except ValueError as e:
-        error = str(e)
-        if "already been used" in error or "expired" in error or "not found" in error.lower():
-            raise HTTPException(
-                status_code=status.HTTP_410_GONE,
-                detail=error,
-            )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error,
-        )
+    return service.confirm(token, action)

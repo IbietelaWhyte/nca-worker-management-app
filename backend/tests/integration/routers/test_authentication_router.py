@@ -1,3 +1,4 @@
+from app.core.exceptions import AppError, ConflictError
 from app.schemas.authentication.models import RegisterResponse
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
@@ -25,7 +26,7 @@ class TestRegisterWorker:
         assert response.json()["email"] == "john.doe@example.com"
 
     def test_returns_409_on_duplicate_email(self, mock_authentication_service):
-        mock_authentication_service.register_worker.side_effect = ValueError(
+        mock_authentication_service.register_worker.side_effect = ConflictError(
             "Email john.doe@example.com is already registered"
         )
         client = make_client(UserRole.ADMIN, authentication_service=mock_authentication_service)
@@ -33,12 +34,13 @@ class TestRegisterWorker:
         response = client.post("/api/v1/authentication/register", json=VALID_PAYLOAD)
         assert response.status_code == 409
 
-    def test_returns_400_on_other_failure(self, mock_authentication_service):
-        mock_authentication_service.register_worker.side_effect = ValueError("Failed to create worker record")
+    def test_returns_500_on_other_failure(self, mock_authentication_service):
+        # A non-conflict failure (e.g. the Supabase call failing) is an unexpected server error.
+        mock_authentication_service.register_worker.side_effect = AppError("Failed to create worker record")
         client = make_client(UserRole.ADMIN, authentication_service=mock_authentication_service)
 
         response = client.post("/api/v1/authentication/register", json=VALID_PAYLOAD)
-        assert response.status_code == 400
+        assert response.status_code == 500
 
     def test_returns_403_for_non_admin(self, mock_authentication_service):
         client = make_client(UserRole.WORKER, authentication_service=mock_authentication_service)

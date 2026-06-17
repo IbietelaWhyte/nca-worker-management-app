@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -39,38 +39,15 @@ def list_departments(
         worker_service: Worker service dependency.
 
     Returns:
-        list[DepartmentResponse]: List of departments (all for admin, filtered for HOD or Assistant HOD).
-
-    Raises:
-        HTTPException: 404 if HOD's worker profile not found.
+        list[DepartmentResponse]: All departments for admin/worker, managed-only for HOD/Assistant HOD.
     """
-    # Admin sees all departments
-    if current_user.role == "admin":
-        return service.get_all_departments()
-
-    # HOD or Assistant HOD sees only their departments
+    # HOD or Assistant HOD sees only their departments; admins and regular workers see all.
     if current_user.role == "hod" or current_user.role == "assistant_hod":
-        # Get worker record from email in JWT token
-        if not current_user.email:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email not found in authentication token",
-            )
-        worker = worker_service.worker_repo.get_by_email(current_user.email)
-        if not worker:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Worker profile not found for authenticated user",
-            )
-
-        # Get departments where this worker is HOD
+        worker = worker_service.get_worker_for_token(current_user)
         if current_user.role == "hod":
-            hod_departments = service.get_departments_by_hod(worker.id)
-        else:  # assistant_hod
-            hod_departments = service.get_assistant_hod_departments(worker.id)
-        return hod_departments
+            return service.get_departments_by_hod(worker.id)
+        return service.get_assistant_hod_departments(worker.id)
 
-    # Regular workers see all departments (for assignment purposes)
     return service.get_all_departments()
 
 
@@ -89,14 +66,8 @@ def get_department(
 
     Returns:
         DepartmentResponse: The department data.
-
-    Raises:
-        HTTPException: 404 if department not found.
     """
-    try:
-        return service.get_department(department_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.get_department(department_id)
 
 
 @router.get("/{department_id}/workers", response_model=DepartmentWithWorkersResponse)
@@ -114,14 +85,8 @@ def get_department_with_workers(
 
     Returns:
         DepartmentWithWorkersResponse: Department with worker details.
-
-    Raises:
-        HTTPException: 404 if department not found.
     """
-    try:
-        return service.get_department_with_workers(department_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.get_department_with_workers(department_id)
 
 
 @router.post("", response_model=DepartmentResponse, status_code=status.HTTP_201_CREATED)
@@ -139,14 +104,8 @@ def create_department(
 
     Returns:
         DepartmentResponse: The newly created department.
-
-    Raises:
-        HTTPException: 409 if department with same name already exists.
     """
-    try:
-        return service.create_department(data)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return service.create_department(data)
 
 
 @router.patch("/{department_id}", response_model=DepartmentResponse)
@@ -166,14 +125,8 @@ def update_department(
 
     Returns:
         DepartmentResponse: The updated department data.
-
-    Raises:
-        HTTPException: 404 if department not found.
     """
-    try:
-        return service.update_department(department_id, data)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.update_department(department_id, data)
 
 
 @router.delete("/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -188,14 +141,8 @@ def delete_department(
         department_id: Unique identifier of the department to delete.
         _: Admin user token required.
         service: Department service dependency.
-
-    Raises:
-        HTTPException: 404 if department not found.
     """
-    try:
-        service.delete_department(department_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.delete_department(department_id)
 
 
 @router.post("/{department_id}/workers/{worker_id}", response_model=MessageResponse)
@@ -205,11 +152,8 @@ def assign_worker(
     _: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
 ) -> MessageResponse:
-    try:
-        service.assign_worker(department_id, worker_id)
-        return MessageResponse(message="Worker assigned successfully")
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.assign_worker(department_id, worker_id)
+    return MessageResponse(message="Worker assigned successfully")
 
 
 @router.delete(
@@ -222,10 +166,7 @@ def unassign_worker(
     _: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
 ) -> None:
-    try:
-        service.unassign_worker(department_id, worker_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.unassign_worker(department_id, worker_id)
 
 
 @router.patch("/{department_id}/hod/{worker_id}", response_model=DepartmentResponse)
@@ -235,10 +176,7 @@ def set_hod(
     _: TokenPayload = AdminUser,
     service: DepartmentService = Depends(get_department_service),
 ) -> DepartmentResponse:
-    try:
-        return service.set_hod(department_id, worker_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.set_hod(department_id, worker_id)
 
 
 @router.get("/{department_id}/subteams", response_model=list[SubteamResponse])

@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.core.exceptions import ConflictError, NotFoundError
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_department, make_subteam
@@ -42,7 +43,7 @@ class TestGetDepartment:
         assert response.json()["name"] == dept.name
 
     def test_returns_404_when_not_found(self, mock_department_service):
-        mock_department_service.get_department.side_effect = ValueError("not found")
+        mock_department_service.get_department.side_effect = NotFoundError("not found")
         client = make_client(department_service=mock_department_service)
 
         response = client.get(f"/api/v1/departments/{uuid4()}")
@@ -60,7 +61,7 @@ class TestCreateDepartment:
         assert response.json()["name"] == "Choir"
 
     def test_returns_409_on_duplicate_name(self, mock_department_service):
-        mock_department_service.create_department.side_effect = ValueError("already exists")
+        mock_department_service.create_department.side_effect = ConflictError("already exists")
         client = make_client(role=UserRole.ADMIN, department_service=mock_department_service)
 
         response = client.post("/api/v1/departments", json={"name": "Choir"})

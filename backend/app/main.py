@@ -1,12 +1,14 @@
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from supabase import Client
 
 from app.core.authentication import get_jwks
 from app.core.config import settings
+from app.core.exceptions import AppError
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.supabase import get_supabase
@@ -94,6 +96,36 @@ app.include_router(availabilities.router, prefix="/api/v1")
 app.include_router(subteams.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(confirmation_tokens.router, prefix="/api/v1")
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    """Map a domain AppError to its associated HTTP status code and a JSON detail body.
+
+    Args:
+        request: The incoming request (unused, required by the handler signature).
+        exc: The raised domain error carrying its status_code and detail.
+
+    Returns:
+        JSONResponse: A response with the error's status code and ``{"detail": ...}`` body.
+    """
+    logger.info("app_error", status_code=exc.status_code, detail=exc.detail)
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler so unexpected errors return a generic 500 without leaking internals.
+
+    Args:
+        request: The incoming request (unused, required by the handler signature).
+        exc: The unhandled exception.
+
+    Returns:
+        JSONResponse: A generic 500 response. The exception detail is logged, not returned.
+    """
+    logger.error("unhandled_exception", error=str(exc), error_type=type(exc).__name__)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 @app.get("/health", tags=["health"])

@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import ScheduleCreate
 from app.service.schedules.service import ScheduleService
@@ -55,7 +56,7 @@ class TestGetSchedule:
 
     def test_raises_when_not_found(self, service, mock_schedule_repo):
         mock_schedule_repo.get_with_assignments.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.get_schedule(uuid4())
 
 
@@ -103,7 +104,7 @@ class TestGenerateSchedule:
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = []
 
-        with pytest.raises(ValueError, match="No workers found"):
+        with pytest.raises(BadRequestError, match="No workers found"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
 
     def test_raises_when_no_available_workers(
@@ -124,7 +125,7 @@ class TestGenerateSchedule:
         mock_worker_repo.get_department_only_workers.return_value = workers
         mock_availability_repo.get_by_worker_and_type.return_value = unavailable
 
-        with pytest.raises(ValueError, match="No available workers"):
+        with pytest.raises(BadRequestError, match="No available workers"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
 
     def test_specific_date_overrides_recurring(
@@ -147,7 +148,7 @@ class TestGenerateSchedule:
         # Specific date override returns unavailable — recurring should be ignored
         mock_availability_repo.get_by_worker_and_type.return_value = specific_unavailable
 
-        with pytest.raises(ValueError, match="No available workers"):
+        with pytest.raises(BadRequestError, match="No available workers"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
         # Verify recurring availability was never checked
         mock_availability_repo.get_by_worker_and_day.assert_not_called()
@@ -155,7 +156,7 @@ class TestGenerateSchedule:
     def test_raises_when_department_not_found(self, service, mock_schedule_repo, mock_department_repo):
         mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.generate_schedule(make_generate_request(), created_by=uuid4())
 
 
@@ -215,5 +216,5 @@ class TestUpdateAssignmentStatus:
 
     def test_raises_when_not_found(self, service, mock_schedule_repo):
         mock_schedule_repo.update_assignment_status.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.update_assignment_status(uuid4(), AssignmentStatus.CONFIRMED)

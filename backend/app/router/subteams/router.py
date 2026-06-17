@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -26,10 +26,7 @@ def get_subteam(
     _: TokenPayload = CurrentUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> SubteamResponse:
-    try:
-        return service.get_subteam(subteam_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.get_subteam(subteam_id)
 
 
 @router.get("/{subteam_id}/workers", response_model=list[SubteamWithWorkersResponse])
@@ -39,10 +36,7 @@ def get_subteam_with_workers(
     service: SubteamService = Depends(get_subteam_service),
 ) -> list[SubteamWithWorkersResponse]:
     """Get subteam with all assigned workers."""
-    try:
-        return service.get_subteam_with_workers(subteam_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.get_subteam_with_workers(subteam_id)
 
 
 @router.post("", response_model=SubteamResponse, status_code=status.HTTP_201_CREATED)
@@ -51,10 +45,7 @@ def create_subteam(
     _: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> SubteamResponse:
-    try:
-        return service.create_subteam(data)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return service.create_subteam(data)
 
 
 @router.patch("/{subteam_id}", response_model=SubteamResponse)
@@ -64,10 +55,7 @@ def update_subteam(
     _: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> SubteamResponse:
-    try:
-        return service.update_subteam(subteam_id, data)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.update_subteam(subteam_id, data)
 
 
 @router.delete("/{subteam_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -76,10 +64,7 @@ def delete_subteam(
     _: TokenPayload = AdminUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> None:
-    try:
-        service.delete_subteam(subteam_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.delete_subteam(subteam_id)
 
 
 @router.post("/{subteam_id}/workers/{worker_id}", response_model=MessageResponse)
@@ -93,11 +78,8 @@ def assign_worker_to_subteam(
 
     Requires the worker to already be assigned to the subteam's parent department.
     """
-    try:
-        service.assign_worker(subteam_id, worker_id)
-        return MessageResponse(message="Worker assigned to subteam successfully")
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.assign_worker(subteam_id, worker_id)
+    return MessageResponse(message="Worker assigned to subteam successfully")
 
 
 @router.delete(
@@ -111,7 +93,4 @@ def unassign_worker_from_subteam(
     service: SubteamService = Depends(get_subteam_service),
 ) -> None:
     """Remove a worker's assignment from a subteam."""
-    try:
-        service.unassign_worker(subteam_id, worker_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.unassign_worker(subteam_id, worker_id)
