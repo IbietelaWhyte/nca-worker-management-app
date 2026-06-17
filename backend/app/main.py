@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from supabase import Client
 
 from app.core.authentication import get_jwks
+from app.core.concurrency import configure_thread_pool
 from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import get_logger, setup_logging
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         None: Control is yielded back to the application to handle requests.
     """
     logger.info("app_starting", env=settings.app_env)
+    configure_thread_pool()
     reminder_service = create_reminder_service()
     reminder_service.start()
     await get_jwks()
