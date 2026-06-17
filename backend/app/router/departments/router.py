@@ -16,7 +16,7 @@ from app.schemas.departments.models import (
     DepartmentUpdate,
     DepartmentWithWorkersResponse,
 )
-from app.schemas.models import MessageResponse, TokenPayload
+from app.schemas.models import MessageResponse, TokenPayload, UserRole
 from app.schemas.subteams.models import SubteamResponse
 from app.service.departments.service import DepartmentService
 from app.service.subteams.service import SubteamService
@@ -46,9 +46,9 @@ def list_departments(
         list[DepartmentResponse]: All departments for admin/worker, managed-only for HOD/Assistant HOD.
     """
     # HOD or Assistant HOD sees only their departments; admins and regular workers see all.
-    if current_user.role == "hod" or current_user.role == "assistant_hod":
+    if current_user.role == UserRole.HOD or current_user.role == UserRole.ASSISTANT_HOD:
         worker = worker_service.get_worker_for_token(current_user)
-        if current_user.role == "hod":
+        if current_user.role == UserRole.HOD:
             return service.get_departments_by_hod(worker.id)
         return service.get_assistant_hod_departments(worker.id)
 

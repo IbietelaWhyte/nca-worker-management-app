@@ -313,6 +313,43 @@ class TestListVisibleWorkers:
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
         assert service.list_visible_workers(_token(role=UserRole.HOD)) == []
 
+    def test_worker_sees_only_self(self, service, mock_worker_repo):
+        me = make_worker()
+        mock_worker_repo.get_by_email.return_value = me
+        mock_worker_repo.get_roles_for_workers.return_value = {me.id: [UserRole.WORKER]}
+
+        result = service.list_visible_workers(_token(role=UserRole.WORKER))
+
+        assert [w.id for w in result] == [me.id]
+        # A regular worker never enumerates the full table.
+        mock_worker_repo.get_all.assert_not_called()
+        mock_worker_repo.search.assert_not_called()
+
+
+class TestAuthorizeViewWorker:
+    def test_admin_bypasses_lookup(self, service, mock_worker_repo):
+        service.authorize_view_worker(_token(role=UserRole.ADMIN), uuid4())  # no raise
+        mock_worker_repo.get_by_email.assert_not_called()
+
+    def test_manager_allowed_for_managed_worker(self, service, mock_worker_repo, mock_department_repo):
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        service.authorize_view_worker(_token(role=UserRole.HOD), uuid4())  # no raise
+
+    def test_manager_denied_for_unmanaged_worker(self, service, mock_worker_repo, mock_department_repo):
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=False)
+        with pytest.raises(PermissionDeniedError, match="departments you manage"):
+            service.authorize_view_worker(_token(role=UserRole.HOD), uuid4())
+
+    def test_worker_allowed_for_own_record(self, service, mock_worker_repo):
+        me = make_worker()
+        mock_worker_repo.get_by_email.return_value = me
+        service.authorize_view_worker(_token(role=UserRole.WORKER), me.id)  # no raise
+
+    def test_worker_denied_for_other_record(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        with pytest.raises(PermissionDeniedError, match="your own worker record"):
+            service.authorize_view_worker(_token(role=UserRole.WORKER), uuid4())
+
 
 class TestUpdateWorkerRoles:
     def test_update_worker_replaces_roles_atomically(self, service, mock_worker_repo):

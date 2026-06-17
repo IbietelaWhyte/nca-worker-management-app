@@ -75,6 +75,14 @@ class TestGetWorker:
         response = client.get(f"/api/v1/workers/{uuid4()}")
         assert response.status_code == 404
 
+    def test_returns_403_when_not_authorized_to_view(self, mock_worker_service):
+        mock_worker_service.authorize_view_worker.side_effect = PermissionDeniedError("nope")
+        client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)
+
+        response = client.get(f"/api/v1/workers/{uuid4()}")
+        assert response.status_code == 403
+        mock_worker_service.get_worker.assert_not_called()
+
 
 class TestCreateWorker:
     def test_returns_201_when_created(self, mock_worker_service):

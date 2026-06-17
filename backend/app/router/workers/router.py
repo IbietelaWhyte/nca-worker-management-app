@@ -47,19 +47,20 @@ def list_workers(
 @router.get("/{worker_id}", response_model=WorkerResponse)
 def get_worker(
     worker_id: UUID,
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = CurrentUser,
     service: WorkerService = Depends(get_worker_service),
 ) -> WorkerResponse:
-    """Retrieve a specific worker by ID.
+    """Retrieve a specific worker by ID (admin, managing HOD/Assistant HOD, or the worker themselves).
 
     Args:
         worker_id: Unique identifier of the worker.
-        _: Current authenticated user token.
+        current_user: Current authenticated user token.
         service: Worker service dependency.
 
     Returns:
         WorkerResponse: The worker data.
     """
+    service.authorize_view_worker(current_user, worker_id)
     return service.get_worker(worker_id)
 
 
@@ -139,17 +140,18 @@ def deactivate_worker(
 @router.get("/{worker_id}/departments", response_model=list[DepartmentResponse])
 def get_worker_departments(
     worker_id: UUID,
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = CurrentUser,
     service: WorkerService = Depends(get_worker_service),
 ) -> list[DepartmentResponse]:
-    """Retrieve all departments a worker is assigned to.
+    """Retrieve all departments a worker is assigned to (admin, managing HOD/Assistant HOD, or self).
 
     Args:
         worker_id: Unique identifier of the worker.
-        _: Current authenticated user token.
+        current_user: Current authenticated user token.
         service: Worker service dependency.
 
     Returns:
         list[DepartmentResponse]: List of departments the worker belongs to.
     """
+    service.authorize_view_worker(current_user, worker_id)
     return service.get_worker_departments(worker_id)
