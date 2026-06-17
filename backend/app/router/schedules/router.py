@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
     CurrentUser,
@@ -8,6 +8,7 @@ from app.core.dependencies import (
     get_reminder_service,
     get_schedule_service,
 )
+from app.core.exceptions import AppError, BadRequestError
 from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
@@ -35,10 +36,7 @@ def get_schedule(
     _: TokenPayload = CurrentUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> ScheduleResponse:
-    try:
-        return service.get_schedule(schedule_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.get_schedule(schedule_id)
 
 
 @router.post(
@@ -55,17 +53,12 @@ def generate_schedule(
     Generates a schedule for a single event using round-robin assignment.
     Requires HOD or admin role.
     """
-    try:
-        if token.email is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="User email is required to create schedule"
-            )
-        schedule = service.generate_schedule(data, created_by=token.email)
-        if schedule is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to generate schedule")
-        return schedule
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    if token.email is None:
+        raise BadRequestError("User email is required to create schedule")
+    schedule = service.generate_schedule(data, created_by=token.email)
+    if schedule is None:
+        raise AppError("Failed to generate schedule")
+    return schedule
 
 
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -74,10 +67,7 @@ def delete_schedule(
     _: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> None:
-    try:
-        service.delete_schedule(schedule_id)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    service.delete_schedule(schedule_id)
 
 
 @router.get("/workers/{worker_id}/assignments", response_model=list[AssignmentResponse])
@@ -100,10 +90,7 @@ def update_assignment_status(
     service: ScheduleService = Depends(get_schedule_service),
 ) -> AssignmentResponse:
     """Workers can confirm or decline their own assignments."""
-    try:
-        return service.update_assignment_status(assignment_id, status_update)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    return service.update_assignment_status(assignment_id, status_update)
 
 
 @router.post("/reminders/trigger", response_model=MessageResponse)

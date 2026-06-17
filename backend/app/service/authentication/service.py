@@ -3,6 +3,7 @@ from uuid import UUID
 from supabase import Client
 from supabase_auth.errors import AuthApiError
 
+from app.core.exceptions import AppError, ConflictError
 from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
@@ -56,7 +57,7 @@ class AuthenticationService:
                 error=str(e),
             )
             self._cleanup_auth_user(auth_user_id)
-            raise ValueError(f"Failed to create worker record: {e}") from e
+            raise AppError(f"Failed to create worker record: {e}") from e
 
         logger.info(
             "worker_registration_completed",
@@ -88,8 +89,8 @@ class AuthenticationService:
         except AuthApiError as e:
             logger.warning("auth_user_creation_failed", email=data.email, error=str(e))
             if "already registered" in str(e).lower():
-                raise ValueError(f"Email {data.email} is already registered") from e
-            raise ValueError(f"Failed to create auth user: {e}") from e
+                raise ConflictError(f"Email {data.email} is already registered") from e
+            raise AppError(f"Failed to create auth user: {e}") from e
 
     def _create_worker_record(self, auth_user_id: UUID, data: RegisterRequest) -> WorkerResponse:
         """Inserts a row into the workers table linked to the auth user."""

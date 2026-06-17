@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.models import AssignmentStatus, UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_assignment, make_schedule
@@ -27,7 +28,7 @@ class TestGetSchedule:
         assert response.status_code == 200
 
     def test_returns_404_when_not_found(self, mock_schedule_service):
-        mock_schedule_service.get_schedule.side_effect = ValueError("not found")
+        mock_schedule_service.get_schedule.side_effect = NotFoundError("not found")
         client = make_client(schedule_service=mock_schedule_service)
 
         response = client.get(f"/api/v1/schedules/{uuid4()}")
@@ -58,7 +59,7 @@ class TestGenerateSchedule:
         assert response.status_code == 201
 
     def test_returns_400_when_no_available_workers(self, mock_schedule_service):
-        mock_schedule_service.generate_schedule.side_effect = ValueError("No available workers")
+        mock_schedule_service.generate_schedule.side_effect = BadRequestError("No available workers")
         client = make_client(
             role=UserRole.HOD,
             schedule_service=mock_schedule_service,
@@ -98,8 +99,8 @@ class TestGenerateSchedule:
         )
         assert response.status_code == 403
 
-    def test_returns_400_when_duplicate_schedule_exists(self, mock_schedule_service):
-        mock_schedule_service.generate_schedule.side_effect = ValueError(
+    def test_returns_409_when_duplicate_schedule_exists(self, mock_schedule_service):
+        mock_schedule_service.generate_schedule.side_effect = ConflictError(
             "A schedule already exists for this department on 2026-03-15"
         )
         client = make_client(
@@ -119,7 +120,7 @@ class TestGenerateSchedule:
                 "reminder_days_before": 1,
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert "already exists" in response.json()["detail"]
 
 
@@ -136,7 +137,7 @@ class TestUpdateAssignmentStatus:
         assert response.json()["status"] == "confirmed"
 
     def test_returns_404_when_assignment_not_found(self, mock_schedule_service):
-        mock_schedule_service.update_assignment_status.side_effect = ValueError("not found")
+        mock_schedule_service.update_assignment_status.side_effect = NotFoundError("not found")
         client = make_client(schedule_service=mock_schedule_service)
 
         response = client.patch(

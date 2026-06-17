@@ -1,9 +1,11 @@
 from uuid import UUID
 
+from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
+from app.schemas.models import TokenPayload, UserRole
 from app.schemas.workers.models import WorkerCreate, WorkerResponse, WorkerUpdate
 
 logger = get_logger(__name__)
@@ -44,7 +46,7 @@ class WorkerService:
         worker = self.worker_repo.get_by_id(worker_id)
         if not worker:
             log.warning("worker_not_found")
-            raise ValueError(f"Worker {worker_id} not found")
+            raise NotFoundError(f"Worker {worker_id} not found")
 
         # Load roles for the worker
         worker.roles = self.worker_repo.get_worker_roles(worker_id)
@@ -125,10 +127,10 @@ class WorkerService:
             existing = self.worker_repo.get_by_phone(data.phone)
         else:
             log.error("missing_contact_info")
-            raise ValueError("Either email or phone number must be provided")
+            raise BadRequestError("Either email or phone number must be provided")
         if existing:
             log.warning("worker_already_exists")
-            raise ValueError(f"Worker with email {data.email} already exists")
+            raise ConflictError(f"Worker with email {data.email} already exists")
         worker = self.worker_repo.create(data.model_dump())
         log.info("worker_created", worker_id=str(worker.id))
         return worker
@@ -155,7 +157,7 @@ class WorkerService:
         worker = self.worker_repo.get_by_id(worker_id)
         if not worker:
             log.warning("worker_not_found")
-            raise ValueError(f"Worker {worker_id} not found")
+            raise NotFoundError(f"Worker {worker_id} not found")
 
         # Extract roles and assistant_hod_departments from update data if present
         update_dict = data.model_dump(exclude_none=True)
@@ -167,19 +169,12 @@ class WorkerService:
             updated = self.worker_repo.update(worker_id, update_dict)
             if not updated:
                 log.error("worker_update_failed")
-                raise ValueError(f"Failed to update worker {worker_id}")
+                raise AppError(f"Failed to update worker {worker_id}")
             worker = updated
 
-        # Update roles if provided
+        # Update roles if provided (diff-based replace: batch-insert added, delete removed)
         if new_roles is not None:
-            # Delete all existing roles
-            self.worker_repo.delete_worker_roles(worker_id)
-            log.info("deleted_existing_roles")
-
-            # Insert new roles
-            for role in new_roles:
-                self.worker_repo.create_worker_role(worker_id, role)
-
+            self.worker_repo.replace_worker_roles(worker_id, new_roles)
             log.info("roles_updated", new_roles=new_roles)
 
         # Update assistant_hod department assignments if provided
@@ -222,7 +217,7 @@ class WorkerService:
         updated = self.worker_repo.update(worker_id, {"is_active": False})
         if not updated:
             log.error("worker_deactivation_failed")
-            raise ValueError(f"Failed to deactivate worker {worker_id}")
+            raise AppError(f"Failed to deactivate worker {worker_id}")
         log.info("worker_deactivated")
         return updated
 
@@ -272,10 +267,7 @@ class WorkerService:
         """
         log = self.logger.bind(method="can_manage_worker", manager_id=str(manager_id), worker_id=str(worker_id))
 
-        # Collect the IDs of all departments this user oversees, as HOD or as assistant_hod
-        managed_dept_ids = {dept.id for dept in self.department_repo.get_departments_by_hod(manager_id)}
-        managed_dept_ids |= set(self.department_repo.get_assistant_hod_department_ids(manager_id))
-
+        managed_dept_ids = self.get_managed_department_ids(manager_id)
         if not managed_dept_ids:
             log.info("manager_has_no_departments")
             return False
@@ -292,3 +284,140 @@ class WorkerService:
 
         log.info("can_manage_check", can_manage=can_manage)
         return can_manage
+
+    def get_managed_department_ids(self, worker_id: UUID) -> set[UUID]:
+        """Return the IDs of all departments a worker oversees, as HOD or as assistant HOD.
+
+        Args:
+            worker_id: Unique identifier of the manager.
+
+        Returns:
+            set[UUID]: Union of department IDs the worker is HOD of and assistant HOD of.
+        """
+        managed_dept_ids = {dept.id for dept in self.department_repo.get_departments_by_hod(worker_id)}
+        managed_dept_ids |= set(self.department_repo.get_assistant_hod_department_ids(worker_id))
+        return managed_dept_ids
+
+    def get_worker_for_token(self, token: TokenPayload) -> WorkerResponse:
+        """Resolve the worker profile for the authenticated user described by a token.
+
+        Args:
+            token: The verified token payload of the requesting user.
+
+        Returns:
+            WorkerResponse: The worker record matching the token's email.
+
+        Raises:
+            BadRequestError: If the token carries no email.
+            NotFoundError: If no worker profile exists for the token's email.
+        """
+        if not token.email:
+            raise BadRequestError("Email not found in authentication token")
+        worker = self.worker_repo.get_by_email(token.email)
+        if not worker:
+            raise NotFoundError("Worker profile not found for authenticated user")
+        return worker
+
+    def authorize_manage_worker(self, token: TokenPayload, worker_id: UUID) -> None:
+        """Ensure the requesting user may manage the given worker.
+
+        Admins are always allowed. Other users must manage a department the worker belongs to.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            worker_id: The worker being acted upon.
+
+        Raises:
+            PermissionDeniedError: If a non-admin does not manage the worker.
+            BadRequestError/NotFoundError: If the actor's worker profile cannot be resolved.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if not self.can_manage_worker(actor.id, worker_id):
+            raise PermissionDeniedError("You can only manage workers in departments you manage")
+
+    def authorize_update_worker(self, token: TokenPayload, worker_id: UUID, data: WorkerUpdate) -> None:
+        """Authorize a worker update, including role and assistant-HOD-department restrictions.
+
+        Admins are unrestricted. Non-admins must manage the worker, may not assign the ``admin`` or
+        ``hod`` roles, and may only assign ``assistant_hod`` for departments they manage.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            worker_id: The worker being updated.
+            data: The requested update payload.
+
+        Raises:
+            PermissionDeniedError: If any of the above rules are violated.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if not self.can_manage_worker(actor.id, worker_id):
+            raise PermissionDeniedError("You can only update workers in departments you manage")
+        if data.roles is not None and any(role in {UserRole.ADMIN, UserRole.HOD} for role in data.roles):
+            raise PermissionDeniedError("HODs can only assign worker and assistant_hod roles")
+        if data.assistant_hod_departments is not None:
+            managed = self.get_managed_department_ids(actor.id)
+            if not set(data.assistant_hod_departments) <= managed:
+                raise PermissionDeniedError("You can only assign assistant_hod for departments you manage")
+
+    def authorize_create_assignment(self, token: TokenPayload, department_id: UUID) -> None:
+        """Ensure the requesting user may assign a worker to the given department.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            department_id: The department a new worker would be assigned to.
+
+        Raises:
+            PermissionDeniedError: If a non-admin does not manage the department.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if department_id not in self.get_managed_department_ids(actor.id):
+            raise PermissionDeniedError("You can only assign workers to departments you manage")
+
+    def list_visible_workers(
+        self, token: TokenPayload, active_only: bool = False, search: str | None = None
+    ) -> list[WorkerResponse]:
+        """List the workers visible to the requesting user, applying optional filters.
+
+        Admins and regular workers see all workers; HODs and assistant HODs see only workers in the
+        departments they manage. The ``active_only`` and ``search`` filters apply to either result.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            active_only: If True, return only active workers.
+            search: Optional case-insensitive name filter.
+
+        Returns:
+            list[WorkerResponse]: The filtered, deduplicated workers visible to the user.
+        """
+        if token.role not in (UserRole.HOD, UserRole.ASSISTANT_HOD):
+            # Admins and regular workers see everyone.
+            if search:
+                return self.search_workers(search)
+            if active_only:
+                return self.get_active_workers()
+            return self.get_all_workers()
+
+        # HOD / assistant HOD: only workers in departments they manage.
+        actor = self.get_worker_for_token(token)
+        managed_dept_ids = self.get_managed_department_ids(actor.id)
+        if not managed_dept_ids:
+            return []
+
+        workers_by_id: dict[UUID, WorkerResponse] = {}
+        for dept_id in managed_dept_ids:
+            for worker in self.get_workers_by_department(dept_id):
+                workers_by_id[worker.id] = worker
+        workers = list(workers_by_id.values())
+
+        if search:
+            needle = search.lower()
+            workers = [w for w in workers if needle in w.first_name.lower() or needle in w.last_name.lower()]
+        if active_only:
+            workers = [w for w in workers if w.is_active]
+        return workers

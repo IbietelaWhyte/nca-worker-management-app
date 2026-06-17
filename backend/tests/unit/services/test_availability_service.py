@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.exceptions import NotFoundError
 from app.schemas.availabilities.models import AvailabilityCreate, AvailabilityUpdate
 from app.schemas.models import AvailabilityType, DayOfWeek
 from app.service.availabilities.service import AvailabilityService
@@ -84,7 +85,7 @@ class TestUpdateAvailability:
 
     def test_raises_when_not_found(self, service, mock_availability_repo):
         mock_availability_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.update_availability(uuid4(), AvailabilityUpdate(is_available=False))
 
 

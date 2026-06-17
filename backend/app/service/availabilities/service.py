@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.exceptions import AppError, BadRequestError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.availabilities.repository import AvailabilityRepository
 from app.schemas.availabilities.models import (
@@ -106,7 +107,7 @@ class AvailabilityService:
             )
         else:
             if data.specific_date is None:
-                raise ValueError("specific_date is required for specific date availability")
+                raise BadRequestError("specific_date is required for specific date availability")
             record = self.availability_repo.upsert_specific_date_availability(
                 worker_id=data.worker_id,
                 specific_date=data.specific_date,
@@ -134,12 +135,12 @@ class AvailabilityService:
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
             log.warning("availability_not_found")
-            raise ValueError(f"Availability record {availability_id} not found")
+            raise NotFoundError(f"Availability record {availability_id} not found")
 
         updated = self.availability_repo.update(availability_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("availability_update_failed")
-            raise ValueError(f"Failed to update availability {availability_id}")
+            raise AppError(f"Failed to update availability {availability_id}")
 
         log.info("availability_updated")
         return updated
@@ -149,7 +150,7 @@ class AvailabilityService:
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
             log.warning("availability_not_found")
-            raise ValueError(f"Availability record {availability_id} not found")
+            raise NotFoundError(f"Availability record {availability_id} not found")
 
         self.availability_repo.delete(availability_id)
         log.info("availability_deleted")

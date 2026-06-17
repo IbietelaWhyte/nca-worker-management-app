@@ -230,23 +230,29 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log.debug("fetched_worker_roles", roles=roles)
         return roles
 
-    def delete_worker_roles(self, worker_id: UUID) -> None:
-        """Delete all roles for a worker from worker_app_roles table.
+    def replace_worker_roles(self, worker_id: UUID, roles: list[UserRole]) -> None:
+        """Replace a worker's roles with the given set, applying only the difference.
+
+        Computes the difference against the worker's current roles, batch-inserts the newly added
+        roles in a single call, then deletes the removed ones. The added roles are inserted before
+        any deletion so the worker is never left without roles mid-update (avoids the zero-roles
+        window of a delete-all-then-reinsert approach).
 
         Args:
             worker_id: Unique identifier of the worker.
+            roles: The complete set of roles the worker should end up with.
         """
-        log = self.logger.bind(method="delete_worker_roles", worker_id=str(worker_id))
-        self.client.table("worker_app_roles").delete().eq("worker_id", str(worker_id)).execute()
-        log.debug("deleted_worker_roles")
+        log = self.logger.bind(method="replace_worker_roles", worker_id=str(worker_id))
+        current = set(self.get_worker_roles(worker_id))
+        desired = set(roles)
 
-    def create_worker_role(self, worker_id: UUID, role: UserRole) -> None:
-        """Create a single role assignment for a worker in worker_app_roles table.
+        to_add = desired - current
+        to_remove = current - desired
 
-        Args:
-            worker_id: Unique identifier of the worker.
-            role: The role to assign.
-        """
-        log = self.logger.bind(method="create_worker_role", worker_id=str(worker_id), role=role)
-        self.client.table("worker_app_roles").insert({"worker_id": str(worker_id), "role": role}).execute()
-        log.debug("created_worker_role")
+        if to_add:
+            self.client.table("worker_app_roles").insert(
+                [{"worker_id": str(worker_id), "role": role} for role in to_add]
+            ).execute()
+        for role in to_remove:
+            self.client.table("worker_app_roles").delete().eq("worker_id", str(worker_id)).eq("role", role).execute()
+        log.debug("replaced_worker_roles", added=sorted(to_add), removed=sorted(to_remove))

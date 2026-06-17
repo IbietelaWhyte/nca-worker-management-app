@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.exceptions import AppError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.schemas.departments.models import (
@@ -38,7 +39,7 @@ class DepartmentService:
         dept = self.department_repo.get_by_id(department_id)
         if not dept:
             log.warning("department_not_found")
-            raise ValueError(f"Department {department_id} not found")
+            raise NotFoundError(f"Department {department_id} not found")
         return dept
 
     def get_all_departments(self) -> list[DepartmentResponse]:
@@ -82,7 +83,7 @@ class DepartmentService:
         dept = self.department_repo.get_with_workers(department_id)
         if not dept:
             log.warning("department_not_found")
-            raise ValueError(f"Department {department_id} not found")
+            raise NotFoundError(f"Department {department_id} not found")
         return dept
 
     def create_department(self, data: DepartmentCreate) -> DepartmentResponse:
@@ -103,7 +104,7 @@ class DepartmentService:
         existing = self.department_repo.get_by_name(data.name)
         if existing:
             log.warning("department_already_exists")
-            raise ValueError(f"Department '{data.name}' already exists")
+            raise ConflictError(f"Department '{data.name}' already exists")
         dept = self.department_repo.create(data.model_dump())
         log.info("department_created")
         return dept
@@ -128,7 +129,7 @@ class DepartmentService:
         updated = self.department_repo.update(department_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("department_update_failed")
-            raise ValueError(f"Failed to update department {department_id}")
+            raise AppError(f"Failed to update department {department_id}")
         log.info("department_updated")
         return updated
 
@@ -196,7 +197,7 @@ class DepartmentService:
         updated = self.department_repo.update(department_id, {"hod_id": str(worker_id)})
         if not updated:
             log.error("set_hod_failed")
-            raise ValueError(f"Failed to set HOD for department {department_id}")
+            raise AppError(f"Failed to set HOD for department {department_id}")
         log.info("hod_assigned")
         return updated
 
@@ -220,7 +221,7 @@ class DepartmentService:
         updated = self.department_repo.assign_assistant_hod(department_id, worker_id)
         if not updated:
             log.error("assign_assistant_hod_failed")
-            raise ValueError(f"Failed to assign Assistant HOD for department {department_id}")
+            raise AppError(f"Failed to assign Assistant HOD for department {department_id}")
         log.info("assistant_hod_assigned")
 
     def remove_assistant_hod(self, department_id: UUID, worker_id: UUID) -> None:
@@ -240,7 +241,7 @@ class DepartmentService:
         removed = self.department_repo.remove_assistant_hod(department_id, worker_id)
         if not removed:
             log.error("remove_assistant_hod_failed")
-            raise ValueError(f"Failed to remove Assistant HOD for department {department_id}")
+            raise AppError(f"Failed to remove Assistant HOD for department {department_id}")
         log.info("assistant_hod_removed")
 
     def get_assistant_hod_departments(self, worker_id: UUID) -> list[DepartmentResponse]:

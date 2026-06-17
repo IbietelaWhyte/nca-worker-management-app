@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.subteams.models import SubteamCreate, SubteamUpdate
 from app.service.subteams.service import SubteamService
 from tests.unit.services.conftest import make_department, make_subteam
@@ -21,7 +22,7 @@ class TestGetSubteam:
 
     def test_raises_when_not_found(self, service, mock_subteam_repo):
         mock_subteam_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.get_subteam(uuid4())
 
 
@@ -40,7 +41,7 @@ class TestCreateSubteam:
         existing = make_subteam(name="Toddlers")
         mock_subteam_repo.get_by_name.return_value = existing
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError, match="already exists"):
             service.create_subteam(SubteamCreate(name="Toddlers", department_id=uuid4()))
         mock_subteam_repo.create.assert_not_called()
 
@@ -57,7 +58,7 @@ class TestUpdateSubteam:
 
     def test_raises_when_not_found(self, service, mock_subteam_repo):
         mock_subteam_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.update_subteam(uuid4(), SubteamUpdate(name="New Name"))
 
 
@@ -78,7 +79,7 @@ class TestAssignWorker:
 
     def test_raises_when_subteam_not_found(self, service, mock_subteam_repo):
         mock_subteam_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.assign_worker(uuid4(), uuid4())
 
     def test_raises_when_worker_not_in_parent_department(self, service, mock_subteam_repo, mock_department_repo):
@@ -91,7 +92,7 @@ class TestAssignWorker:
         other_dept_id = uuid4()
         mock_department_repo.get_departments_for_worker.return_value = [make_department(id=other_dept_id)]
 
-        with pytest.raises(ValueError, match="not assigned to department"):
+        with pytest.raises(BadRequestError, match="not assigned to department"):
             service.assign_worker(subteam.id, worker_id)
         mock_subteam_repo.assign_worker.assert_not_called()
 
@@ -104,7 +105,7 @@ class TestAssignWorker:
         # Worker is not assigned to any department
         mock_department_repo.get_departments_for_worker.return_value = []
 
-        with pytest.raises(ValueError, match="not assigned to department"):
+        with pytest.raises(BadRequestError, match="not assigned to department"):
             service.assign_worker(subteam.id, worker_id)
         mock_subteam_repo.assign_worker.assert_not_called()
 
@@ -120,5 +121,5 @@ class TestUnassignWorker:
 
     def test_raises_when_subteam_not_found(self, service, mock_subteam_repo):
         mock_subteam_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.unassign_worker(uuid4(), uuid4())

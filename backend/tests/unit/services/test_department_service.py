@@ -2,6 +2,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.exceptions import ConflictError, NotFoundError
 from app.schemas.departments.models import DepartmentCreate, DepartmentUpdate
 from app.service.departments.service import DepartmentService
 from tests.unit.services.conftest import make_department
@@ -21,7 +22,7 @@ class TestGetDepartment:
 
     def test_raises_when_not_found(self, service, mock_department_repo):
         mock_department_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.get_department(uuid4())
 
 
@@ -39,7 +40,7 @@ class TestCreateDepartment:
         existing = make_department(name="Choir")
         mock_department_repo.get_by_name.return_value = existing
 
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ConflictError, match="already exists"):
             service.create_department(DepartmentCreate(name="Choir"))
         mock_department_repo.create.assert_not_called()
 
@@ -56,7 +57,7 @@ class TestUpdateDepartment:
 
     def test_raises_when_not_found(self, service, mock_department_repo):
         mock_department_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.update_department(uuid4(), DepartmentUpdate(name="New Name"))
 
 
@@ -71,7 +72,7 @@ class TestAssignWorker:
 
     def test_raises_when_department_not_found(self, service, mock_department_repo):
         mock_department_repo.get_by_id.return_value = None
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(NotFoundError, match="not found"):
             service.assign_worker(uuid4(), uuid4())
 
 

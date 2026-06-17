@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_subteam
@@ -15,7 +16,7 @@ class TestGetSubteam:
         assert response.status_code == 200
 
     def test_returns_404_when_not_found(self, mock_subteam_service):
-        mock_subteam_service.get_subteam.side_effect = ValueError("not found")
+        mock_subteam_service.get_subteam.side_effect = NotFoundError("not found")
         client = make_client(subteam_service=mock_subteam_service)
 
         response = client.get(f"/api/v1/subteams/{uuid4()}")
@@ -41,7 +42,7 @@ class TestCreateSubteam:
         assert response.json()["workers_per_slot"] == 3
 
     def test_returns_409_on_duplicate_name(self, mock_subteam_service):
-        mock_subteam_service.create_subteam.side_effect = ValueError("already exists")
+        mock_subteam_service.create_subteam.side_effect = ConflictError("already exists")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
         response = client.post(
@@ -102,18 +103,18 @@ class TestAssignWorkerToSubteam:
         mock_subteam_service.assign_worker.assert_called_once_with(subteam_id, worker_id)
 
     def test_returns_404_when_subteam_not_found(self, mock_subteam_service):
-        mock_subteam_service.assign_worker.side_effect = ValueError("subteam not found")
+        mock_subteam_service.assign_worker.side_effect = NotFoundError("subteam not found")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
         response = client.post(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
         assert response.status_code == 404
 
-    def test_returns_404_when_worker_not_in_parent_department(self, mock_subteam_service):
-        mock_subteam_service.assign_worker.side_effect = ValueError("Worker not assigned to department")
+    def test_returns_400_when_worker_not_in_parent_department(self, mock_subteam_service):
+        mock_subteam_service.assign_worker.side_effect = BadRequestError("Worker not assigned to department")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
         response = client.post(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
-        assert response.status_code == 404
+        assert response.status_code == 400
         assert "not assigned to department" in response.json()["detail"].lower()
 
     def test_returns_403_for_worker_role(self, mock_subteam_service):
@@ -133,7 +134,7 @@ class TestUnassignWorkerFromSubteam:
         mock_subteam_service.unassign_worker.assert_called_once_with(subteam_id, worker_id)
 
     def test_returns_404_when_subteam_not_found(self, mock_subteam_service):
-        mock_subteam_service.unassign_worker.side_effect = ValueError("subteam not found")
+        mock_subteam_service.unassign_worker.side_effect = NotFoundError("subteam not found")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
         response = client.delete(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
