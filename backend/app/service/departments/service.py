@@ -258,3 +258,21 @@ class DepartmentService:
         departments = self.department_repo.get_assistant_hod_departments(worker_id)
         log.debug("fetched_assistant_hod_departments", count=len(departments))
         return departments
+
+    def get_assistant_hod_department_ids(self, worker_id: UUID) -> list[UUID]:
+        """Retrieve the IDs of all departments where a worker is an Assistant HOD.
+
+        Identifier-only counterpart to get_assistant_hod_departments, for callers that only need
+        the department IDs (e.g. permission checks comparing against a requested department set).
+
+        Args:
+            worker_id: Unique identifier of the worker who is an Assistant HOD.
+
+        Returns:
+            list[UUID]: A list of department IDs where the worker is an Assistant HOD. Returns an
+                        empty list if the worker is not an Assistant HOD of any departments.
+        """
+        log = self.logger.bind(method="get_assistant_hod_department_ids", worker_id=str(worker_id))
+        department_ids = self.department_repo.get_assistant_hod_department_ids(worker_id)
+        log.debug("fetched_assistant_hod_department_ids", count=len(department_ids))
+        return department_ids
