@@ -26,7 +26,7 @@ const publicClient = axios.create({
  * }>}
  */
 export async function getConfirmationDetails(token) {
-    const response = await publicClient.get(`/api/v1/confirm/${token}`)
+    const response = await publicClient.get(`/confirm/${token}`)
     return response.data
 }
 
@@ -38,7 +38,7 @@ export async function getConfirmationDetails(token) {
  * @returns {Promise<object>} Updated assignment response.
  */
 export async function submitConfirmation(token, action) {
-    const response = await publicClient.post(`/api/v1/confirm/${token}`, null, {
+    const response = await publicClient.post(`/confirm/${token}`, null, {
         params: { action },
     })
     return response.data
