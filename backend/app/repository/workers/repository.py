@@ -3,6 +3,7 @@ from uuid import UUID
 from supabase import Client
 
 from app.core.logging import get_logger
+from app.core.redaction import mask_email, mask_phone
 from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
@@ -37,7 +38,7 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse | None: A WorkerResponse model instance if found, None if no worker exists with
                           the given email address or if the response contains no data.
         """
-        log = self.logger.bind(method="get_by_email", email=email)
+        log = self.logger.bind(method="get_by_email", email=mask_email(email))
         response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.EMAIL, email).maybe_single().execute()
         worker = self._to_model(response.data) if response else None
         if worker:
@@ -60,7 +61,7 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse | None: A WorkerResponse model instance if found, None if no worker exists with
                           the given phone number or if the response contains no data.
         """
-        log = self.logger.bind(method="get_by_phone", phone=phone)
+        log = self.logger.bind(method="get_by_phone", phone=mask_phone(phone))
         response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.PHONE, phone).maybe_single().execute()
         worker = self._to_model(response.data) if response else None
         if worker:

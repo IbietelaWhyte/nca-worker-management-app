@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -12,30 +12,50 @@ from app.schemas.models import TokenPayload
 bearer_scheme = HTTPBearer()
 logger = get_logger(__name__)
 
-# Cache it at module level
-_jwks = None
+# The full JWKS document ({"keys": [...]}) cached at module level.
+_jwks_cache: dict[str, Any] | None = None
 
 
-async def get_jwks() -> Any:
-    """Fetch and cache the JSON Web Key Set (JWKS) from Supabase.
-
-    This function retrieves the public keys used to verify JWT tokens from
-    Supabase's well-known JWKS endpoint. The keys are cached at module level
-    to avoid repeated network requests.
+async def _fetch_jwks() -> dict[str, Any]:
+    """Fetch the full JWKS document from Supabase's well-known endpoint.
 
     Returns:
-        Any: The first JWK (JSON Web Key) from Supabase's JWKS endpoint.
+        dict[str, Any]: The JWKS document, i.e. ``{"keys": [...]}``.
 
     Raises:
         httpx.HTTPStatusError: If the request to fetch JWKS fails.
     """
-    global _jwks
-    if _jwks is None:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
-            response.raise_for_status()
-            _jwks = response.json()["keys"][0]  # grab the first key
-    return _jwks
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
+        response.raise_for_status()
+        return cast(dict[str, Any], response.json())
+
+
+async def get_jwks(force_refresh: bool = False) -> dict[str, Any]:
+    """Fetch and cache the full JSON Web Key Set (JWKS) from Supabase.
+
+    The entire key set is cached (not just the first key) so verification works regardless of which
+    key signed a token and survives Supabase publishing multiple keys.
+
+    Args:
+        force_refresh: If True, re-fetch from Supabase even when a cached copy exists (used to pick up
+            rotated signing keys).
+
+    Returns:
+        dict[str, Any]: The cached JWKS document (``{"keys": [...]}``).
+
+    Raises:
+        httpx.HTTPStatusError: If the request to fetch JWKS fails.
+    """
+    global _jwks_cache
+    if _jwks_cache is None or force_refresh:
+        _jwks_cache = await _fetch_jwks()
+    return _jwks_cache
+
+
+def _kid_in_jwks(jwks: dict[str, Any], kid: str) -> bool:
+    """Return True if the given key id is present in the JWKS document."""
+    return any(key.get("kid") == kid for key in jwks.get("keys", []))
 
 
 async def verify_token(
@@ -49,21 +69,31 @@ async def verify_token(
     log = logger.bind(method="verify_token")
     token = credentials.credentials
     try:
-        jwk = await get_jwks()
+        # Select the signing key by the token's kid; refresh the JWKS once if it's unknown, so
+        # rotated/newly-published keys are picked up without a restart.
+        kid = jwt.get_unverified_header(token).get("kid")
+        jwks = await get_jwks()
+        if kid and not _kid_in_jwks(jwks, kid):
+            jwks = await get_jwks(force_refresh=True)
+
         payload = jwt.decode(
             token,
-            jwk,
+            jwks,
             algorithms=["ES256"],
             options={"verify_aud": False},
         )
 
+        sub = payload.get("sub")
+        if not sub:
+            raise JWTError("token missing 'sub' claim")
+
         # Supabase stores custom roles in app_metadata
         app_metadata = payload.get("app_metadata", {})
         role = app_metadata.get("role", "worker")
-        log.info("Token verified", role=role, sub=payload["sub"])
+        log.info("token_verified", role=role, sub=sub)
 
         return TokenPayload(
-            sub=payload["sub"],
+            sub=sub,
             email=payload.get("email"),
             role=role,
         )

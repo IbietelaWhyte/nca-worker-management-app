@@ -2,6 +2,7 @@ from uuid import UUID
 
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.logging import get_logger
+from app.core.redaction import mask_email
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
@@ -131,7 +132,7 @@ class WorkerService:
             ValueError: If contact info is missing or worker already exists.
         """
         # bind the method and email for better traceability in logs
-        log = self.logger.bind(method="create_worker", email=data.email)
+        log = self.logger.bind(method="create_worker", email=mask_email(data.email))
         if data.email:
             existing = self.worker_repo.get_by_email(data.email)
         elif data.phone:
@@ -161,7 +162,9 @@ class WorkerService:
         """
         # bind the method and worker_id for better traceability in logs
         log = self.logger.bind(
-            method="update_worker", worker_id=str(worker_id), data=data.model_dump(exclude_none=True)
+            method="update_worker",
+            worker_id=str(worker_id),
+            fields=sorted(data.model_dump(exclude_none=True).keys()),
         )
 
         # Get existing worker
@@ -246,7 +249,7 @@ class WorkerService:
         # bind the method and query for better traceability in logs
         log = self.logger.bind(method="search_workers", query=query)
         workers = self.worker_repo.search(query)
-        log.info("worker_search", results=len(workers), workers=workers)
+        log.info("worker_search", results=len(workers))
         return workers
 
     def get_worker_departments(self, worker_id: UUID) -> list[DepartmentResponse]:

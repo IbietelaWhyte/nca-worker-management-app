@@ -5,6 +5,7 @@ from supabase_auth.errors import AuthApiError
 
 from app.core.exceptions import AppError, ConflictError
 from app.core.logging import get_logger
+from app.core.redaction import mask_email
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.authentication.models import RegisterRequest, RegisterResponse
@@ -31,7 +32,7 @@ class AuthenticationService:
         4. Assign to departments if provided
         5. On any failure, attempt to clean up the auth user to avoid orphans
         """
-        logger.info("worker_registration_started", email=data.email, role=data.role)
+        logger.info("worker_registration_started", email=mask_email(data.email), role=data.role)
 
         # 1. Create Supabase auth user
         auth_user_id = self._create_auth_user(data)
@@ -52,7 +53,7 @@ class AuthenticationService:
         except Exception as e:
             logger.error(
                 "worker_record_creation_failed",
-                email=data.email,
+                email=mask_email(data.email),
                 auth_user_id=str(auth_user_id),
                 error=str(e),
             )
@@ -62,7 +63,7 @@ class AuthenticationService:
         logger.info(
             "worker_registration_completed",
             worker_id=str(worker.id),
-            email=data.email,
+            email=mask_email(data.email),
             role=data.role,
         )
 
@@ -84,10 +85,10 @@ class AuthenticationService:
                 }
             )
             auth_user_id = response.user.id
-            logger.info("auth_user_created", auth_user_id=auth_user_id, email=data.email, role=data.role)
+            logger.info("auth_user_created", auth_user_id=auth_user_id, email=mask_email(data.email), role=data.role)
             return UUID(auth_user_id)
         except AuthApiError as e:
-            logger.warning("auth_user_creation_failed", email=data.email, error=str(e))
+            logger.warning("auth_user_creation_failed", email=mask_email(data.email), error=str(e))
             if "already registered" in str(e).lower():
                 raise ConflictError(f"Email {data.email} is already registered") from e
             raise AppError(f"Failed to create auth user: {e}") from e
