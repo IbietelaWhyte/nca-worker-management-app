@@ -20,7 +20,7 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 @router.get("", response_model=list[WorkerResponse])
 def list_workers(
     active_only: bool = Query(default=False),
-    search: str | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=100),
     current_user: TokenPayload = CurrentUser,
     worker_service: WorkerService = Depends(get_worker_service),
     department_service: DepartmentService = Depends(get_department_service),

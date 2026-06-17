@@ -3,6 +3,7 @@ from uuid import UUID
 from supabase import Client
 
 from app.core.logging import get_logger
+from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
 from app.schemas.models import UserRole, WorkerStatus
@@ -198,10 +199,13 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             WorkerResponse(first_name="Jane", last_name="Smithson")]
         """
         log = self.logger.bind(method="search", query=query)
+        # Quote/escape the user value so PostgREST reserved characters in it (',', '.', '(', ')', '"')
+        # are treated as literal data and cannot inject additional filter conditions.
+        pattern = quote_postgrest_value(f"%{query}%")
         response = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
-            .or_(f"{q.Columns.FIRST_NAME}.ilike.%{query}%,{q.Columns.LAST_NAME}.ilike.%{query}%")
+            .or_(f"{q.Columns.FIRST_NAME}.ilike.{pattern},{q.Columns.LAST_NAME}.ilike.{pattern}")
             .execute()
         )
         workers = self._to_model_list(response.data or [])
