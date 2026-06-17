@@ -5,6 +5,10 @@ from postgrest import CountMethod
 from pydantic import BaseModel
 from supabase import Client
 
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 T = TypeVar("T", bound=BaseModel)
 U = TypeVar("U", bound=BaseModel)
 
@@ -102,7 +106,12 @@ class BaseRepository(Generic[T]):
             list[T]: A list of model instances. Returns an empty list if no records are found.
         """
         response = self.client.table(self.table).select("*").range(offset, offset + limit - 1).execute()
-        return self._to_model_list(response.data or [])
+        results = self._to_model_list(response.data or [])
+        if len(results) == limit:
+            # We returned a full page, so more rows likely exist beyond this window. Surface it
+            # rather than truncating silently — callers should page with limit/offset.
+            logger.warning("get_all_truncated", table=self.table, limit=limit, offset=offset)
+        return results
 
     def create(self, data: dict[str, Any]) -> T:
         """
@@ -151,5 +160,6 @@ class BaseRepository(Generic[T]):
         Returns:
             int: The total number of records. Returns 0 if the table is empty.
         """
-        response = self.client.table(self.table).select("*", count=CountMethod.exact).execute()
+        # head=True asks PostgREST for the count only (no row payload transferred).
+        response = self.client.table(self.table).select("*", count=CountMethod.exact, head=True).execute()
         return response.count or 0

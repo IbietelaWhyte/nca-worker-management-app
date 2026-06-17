@@ -323,3 +323,50 @@ class TestUpdateWorkerRoles:
         service.update_worker(worker.id, WorkerUpdate(roles=[UserRole.WORKER, UserRole.HOD]))
 
         mock_worker_repo.replace_worker_roles.assert_called_once_with(worker.id, [UserRole.WORKER, UserRole.HOD])
+
+
+class TestBatchRoleLoading:
+    def test_get_all_workers_loads_roles_in_one_batch(self, service, mock_worker_repo):
+        w1, w2 = make_worker(), make_worker()
+        mock_worker_repo.get_all.return_value = [w1, w2]
+        mock_worker_repo.get_roles_for_workers.return_value = {
+            w1.id: [UserRole.WORKER],
+            w2.id: [UserRole.HOD],
+        }
+
+        result = service.get_all_workers()
+
+        # Single batched query, not one get_worker_roles per worker.
+        mock_worker_repo.get_roles_for_workers.assert_called_once_with([w1.id, w2.id])
+        mock_worker_repo.get_worker_roles.assert_not_called()
+        assert result[0].roles == [UserRole.WORKER]
+        assert result[1].roles == [UserRole.HOD]
+
+    def test_get_active_workers_loads_roles_in_one_batch(self, service, mock_worker_repo):
+        w1 = make_worker()
+        mock_worker_repo.get_active_workers.return_value = [w1]
+        mock_worker_repo.get_roles_for_workers.return_value = {}
+
+        result = service.get_active_workers()
+
+        mock_worker_repo.get_roles_for_workers.assert_called_once_with([w1.id])
+        mock_worker_repo.get_worker_roles.assert_not_called()
+        assert result[0].roles == []  # worker with no roles defaults to empty list
+
+    def test_get_all_workers_forwards_limit_and_offset(self, service, mock_worker_repo):
+        mock_worker_repo.get_all.return_value = []
+        mock_worker_repo.get_roles_for_workers.return_value = {}
+
+        service.get_all_workers(limit=5, offset=10)
+
+        mock_worker_repo.get_all.assert_called_once_with(limit=5, offset=10)
+
+
+class TestListVisibleWorkersPagination:
+    def test_admin_unfiltered_listing_forwards_limit_and_offset(self, service, mock_worker_repo):
+        mock_worker_repo.get_all.return_value = []
+        mock_worker_repo.get_roles_for_workers.return_value = {}
+
+        service.list_visible_workers(_token(role=UserRole.ADMIN), limit=5, offset=10)
+
+        mock_worker_repo.get_all.assert_called_once_with(limit=5, offset=10)

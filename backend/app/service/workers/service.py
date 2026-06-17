@@ -52,20 +52,35 @@ class WorkerService:
         worker.roles = self.worker_repo.get_worker_roles(worker_id)
         return worker
 
-    def get_all_workers(self) -> list[WorkerResponse]:
-        """Retrieve all workers.
+    def _attach_roles(self, workers: list[WorkerResponse]) -> list[WorkerResponse]:
+        """Load roles for a list of workers in a single batched query and attach them.
+
+        Args:
+            workers: Workers to enrich with their roles.
 
         Returns:
-            list[WorkerResponse]: List of all workers in the system with their roles.
+            list[WorkerResponse]: The same workers with their ``roles`` populated.
+        """
+        if not workers:
+            return workers
+        roles_by_worker = self.worker_repo.get_roles_for_workers([worker.id for worker in workers])
+        for worker in workers:
+            worker.roles = roles_by_worker.get(worker.id, [])
+        return workers
+
+    def get_all_workers(self, limit: int = 100, offset: int = 0) -> list[WorkerResponse]:
+        """Retrieve all workers (paginated), with their roles.
+
+        Args:
+            limit: Maximum number of workers to return.
+            offset: Number of workers to skip before returning results.
+
+        Returns:
+            list[WorkerResponse]: List of workers in the system with their roles.
         """
         # bind the method for better traceability in logs
-        log = self.logger.bind(method="get_all_workers")
-        workers = self.worker_repo.get_all()
-
-        # Load roles for each worker
-        for worker in workers:
-            worker.roles = self.worker_repo.get_worker_roles(worker.id)
-
+        log = self.logger.bind(method="get_all_workers", limit=limit, offset=offset)
+        workers = self._attach_roles(self.worker_repo.get_all(limit=limit, offset=offset))
         log.info("fetched_all_workers", count=len(workers))
         return workers
 
@@ -77,11 +92,7 @@ class WorkerService:
         """
         # bind the method for better traceability in logs
         log = self.logger.bind(method="get_active_workers")
-        workers = self.worker_repo.get_active_workers()
-
-        # Load roles for each worker
-        for worker in workers:
-            worker.roles = self.worker_repo.get_worker_roles(worker.id)
+        workers = self._attach_roles(self.worker_repo.get_active_workers())
 
         log.info("fetched_active_workers", count=len(workers))
         return workers
@@ -380,17 +391,25 @@ class WorkerService:
             raise PermissionDeniedError("You can only assign workers to departments you manage")
 
     def list_visible_workers(
-        self, token: TokenPayload, active_only: bool = False, search: str | None = None
+        self,
+        token: TokenPayload,
+        active_only: bool = False,
+        search: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
     ) -> list[WorkerResponse]:
         """List the workers visible to the requesting user, applying optional filters.
 
         Admins and regular workers see all workers; HODs and assistant HODs see only workers in the
         departments they manage. The ``active_only`` and ``search`` filters apply to either result.
+        ``limit``/``offset`` page the unfiltered admin/worker listing.
 
         Args:
             token: The verified token payload of the requesting user.
             active_only: If True, return only active workers.
             search: Optional case-insensitive name filter.
+            limit: Max workers for the unfiltered listing.
+            offset: Number of workers to skip for the unfiltered listing.
 
         Returns:
             list[WorkerResponse]: The filtered, deduplicated workers visible to the user.
@@ -401,7 +420,7 @@ class WorkerService:
                 return self.search_workers(search)
             if active_only:
                 return self.get_active_workers()
-            return self.get_all_workers()
+            return self.get_all_workers(limit=limit, offset=offset)
 
         # HOD / assistant HOD: only workers in departments they manage.
         actor = self.get_worker_for_token(token)

@@ -42,14 +42,18 @@ class DepartmentService:
             raise NotFoundError(f"Department {department_id} not found")
         return dept
 
-    def get_all_departments(self) -> list[DepartmentResponse]:
-        """Retrieve all departments.
+    def get_all_departments(self, limit: int = 100, offset: int = 0) -> list[DepartmentResponse]:
+        """Retrieve all departments (paginated).
+
+        Args:
+            limit: Maximum number of departments to return.
+            offset: Number of departments to skip before returning results.
 
         Returns:
-            list[DepartmentResponse]: List of all departments in the system.
+            list[DepartmentResponse]: List of departments in the system.
         """
-        log = self.logger.bind(method="get_all_departments")
-        depts = self.department_repo.get_all()
+        log = self.logger.bind(method="get_all_departments", limit=limit, offset=offset)
+        depts = self.department_repo.get_all(limit=limit, offset=offset)
         log.info("fetched_all_departments", count=len(depts))
         return depts
 

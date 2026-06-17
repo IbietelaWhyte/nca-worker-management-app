@@ -35,6 +35,23 @@ class TestListWorkers:
         assert response.status_code == 200
         assert mock_worker_service.list_visible_workers.call_args.kwargs["search"] == "john"
 
+    def test_passes_limit_and_offset(self, mock_worker_service):
+        mock_worker_service.list_visible_workers.return_value = []
+        client = make_client(worker_service=mock_worker_service)
+
+        response = client.get("/api/v1/workers?limit=5&offset=10")
+        assert response.status_code == 200
+        kwargs = mock_worker_service.list_visible_workers.call_args.kwargs
+        assert kwargs["limit"] == 5
+        assert kwargs["offset"] == 10
+
+    def test_rejects_out_of_range_limit(self, mock_worker_service):
+        mock_worker_service.list_visible_workers.return_value = []
+        client = make_client(worker_service=mock_worker_service)
+
+        response = client.get("/api/v1/workers?limit=999")
+        assert response.status_code == 422  # exceeds le=500
+
     def test_requires_authentication(self):
         client = TestClient(app)
         response = client.get("/api/v1/workers")

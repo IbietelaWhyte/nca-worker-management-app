@@ -230,6 +230,36 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log.debug("fetched_worker_roles", roles=roles)
         return roles
 
+    def get_roles_for_workers(self, worker_ids: list[UUID]) -> dict[UUID, list[UserRole]]:
+        """Retrieve roles for many workers in a single query, keyed by worker id.
+
+        Batched counterpart to get_worker_roles, used to avoid N+1 queries when loading roles for a
+        list of workers.
+
+        Args:
+            worker_ids: The workers whose roles to fetch.
+
+        Returns:
+            dict[UUID, list[UserRole]]: Map of worker id to its roles. Workers with no roles are
+                omitted; the caller should default missing entries to an empty list. Returns an empty
+                dict when given no worker ids.
+        """
+        if not worker_ids:
+            return {}
+        log = self.logger.bind(method="get_roles_for_workers", count=len(worker_ids))
+        response = (
+            self.client.table("worker_app_roles")
+            .select("worker_id, role")
+            .in_("worker_id", [str(wid) for wid in worker_ids])
+            .execute()
+        )
+        rows: list[dict[str, str]] = response.data or []  # type: ignore[assignment]
+        roles_by_worker: dict[UUID, list[UserRole]] = {}
+        for row in rows:
+            roles_by_worker.setdefault(UUID(row["worker_id"]), []).append(UserRole(row["role"]))
+        log.debug("fetched_roles_for_workers", workers_with_roles=len(roles_by_worker))
+        return roles_by_worker
+
     def replace_worker_roles(self, worker_id: UUID, roles: list[UserRole]) -> None:
         """Replace a worker's roles with the given set, applying only the difference.
 
