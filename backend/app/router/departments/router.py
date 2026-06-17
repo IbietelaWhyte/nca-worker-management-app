@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -27,6 +27,8 @@ router = APIRouter(prefix="/departments", tags=["departments"])
 
 @router.get("", response_model=list[DepartmentResponse])
 def list_departments(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     current_user: TokenPayload = CurrentUser,
     service: DepartmentService = Depends(get_department_service),
     worker_service: WorkerService = Depends(get_worker_service),
@@ -34,6 +36,8 @@ def list_departments(
     """List departments - filtered by HOD or Assistant HOD role if applicable.
 
     Args:
+        limit: Max departments to return for the admin/worker listing (pagination).
+        offset: Number of departments to skip for the admin/worker listing (pagination).
         current_user: Current authenticated user token.
         service: Department service dependency.
         worker_service: Worker service dependency.
@@ -48,7 +52,7 @@ def list_departments(
             return service.get_departments_by_hod(worker.id)
         return service.get_assistant_hod_departments(worker.id)
 
-    return service.get_all_departments()
+    return service.get_all_departments(limit=limit, offset=offset)
 
 
 @router.get("/{department_id}", response_model=DepartmentResponse)

@@ -21,6 +21,8 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 def list_workers(
     active_only: bool = Query(default=False),
     search: str | None = Query(default=None, max_length=100),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     current_user: TokenPayload = CurrentUser,
     worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[WorkerResponse]:
@@ -29,13 +31,17 @@ def list_workers(
     Args:
         active_only: If True, return only active workers.
         search: Optional search query to filter by worker name.
+        limit: Max workers to return for the unfiltered listing (pagination).
+        offset: Number of workers to skip for the unfiltered listing (pagination).
         current_user: Current authenticated user token.
         worker_service: Worker service dependency.
 
     Returns:
         list[WorkerResponse]: All workers for admins/workers, department-filtered for HOD/Assistant HOD.
     """
-    return worker_service.list_visible_workers(current_user, active_only=active_only, search=search)
+    return worker_service.list_visible_workers(
+        current_user, active_only=active_only, search=search, limit=limit, offset=offset
+    )
 
 
 @router.get("/{worker_id}", response_model=WorkerResponse)
