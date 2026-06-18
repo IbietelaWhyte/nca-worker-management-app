@@ -407,3 +407,95 @@ class TestListVisibleWorkersPagination:
         service.list_visible_workers(_token(role=UserRole.ADMIN), limit=5, offset=10)
 
         mock_worker_repo.get_all.assert_called_once_with(limit=5, offset=10)
+
+
+def _csv(rows: str) -> bytes:
+    """Build CSV bytes with the standard header plus the given data rows."""
+    return f"first_name,last_name,email,phone\n{rows}".encode()
+
+
+class TestImportWorkers:
+    @pytest.fixture(autouse=True)
+    def _department_exists(self, mock_department_repo):
+        # Every import targets an existing department unless a test overrides this.
+        mock_department_repo.get_by_id.return_value = make_department()
+
+    def test_creates_and_assigns_valid_rows(self, service, mock_worker_repo, mock_department_repo):
+        dept_id = uuid4()
+        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.create.side_effect = [
+            make_worker(email="a@example.com"),
+            make_worker(email="b@example.com"),
+        ]
+
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nBob,Kim,b@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, dept_id, dry_run=False)
+
+        assert result.total_rows == 2
+        assert result.created == 2
+        assert result.skipped_duplicate == 0
+        assert result.errors == 0
+        assert all(r.status == "created" for r in result.results)
+        assert mock_worker_repo.create.call_count == 2
+        assert mock_department_repo.assign_worker.call_count == 2
+
+    def test_dry_run_performs_no_writes(self, service, mock_worker_repo, mock_department_repo):
+        mock_worker_repo.get_by_email.return_value = None
+
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=True)
+
+        assert result.dry_run is True
+        assert result.valid == 1
+        assert result.created == 0
+        assert result.results[0].status == "valid"
+        mock_worker_repo.create.assert_not_called()
+        mock_department_repo.assign_worker.assert_not_called()
+
+    def test_skips_existing_worker_in_db(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_email.return_value = make_worker(email="a@example.com")
+
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+        assert result.skipped_duplicate == 1
+        assert result.created == 0
+        assert result.results[0].status == "skipped_duplicate"
+        mock_worker_repo.create.assert_not_called()
+
+    def test_skips_duplicate_email_within_file(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.create.return_value = make_worker(email="a@example.com")
+
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nAnna,Lee,A@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+        assert result.created == 1
+        assert result.skipped_duplicate == 1
+        assert result.results[1].status == "skipped_duplicate"
+        # Email match is case-insensitive, so the DB is only checked for the first occurrence.
+        mock_worker_repo.get_by_email.assert_called_once()
+
+    def test_reports_invalid_row_but_processes_others(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.create.return_value = make_worker(email="b@example.com")
+
+        # First row is missing the email cell; second row is valid.
+        csv_bytes = _csv("Ann,Lee,,+14165550111\nBob,Kim,b@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+        assert result.errors == 1
+        assert result.created == 1
+        assert result.results[0].status == "error"
+        assert result.results[1].status == "created"
+
+    def test_raises_on_missing_required_column(self, service):
+        csv_bytes = b"first_name,last_name,email\nAnn,Lee,a@example.com"
+        with pytest.raises(BadRequestError, match="missing required column"):
+            service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+    def test_raises_when_department_not_found(self, service, mock_department_repo):
+        mock_department_repo.get_by_id.return_value = None
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
+        with pytest.raises(NotFoundError, match="not found"):
+            service.import_workers(csv_bytes, uuid4(), dry_run=False)

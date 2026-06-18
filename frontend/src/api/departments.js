@@ -24,3 +24,11 @@ export const setHod = (departmentId, workerId) =>
 
 export const getDepartmentWithSubteams = departmentId =>
     apiClient.get(`/departments/${departmentId}/subteams`)
+
+export const importWorkersCsv = (departmentId, file, { dryRun }) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiClient.post(`/departments/${departmentId}/workers/import?dry_run=${dryRun}`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    })
+}
