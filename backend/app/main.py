@@ -15,6 +15,7 @@ from app.core.middleware import RequestLoggingMiddleware
 from app.core.supabase import get_supabase
 from app.repository.schedules.repository import ScheduleRepository
 from app.router import (
+    account,
     authentication,
     availabilities,
     confirmation_tokens,
@@ -106,6 +107,7 @@ app.include_router(schedules.router, prefix="/api/v1")
 app.include_router(availabilities.router, prefix="/api/v1")
 app.include_router(subteams.router, prefix="/api/v1")
 app.include_router(department_roles.router, prefix="/api/v1")
+app.include_router(account.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(confirmation_tokens.router, prefix="/api/v1")
 
