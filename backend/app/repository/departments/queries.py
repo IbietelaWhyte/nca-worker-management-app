@@ -3,7 +3,7 @@ JUNCTION_TABLE = "worker_departments"
 ASSISTANT_HOD_JUNCTION_TABLE = "department_assistant_hods"
 
 SELECT_ALL = "*"
-SELECT_WITH_WORKERS = "*, workers:worker_departments(workers(*))"
+SELECT_WITH_WORKERS = "*, workers:worker_departments(workers(*), department_roles(*))"
 # for fetching departments where a worker is an assistant HOD,
 # we need to select from the assistant HOD junction table and include department details
 SELECT_ASSISTANT_HOD_DEPARTMENTS = "departments(*)"

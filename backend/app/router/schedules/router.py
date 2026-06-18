@@ -93,6 +93,20 @@ def update_assignment_status(
     return service.update_assignment_status(assignment_id, status_update)
 
 
+@router.patch(
+    "/assignments/{assignment_id}/role",
+    response_model=AssignmentResponse,
+)
+def update_assignment_role(
+    assignment_id: UUID,
+    department_role_id: UUID | None = None,
+    _: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+) -> AssignmentResponse:
+    """Override the department role on an assignment (omit department_role_id to clear)."""
+    return service.update_assignment_role(assignment_id, department_role_id)
+
+
 @router.post("/reminders/trigger", response_model=MessageResponse)
 def trigger_reminders(
     _: TokenPayload = HODUser,

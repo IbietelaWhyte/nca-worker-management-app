@@ -17,6 +17,12 @@ export const updateAssignmentStatus = (assignmentId, status_update) =>
         params: { status_update },
     })
 
+export const setAssignmentRole = (assignmentId, departmentRoleId) =>
+    apiClient.patch(`/schedules/assignments/${assignmentId}/role`, null, {
+        // Omit the param to clear the role (backend treats absent as None).
+        params: departmentRoleId ? { department_role_id: departmentRoleId } : {},
+    })
+
 export const triggerReminders = () => apiClient.post('/schedules/reminders/trigger')
 
 export const triggerRemindersForSchedule = scheduleId =>

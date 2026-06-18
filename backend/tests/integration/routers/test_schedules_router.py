@@ -146,6 +146,43 @@ class TestUpdateAssignmentStatus:
         assert response.status_code == 404
 
 
+class TestUpdateAssignmentRole:
+    def test_hod_can_set_role(self, mock_schedule_service):
+        role_id = uuid4()
+        assignment = make_assignment(department_role_id=role_id)
+        mock_schedule_service.update_assignment_role.return_value = assignment
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.patch(
+            f"/api/v1/schedules/assignments/{assignment.id}/role?department_role_id={role_id}",
+        )
+        assert response.status_code == 200
+        mock_schedule_service.update_assignment_role.assert_called_once_with(assignment.id, role_id)
+
+    def test_hod_can_clear_role(self, mock_schedule_service):
+        assignment = make_assignment(department_role_id=None)
+        mock_schedule_service.update_assignment_role.return_value = assignment
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.patch(f"/api/v1/schedules/assignments/{assignment.id}/role")
+        assert response.status_code == 200
+        mock_schedule_service.update_assignment_role.assert_called_once_with(assignment.id, None)
+
+    def test_returns_400_when_role_in_different_department(self, mock_schedule_service):
+        mock_schedule_service.update_assignment_role.side_effect = BadRequestError("does not belong")
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.patch(
+            f"/api/v1/schedules/assignments/{uuid4()}/role?department_role_id={uuid4()}",
+        )
+        assert response.status_code == 400
+
+    def test_returns_403_for_worker_role(self, mock_schedule_service):
+        client = make_client(role=UserRole.WORKER, schedule_service=mock_schedule_service)
+        response = client.patch(f"/api/v1/schedules/assignments/{uuid4()}/role?department_role_id={uuid4()}")
+        assert response.status_code == 403
+
+
 class TestTriggerReminders:
     def test_returns_200_with_sent_count(self, mock_reminder_service):
         mock_reminder_service.trigger_manually.return_value = 5

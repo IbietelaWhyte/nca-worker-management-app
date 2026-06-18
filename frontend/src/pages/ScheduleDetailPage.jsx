@@ -10,18 +10,26 @@ import { ArrowLeft, Bell } from 'lucide-react'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
 import { getSubteamsByDepartment } from '@/api/subteams'
+import { getRolesByDepartment } from '@/api/roles'
 
 export default function ScheduleDetailPage() {
     const { id } = useParams()
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead } = useAuth()
-    const { schedule, loading, error, changeAssignmentStatus, sendRemindersForSchedule } =
-        useScheduleDetail(id)
+    const {
+        schedule,
+        loading,
+        error,
+        changeAssignmentStatus,
+        changeAssignmentRole,
+        sendRemindersForSchedule,
+    } = useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
     const [showEmptySubteams, setShowEmptySubteams] = useState(true)
     const [allSubteams, setAllSubteams] = useState([])
     const [subteamsLoading, setSubteamsLoading] = useState(false)
+    const [departmentRoles, setDepartmentRoles] = useState([])
 
     // Fetch all subteams for the department
     useEffect(() => {
@@ -39,6 +47,21 @@ export default function ScheduleDetailPage() {
             }
         }
         fetchSubteams()
+    }, [schedule?.department_id])
+
+    // Fetch the department's roles for the per-assignment role selector
+    useEffect(() => {
+        const fetchRoles = async () => {
+            if (!schedule?.department_id) return
+            try {
+                const response = await getRolesByDepartment(schedule.department_id)
+                setDepartmentRoles(response.data || [])
+            } catch (err) {
+                console.error('Failed to fetch roles:', err)
+                setDepartmentRoles([])
+            }
+        }
+        fetchRoles()
     }, [schedule?.department_id])
 
     // Group and filter assignments by subteam
@@ -222,6 +245,8 @@ export default function ScheduleDetailPage() {
                     <AssignmentsList
                         groupedAssignments={groupedAssignments}
                         onStatusChange={changeAssignmentStatus}
+                        onRoleChange={changeAssignmentRole}
+                        roles={departmentRoles}
                         canManage={isAdmin || isDepartmentHead}
                     />
                 )}

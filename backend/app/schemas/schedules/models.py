@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, model_validator
 
+from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerResponse
 
@@ -58,6 +59,7 @@ class AssignmentResponse(BaseModel):
     reminder_sent_at: datetime | None = None
     workers: WorkerResponse | None = None  # Nested worker object from joined query
     subteams: SubteamResponse | None = None  # Nested subteam object from joined query
+    department_roles: DepartmentRoleResponse | None = None  # Nested role object from joined query
     schedules: "Schedule | None" = None  # Nested schedule object from joined query
 
 

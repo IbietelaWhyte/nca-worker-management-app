@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
     getSchedule,
     updateAssignmentStatus,
+    setAssignmentRole,
     triggerReminders,
     triggerRemindersForSchedule,
 } from '@/api/schedules'
@@ -40,6 +41,13 @@ export function useScheduleDetail(scheduleId) {
         return response.data
     }
 
+    const changeAssignmentRole = async (assignmentId, departmentRoleId) => {
+        // The role endpoint returns a bare row (no nested worker/subteam), so refetch
+        // the full schedule to keep grouping and worker details intact.
+        await setAssignmentRole(assignmentId, departmentRoleId)
+        await fetchSchedule()
+    }
+
     const sendReminders = async () => {
         const response = await triggerReminders()
         return response.data
@@ -56,6 +64,7 @@ export function useScheduleDetail(scheduleId) {
         error,
         refetch: fetchSchedule,
         changeAssignmentStatus,
+        changeAssignmentRole,
         sendReminders,
         sendRemindersForSchedule,
     }

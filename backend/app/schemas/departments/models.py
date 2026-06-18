@@ -3,7 +3,14 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.workers.models import Worker
+
+
+class WorkerWithDepartmentRole(Worker):
+    """A department member with their standing role in that department (if any)."""
+
+    department_role: DepartmentRoleResponse | None = None
 
 
 class Department(BaseModel):
@@ -27,7 +34,7 @@ class DepartmentResponse(Department):
 
 
 class DepartmentWithWorkersResponse(DepartmentResponse):
-    workers: list[Worker] = []
+    workers: list[WorkerWithDepartmentRole] = []
 
 
 class DepartmentUpdate(BaseModel):

@@ -11,6 +11,7 @@ from tests.unit.services.conftest import (
     make_assignment,
     make_availability,
     make_department,
+    make_department_role,
     make_schedule,
     make_worker,
 )
@@ -23,13 +24,17 @@ def service(
     mock_department_repo,
     mock_subteam_repo,
     mock_availability_repo,
+    mock_department_role_repo,
 ):
+    # Default: workers have no standing role unless a test overrides this.
+    mock_department_role_repo.get_role_for_worker_in_department.return_value = None
     return ScheduleService(
         schedule_repo=mock_schedule_repo,
         worker_repo=mock_worker_repo,
         department_repo=mock_department_repo,
         subteam_repo=mock_subteam_repo,
         availability_repo=mock_availability_repo,
+        department_role_repo=mock_department_role_repo,
     )
 
 
@@ -205,6 +210,67 @@ class TestRoundRobin:
         assert assignments_arg[0]["worker_id"] == str(never_assigned.id)
 
 
+class TestRoleAutoFill:
+    def test_assignment_inherits_worker_standing_role(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_availability_repo,
+        mock_department_role_repo,
+    ):
+        dept = make_department(workers_per_slot=1)
+        worker = make_worker()
+        role = make_department_role(department_id=dept.id)
+        schedule = make_schedule(department_id=dept.id)
+
+        mock_department_repo.get_by_id.return_value = dept
+        mock_worker_repo.get_department_only_workers.return_value = [worker]
+        mock_availability_repo.get_by_worker_and_type.return_value = None
+        mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = schedule
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_schedule_repo.get_assignments_for_worker.return_value = []
+        mock_department_role_repo.get_role_for_worker_in_department.return_value = role
+
+        service.generate_schedule(make_generate_request(department_id=dept.id), created_by=uuid4())
+
+        assignments_arg = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
+        assert assignments_arg[0]["department_role_id"] == str(role.id)
+
+    def test_assignment_role_is_none_when_worker_has_no_role(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_availability_repo,
+        mock_department_role_repo,
+    ):
+        dept = make_department(workers_per_slot=1)
+        worker = make_worker()
+        schedule = make_schedule(department_id=dept.id)
+
+        mock_department_repo.get_by_id.return_value = dept
+        mock_worker_repo.get_department_only_workers.return_value = [worker]
+        mock_availability_repo.get_by_worker_and_type.return_value = None
+        mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = schedule
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_schedule_repo.get_assignments_for_worker.return_value = []
+        mock_department_role_repo.get_role_for_worker_in_department.return_value = None
+
+        service.generate_schedule(make_generate_request(department_id=dept.id), created_by=uuid4())
+
+        assignments_arg = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
+        assert assignments_arg[0]["department_role_id"] is None
+
+
 class TestUpdateAssignmentStatus:
     def test_updates_successfully(self, service, mock_schedule_repo):
         assignment = make_assignment()
@@ -218,3 +284,50 @@ class TestUpdateAssignmentStatus:
         mock_schedule_repo.update_assignment_status.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.update_assignment_status(uuid4(), AssignmentStatus.CONFIRMED)
+
+
+class TestUpdateAssignmentRole:
+    def test_sets_role_when_in_same_department(self, service, mock_schedule_repo, mock_department_role_repo):
+        dept_id = uuid4()
+        assignment = make_assignment()
+        schedule = make_schedule(id=assignment.schedule_id, department_id=dept_id)
+        role = make_department_role(department_id=dept_id)
+        updated = make_assignment(id=assignment.id, department_role_id=role.id)
+
+        mock_schedule_repo.get_assignment_by_id.return_value = assignment
+        mock_schedule_repo.get_by_id.return_value = schedule
+        mock_department_role_repo.get_by_id.return_value = role
+        mock_schedule_repo.update_assignment_role.return_value = updated
+
+        result = service.update_assignment_role(assignment.id, role.id)
+        assert result.department_role_id == role.id
+        mock_schedule_repo.update_assignment_role.assert_called_once_with(assignment.id, role.id)
+
+    def test_clears_role_without_validation(self, service, mock_schedule_repo, mock_department_role_repo):
+        assignment = make_assignment()
+        cleared = make_assignment(id=assignment.id, department_role_id=None)
+        mock_schedule_repo.get_assignment_by_id.return_value = assignment
+        mock_schedule_repo.update_assignment_role.return_value = cleared
+
+        result = service.update_assignment_role(assignment.id, None)
+        assert result.department_role_id is None
+        # No department/role lookups needed when clearing.
+        mock_department_role_repo.get_by_id.assert_not_called()
+
+    def test_raises_when_role_in_different_department(self, service, mock_schedule_repo, mock_department_role_repo):
+        assignment = make_assignment()
+        schedule = make_schedule(id=assignment.schedule_id, department_id=uuid4())
+        role = make_department_role(department_id=uuid4())  # different department
+
+        mock_schedule_repo.get_assignment_by_id.return_value = assignment
+        mock_schedule_repo.get_by_id.return_value = schedule
+        mock_department_role_repo.get_by_id.return_value = role
+
+        with pytest.raises(BadRequestError, match="does not belong"):
+            service.update_assignment_role(assignment.id, role.id)
+        mock_schedule_repo.update_assignment_role.assert_not_called()
+
+    def test_raises_when_assignment_not_found(self, service, mock_schedule_repo):
+        mock_schedule_repo.get_assignment_by_id.return_value = None
+        with pytest.raises(NotFoundError, match="not found"):
+            service.update_assignment_role(uuid4(), uuid4())

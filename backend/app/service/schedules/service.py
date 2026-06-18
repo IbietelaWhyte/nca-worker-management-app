@@ -4,6 +4,7 @@ from uuid import UUID
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.availabilities.repository import AvailabilityRepository
+from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
@@ -28,12 +29,14 @@ class ScheduleService:
         department_repo: DepartmentRepository,
         subteam_repo: SubteamRepository,
         availability_repo: AvailabilityRepository,
+        department_role_repo: DepartmentRoleRepository,
     ) -> None:
         self.schedule_repo = schedule_repo
         self.worker_repo = worker_repo
         self.department_repo = department_repo
         self.subteam_repo = subteam_repo
         self.availability_repo = availability_repo
+        self.department_role_repo = department_role_repo
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="ScheduleService")
@@ -224,6 +227,14 @@ class ScheduleService:
                 worker_subteams[w.id] = str(worker_subteam.id) if worker_subteam else None
             logger.info("worker_subteams_resolved_for_department_all", worker_subteams=worker_subteams)
 
+        # Auto-fill each assignment's role from the worker's standing department role.
+        # The HOD can override an individual assignment's role later via update_assignment_role.
+        worker_roles: dict[UUID, str | None] = {}
+        for w in selected:
+            role = self.department_role_repo.get_role_for_worker_in_department(w.id, data.department_id)
+            worker_roles[w.id] = str(role.id) if role else None
+        log.info("worker_roles_resolved", worker_roles=worker_roles)
+
         assignments = [
             {
                 "schedule_id": str(schedule.id),
@@ -231,6 +242,7 @@ class ScheduleService:
                 "subteam_id": worker_subteams.get(worker.id, schedule_subteam_id)
                 if data.scope == ScopeType.DEPARTMENT_ALL
                 else schedule_subteam_id,
+                "department_role_id": worker_roles.get(worker.id),
                 "status": AssignmentStatus.PENDING,
             }
             for worker in selected
@@ -256,6 +268,55 @@ class ScheduleService:
             assignment_id=str(assignment_id),
             status=status,
         )
+        return updated
+
+    def update_assignment_role(self, assignment_id: UUID, department_role_id: UUID | None) -> AssignmentResponse:
+        """Override the department role on a schedule assignment.
+
+        Validates that the role (when provided) belongs to the same department as the
+        assignment's schedule, preventing a role from another department being applied.
+
+        Args:
+            assignment_id: Unique identifier of the assignment to update.
+            department_role_id: The role to set, or None to clear it.
+
+        Returns:
+            AssignmentResponse: The updated assignment.
+
+        Raises:
+            NotFoundError: If the assignment, its schedule, or the role is not found.
+            BadRequestError: If the role belongs to a different department.
+        """
+        log = self.logger.bind(
+            method="update_assignment_role",
+            assignment_id=str(assignment_id),
+            department_role_id=str(department_role_id) if department_role_id else None,
+        )
+
+        assignment = self.schedule_repo.get_assignment_by_id(assignment_id)
+        if not assignment:
+            log.warning("assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+
+        if department_role_id is not None:
+            schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
+            if not schedule:
+                log.warning("schedule_not_found", schedule_id=str(assignment.schedule_id))
+                raise NotFoundError(f"Schedule {assignment.schedule_id} not found")
+
+            role = self.department_role_repo.get_by_id(department_role_id)
+            if not role:
+                log.warning("role_not_found")
+                raise NotFoundError(f"Department role {department_role_id} not found")
+            if role.department_id != schedule.department_id:
+                log.warning("role_department_mismatch", role_department_id=str(role.department_id))
+                raise BadRequestError("Role does not belong to the schedule's department")
+
+        updated = self.schedule_repo.update_assignment_role(assignment_id, department_role_id)
+        if not updated:
+            log.warning("assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+        log.info("assignment_role_updated")
         return updated
 
     def delete_schedule(self, schedule_id: UUID) -> None:

@@ -68,13 +68,15 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         )
         log.debug("fetched_department_with_workers_raw_response", response=response.data if response else None)
 
-        # Flatten the nested worker_departments structure
+        # Flatten the nested worker_departments structure, attaching each member's
+        # standing department role (from the junction's department_role_id) onto the worker.
         if response and response.data and isinstance(response.data, dict):
             data = cast(dict[str, Any], response.data)
             if "workers" in data and isinstance(data["workers"], list):
-                # Extract worker objects from the junction table structure
                 data["workers"] = [
-                    item["workers"] for item in data["workers"] if isinstance(item, dict) and "workers" in item
+                    {**item["workers"], "department_role": item.get("department_roles")}
+                    for item in data["workers"]
+                    if isinstance(item, dict) and item.get("workers")
                 ]
 
         department = self._to_model(response.data, DepartmentWithWorkersResponse) if response else None
