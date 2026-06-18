@@ -35,7 +35,7 @@ export default function LoginPage() {
                     <p className="text-muted-foreground text-sm">Sign in to your account</p>
                 </div>
 
-                <div className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
                         <label className="text-sm font-medium">Email</label>
                         <input
@@ -60,10 +60,10 @@ export default function LoginPage() {
 
                     {error && <p className="text-sm text-destructive">{error}</p>}
 
-                    <Button onClick={handleSubmit} disabled={loading} className="w-full">
+                    <Button type="submit" disabled={loading} className="w-full">
                         {loading ? 'Signing in...' : 'Sign in'}
                     </Button>
-                </div>
+                </form>
             </div>
         </div>
     )

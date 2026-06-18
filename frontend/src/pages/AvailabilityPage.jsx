@@ -13,8 +13,11 @@ export default function AvailabilityPage() {
     const { workers, loading: workersLoading } = useWorkers()
     const [selectedWorkerId, setSelectedWorkerId] = useState('')
 
-    const currentWorker = workers.find(w => w.email === user?.email)
+    // Workers are linked to auth users by email (auth_user_id is not serialized
+    // to the client). Compare case-insensitively to avoid spurious mismatches.
+    const currentWorker = workers.find(w => w.email?.toLowerCase() === user?.email?.toLowerCase())
     const resolvedWorkerId = isAdmin ? selectedWorkerId : (currentWorker?.id ?? '')
+    const noProfileLinked = !isAdmin && !workersLoading && !currentWorker
 
     const {
         specificDates,
@@ -64,13 +67,15 @@ export default function AvailabilityPage() {
                 </div>
             )}
 
-            {/* No worker selected yet — admin only */}
+            {/* No worker resolved — admin hasn't picked one, profile is loading, or none is linked */}
             {!resolvedWorkerId && (
                 <div className="flex items-center justify-center h-48 border rounded-lg border-dashed">
                     <p className="text-muted-foreground text-sm">
                         {isAdmin
                             ? 'Select a worker above to manage their availability'
-                            : 'Loading your availability...'}
+                            : noProfileLinked
+                              ? 'No worker profile is linked to your account. Please contact an administrator.'
+                              : 'Loading your availability...'}
                     </p>
                 </div>
             )}

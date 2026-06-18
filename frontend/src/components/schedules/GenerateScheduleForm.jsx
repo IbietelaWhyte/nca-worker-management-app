@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { format } from 'date-fns'
+import { format, startOfToday } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,7 +54,8 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
         }
     }
 
-    const handleSubmit = async () => {
+    const handleSubmit = async e => {
+        e?.preventDefault()
         if (!form.title.trim()) return setError('Title is required')
         if (!form.scheduled_date) return setError('Date is required')
         if (!form.start_time || !form.end_time) return setError('Start and end time are required')
@@ -85,7 +86,7 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
     }
 
     return (
-        <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
                 <Alert variant="destructive">
                     <p className="text-sm">{error}</p>
@@ -110,6 +111,7 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
                 <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                     <PopoverTrigger asChild>
                         <Button
+                            type="button"
                             variant="outline"
                             className={cn(
                                 'w-full justify-start text-left font-normal',
@@ -130,7 +132,7 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
                                 setForm(prev => ({ ...prev, scheduled_date: date }))
                                 setCalendarOpen(false)
                             }}
-                            disabled={date => date < new Date()}
+                            disabled={date => date < startOfToday()}
                             initialFocus
                         />
                     </PopoverContent>
@@ -244,13 +246,13 @@ export default function GenerateScheduleForm({ departmentId, onSubmit, onCancel 
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={onCancel} disabled={loading}>
+                <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
                     Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={loading}>
+                <Button type="submit" disabled={loading}>
                     {loading ? 'Generating...' : 'Generate Schedule'}
                 </Button>
             </div>
-        </div>
+        </form>
     )
 }
