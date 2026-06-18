@@ -15,7 +15,9 @@ const DepartmentDetailPage = lazy(() => import('@/pages/DepartmentDetailPage'))
 const SchedulesPage = lazy(() => import('@/pages/SchedulesPage'))
 const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
+const AccountPage = lazy(() => import('@/pages/AccountPage'))
 const ConfirmPage = lazy(() => import('@/pages/ConfirmPage'))
+const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
 
 const PageFallback = () => (
     <div className="min-h-screen flex items-center justify-center">
@@ -99,8 +101,18 @@ function App() {
                             </ProtectedLayout>
                         }
                     />
+                    <Route
+                        path="/account"
+                        element={
+                            <ProtectedLayout>
+                                <AccountPage />
+                            </ProtectedLayout>
+                        }
+                    />
                     {/* Public route — no auth required, accessible by workers via SMS link */}
                     <Route path="/confirm/:token" element={<ConfirmPage />} />
+                    {/* Public route — password recovery link target */}
+                    <Route path="/reset-password" element={<ResetPasswordPage />} />
                 </Routes>
             </Suspense>
         </AuthProvider>

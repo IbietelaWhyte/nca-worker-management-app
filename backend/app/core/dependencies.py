@@ -14,6 +14,7 @@ from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
+from app.service.account.service import AccountService
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
@@ -303,6 +304,25 @@ def get_department_role_service(
     return DepartmentRoleService(
         department_role_repo=department_role_repo,
         department_repo=department_repo,
+    )
+
+
+def get_account_service(
+    worker_service: WorkerService = Depends(get_worker_service),
+    client: Client = Depends(get_db),
+) -> AccountService:
+    """FastAPI dependency that provides an AccountService instance.
+
+    Args:
+        worker_service: WorkerService dependency for resolving/updating the caller's own record.
+        client: Supabase client (service-role) for privileged auth admin operations.
+
+    Returns:
+        AccountService: Service for self-service account operations.
+    """
+    return AccountService(
+        worker_service=worker_service,
+        client=client,
     )
 
 

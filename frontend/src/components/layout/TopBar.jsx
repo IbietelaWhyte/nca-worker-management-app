@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
@@ -8,7 +9,7 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { LogOut } from 'lucide-react'
+import { LogOut, Settings } from 'lucide-react'
 
 function getInitials(email) {
     if (!email) return '?'
@@ -17,6 +18,7 @@ function getInitials(email) {
 
 export default function TopBar() {
     const { user, signOut } = useAuth()
+    const navigate = useNavigate()
 
     return (
         <div className="h-16 border-b flex items-center justify-between px-6 bg-background">
@@ -39,6 +41,14 @@ export default function TopBar() {
                     <DropdownMenuLabel className="text-xs text-muted-foreground font-normal truncate">
                         {user?.email}
                     </DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                        onClick={() => navigate('/account')}
+                        className="cursor-pointer"
+                    >
+                        <Settings size={14} className="mr-2" />
+                        Account settings
+                    </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                         onClick={signOut}

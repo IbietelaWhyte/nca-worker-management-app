@@ -1,3 +1,4 @@
+from app.router.account import router as account
 from app.router.authentication import router as authentication
 from app.router.availabilities import router as availabilities
 from app.router.confirmation_tokens import router as confirmation_tokens
@@ -8,6 +9,7 @@ from app.router.subteams import router as subteams
 from app.router.workers import router as workers
 
 __all__ = [
+    "account",
     "workers",
     "departments",
     "department_roles",
