@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { CheckCircle, XCircle, Clock } from 'lucide-react'
 
 const STATUS_CONFIG = {
@@ -9,12 +16,18 @@ const STATUS_CONFIG = {
     declined: { label: 'Declined', variant: 'destructive', icon: XCircle },
 }
 
+// Radix Select disallows an empty-string value, so use a sentinel for "no role".
+const NO_ROLE = '__none__'
+
 export default function AssignmentsList({
     groupedAssignments = [],
     onStatusChange,
+    onRoleChange,
+    roles = [],
     canManage = false,
 }) {
     const [loadingId, setLoadingId] = useState(null)
+    const [roleLoadingId, setRoleLoadingId] = useState(null)
 
     const handleStatusChange = async (assignmentId, status) => {
         setLoadingId(assignmentId)
@@ -22,6 +35,15 @@ export default function AssignmentsList({
             await onStatusChange(assignmentId, status)
         } finally {
             setLoadingId(null)
+        }
+    }
+
+    const handleRoleChange = async (assignmentId, value) => {
+        setRoleLoadingId(assignmentId)
+        try {
+            await onRoleChange(assignmentId, value === NO_ROLE ? null : value)
+        } finally {
+            setRoleLoadingId(null)
         }
     }
 
@@ -85,6 +107,51 @@ export default function AssignmentsList({
                                             </div>
 
                                             <div className="flex items-center gap-2">
+                                                {canManage ? (
+                                                    <Select
+                                                        value={
+                                                            assignment.department_roles?.id ??
+                                                            NO_ROLE
+                                                        }
+                                                        onValueChange={value =>
+                                                            handleRoleChange(assignment.id, value)
+                                                        }
+                                                        disabled={
+                                                            roleLoadingId === assignment.id ||
+                                                            roles.length === 0
+                                                        }
+                                                    >
+                                                        <SelectTrigger size="sm" className="w-36">
+                                                            <SelectValue
+                                                                placeholder={
+                                                                    roles.length === 0
+                                                                        ? 'No roles'
+                                                                        : 'No role'
+                                                                }
+                                                            />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value={NO_ROLE}>
+                                                                No role
+                                                            </SelectItem>
+                                                            {roles.map(r => (
+                                                                <SelectItem key={r.id} value={r.id}>
+                                                                    {r.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    assignment.department_roles && (
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="text-xs"
+                                                        >
+                                                            {assignment.department_roles.name}
+                                                        </Badge>
+                                                    )
+                                                )}
+
                                                 <Badge
                                                     variant={config.variant}
                                                     className="flex items-center gap-1"

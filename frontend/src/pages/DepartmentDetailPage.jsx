@@ -3,14 +3,17 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useDepartmentDetail } from '@/hooks/useDepartmentDetail'
 import { useWorkers } from '@/hooks/useWorkers'
 import { useSubteams } from '@/hooks/useSubteams'
+import { useRoles } from '@/hooks/useRoles'
 import { useAuth } from '@/context/AuthContext'
 import SubteamForm from '@/components/subteams/SubteamForm'
+import RoleForm from '@/components/roles/RoleForm'
 import CsvImportDialog from '@/components/departments/CsvImportDialog'
 import {
     getSubteamWithWorkers,
     assignWorkerToSubteam,
     unassignWorkerFromSubteam,
 } from '@/api/subteams'
+import { assignWorkerRole, unassignWorkerRole } from '@/api/roles'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -23,6 +26,13 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import {
     ArrowLeft,
@@ -37,6 +47,9 @@ import {
     ChevronDown,
     Upload,
 } from 'lucide-react'
+
+// Radix Select disallows an empty-string value, so use a sentinel for "no role".
+const NO_ROLE = '__none__'
 
 export default function DepartmentDetailPage() {
     const { id } = useParams()
@@ -64,6 +77,9 @@ export default function DepartmentDetailPage() {
         removeSubteam,
     } = useSubteams(id)
 
+    // Roles
+    const { roles, loading: rolesLoading, addRole, editRole, removeRole } = useRoles(id)
+
     // Member dialog state
     const [addMemberOpen, setAddMemberOpen] = useState(false)
     const [csvImportOpen, setCsvImportOpen] = useState(false)
@@ -81,6 +97,14 @@ export default function DepartmentDetailPage() {
     const [addSubteamMemberOpen, setAddSubteamMemberOpen] = useState(false)
     const [selectedSubteam, setSelectedSubteam] = useState(null)
     const [subteamMemberActionLoading, setSubteamMemberActionLoading] = useState(null)
+
+    // Role dialog + inline assignment state
+    const [roleDialogOpen, setRoleDialogOpen] = useState(false)
+    const [editingRole, setEditingRole] = useState(null)
+    const [roleActionLoading, setRoleActionLoading] = useState(null)
+    const [memberRoleLoading, setMemberRoleLoading] = useState(null)
+
+    const canManage = isAdmin || isDepartmentHead
 
     // Workers not already in this department
     const memberIds = new Set(department?.workers?.map(w => w.id) ?? [])
@@ -215,6 +239,57 @@ export default function DepartmentDetailPage() {
         }
     }
 
+    // Role handlers
+    const handleOpenCreateRole = () => {
+        setEditingRole(null)
+        setRoleDialogOpen(true)
+    }
+
+    const handleOpenEditRole = roleToEdit => {
+        setEditingRole(roleToEdit)
+        setRoleDialogOpen(true)
+    }
+
+    const handleRoleSubmit = async formData => {
+        if (editingRole) {
+            await editRole(editingRole.id, formData)
+        } else {
+            await addRole(formData)
+        }
+        setRoleDialogOpen(false)
+        setEditingRole(null)
+    }
+
+    const handleDeleteRole = async roleToDelete => {
+        if (!confirm(`Delete role "${roleToDelete.name}"? This cannot be undone.`)) return
+        setRoleActionLoading(roleToDelete.id)
+        try {
+            await removeRole(roleToDelete.id)
+        } finally {
+            setRoleActionLoading(null)
+        }
+    }
+
+    // Set or clear a member's standing department role from the Members tab.
+    const handleMemberRoleChange = async (worker, value) => {
+        setMemberRoleLoading(worker.id)
+        try {
+            if (value === NO_ROLE) {
+                if (worker.department_role) {
+                    await unassignWorkerRole(worker.department_role.id, worker.id)
+                }
+            } else {
+                await assignWorkerRole(value, worker.id)
+            }
+            await refetch()
+        } catch (error) {
+            console.error('Failed to update member role:', error)
+            alert(error.response?.data?.detail || 'Failed to update role')
+        } finally {
+            setMemberRoleLoading(null)
+        }
+    }
+
     if (deptLoading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -267,6 +342,14 @@ export default function DepartmentDetailPage() {
                         {subteams.length > 0 && (
                             <Badge variant="secondary" className="ml-2 text-xs">
                                 {subteams.length}
+                            </Badge>
+                        )}
+                    </TabsTrigger>
+                    <TabsTrigger value="roles">
+                        Roles
+                        {roles.length > 0 && (
+                            <Badge variant="secondary" className="ml-2 text-xs">
+                                {roles.length}
                             </Badge>
                         )}
                     </TabsTrigger>
@@ -340,8 +423,63 @@ export default function DepartmentDetailPage() {
                                                         </div>
                                                     </TableCell>
                                                     <TableCell>{worker.email}</TableCell>
-                                                    <TableCell className="text-muted-foreground">
-                                                        {isHod ? 'Head of Department' : 'Member'}
+                                                    <TableCell>
+                                                        {canManage ? (
+                                                            <Select
+                                                                value={
+                                                                    worker.department_role?.id ??
+                                                                    NO_ROLE
+                                                                }
+                                                                onValueChange={value =>
+                                                                    handleMemberRoleChange(
+                                                                        worker,
+                                                                        value
+                                                                    )
+                                                                }
+                                                                disabled={
+                                                                    memberRoleLoading ===
+                                                                        worker.id ||
+                                                                    roles.length === 0
+                                                                }
+                                                            >
+                                                                <SelectTrigger
+                                                                    size="sm"
+                                                                    className="w-40"
+                                                                >
+                                                                    <SelectValue
+                                                                        placeholder={
+                                                                            roles.length === 0
+                                                                                ? 'No roles defined'
+                                                                                : 'No role'
+                                                                        }
+                                                                    />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value={NO_ROLE}>
+                                                                        No role
+                                                                    </SelectItem>
+                                                                    {roles.map(r => (
+                                                                        <SelectItem
+                                                                            key={r.id}
+                                                                            value={r.id}
+                                                                        >
+                                                                            {r.name}
+                                                                        </SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        ) : worker.department_role ? (
+                                                            <Badge
+                                                                variant="secondary"
+                                                                className="text-xs"
+                                                            >
+                                                                {worker.department_role.name}
+                                                            </Badge>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">
+                                                                —
+                                                            </span>
+                                                        )}
                                                     </TableCell>
                                                     <TableCell className="text-right">
                                                         <div className="flex justify-end gap-2">
@@ -697,6 +835,112 @@ export default function DepartmentDetailPage() {
                         )}
                     </div>
                 </TabsContent>
+
+                {/* Roles tab */}
+                <TabsContent value="roles" className="mt-4">
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm text-muted-foreground">
+                                Define functional roles (e.g. Teacher, Helper) and assign them to
+                                members on the Members tab
+                            </p>
+                            {canManage && (
+                                <Button size="sm" onClick={handleOpenCreateRole}>
+                                    <Plus size={16} className="mr-2" /> Add Role
+                                </Button>
+                            )}
+                        </div>
+
+                        {rolesLoading && (
+                            <div className="flex items-center justify-center h-32">
+                                <p className="text-muted-foreground text-sm">Loading roles...</p>
+                            </div>
+                        )}
+
+                        {!rolesLoading && roles.length === 0 && (
+                            <div className="flex flex-col items-center justify-center h-40 border rounded-lg">
+                                <p className="text-muted-foreground text-sm">No roles yet</p>
+                                {canManage && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="mt-3"
+                                        onClick={handleOpenCreateRole}
+                                    >
+                                        Add first role
+                                    </Button>
+                                )}
+                            </div>
+                        )}
+
+                        {!rolesLoading && roles.length > 0 && (
+                            <div className="border rounded-lg overflow-hidden">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Name</TableHead>
+                                            <TableHead>Description</TableHead>
+                                            {canManage && (
+                                                <TableHead className="text-right">
+                                                    Actions
+                                                </TableHead>
+                                            )}
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {roles.map(roleItem => (
+                                            <TableRow key={roleItem.id}>
+                                                <TableCell className="font-medium">
+                                                    {roleItem.name}
+                                                </TableCell>
+                                                <TableCell className="text-muted-foreground">
+                                                    {roleItem.description ?? '—'}
+                                                </TableCell>
+                                                {canManage && (
+                                                    <TableCell className="text-right">
+                                                        <div className="flex justify-end gap-2">
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() =>
+                                                                    handleOpenEditRole(roleItem)
+                                                                }
+                                                            >
+                                                                <Pencil
+                                                                    size={14}
+                                                                    className="mr-1"
+                                                                />{' '}
+                                                                Edit
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                disabled={
+                                                                    roleActionLoading ===
+                                                                    roleItem.id
+                                                                }
+                                                                onClick={() =>
+                                                                    handleDeleteRole(roleItem)
+                                                                }
+                                                                className="text-destructive hover:text-destructive"
+                                                            >
+                                                                <Trash2
+                                                                    size={14}
+                                                                    className="mr-1"
+                                                                />{' '}
+                                                                Delete
+                                                            </Button>
+                                                        </div>
+                                                    </TableCell>
+                                                )}
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        )}
+                    </div>
+                </TabsContent>
             </Tabs>
 
             {/* CSV import dialog */}
@@ -817,6 +1061,23 @@ export default function DepartmentDetailPage() {
                         onCancel={() => {
                             setSubteamDialogOpen(false)
                             setEditingSubteam(null)
+                        }}
+                    />
+                </DialogContent>
+            </Dialog>
+
+            {/* Create / Edit role dialog */}
+            <Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>{editingRole ? 'Edit Role' : 'Add Role'}</DialogTitle>
+                    </DialogHeader>
+                    <RoleForm
+                        initial={editingRole ?? undefined}
+                        onSubmit={handleRoleSubmit}
+                        onCancel={() => {
+                            setRoleDialogOpen(false)
+                            setEditingRole(null)
                         }}
                     />
                 </DialogContent>

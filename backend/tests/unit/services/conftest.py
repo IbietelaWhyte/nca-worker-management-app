@@ -5,12 +5,14 @@ from uuid import uuid4
 import pytest
 
 from app.repository.availabilities.repository import AvailabilityRepository
+from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.authentication.models import RegisterRequest
 from app.schemas.availabilities.models import AvailabilityResponse
+from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
@@ -46,6 +48,11 @@ def mock_availability_repo():
 @pytest.fixture
 def mock_subteam_repo():
     return MagicMock(spec=SubteamRepository)
+
+
+@pytest.fixture
+def mock_department_role_repo():
+    return MagicMock(spec=DepartmentRoleRepository)
 
 
 @pytest.fixture
@@ -101,6 +108,15 @@ def make_subteam(**kwargs) -> SubteamResponse:
         description=kwargs.get("description", None),
         workers_per_slot=kwargs.get("workers_per_slot", None),
         created_at=kwargs.get("created_at", date.today()),
+    )
+
+
+def make_department_role(**kwargs) -> DepartmentRoleResponse:
+    return DepartmentRoleResponse(
+        id=kwargs.get("id", uuid4()),
+        department_id=kwargs.get("department_id", uuid4()),
+        name=kwargs.get("name", "Teacher"),
+        description=kwargs.get("description", None),
     )
 
 

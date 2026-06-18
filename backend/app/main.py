@@ -14,7 +14,16 @@ from app.core.logging import get_logger, setup_logging
 from app.core.middleware import RequestLoggingMiddleware
 from app.core.supabase import get_supabase
 from app.repository.schedules.repository import ScheduleRepository
-from app.router import authentication, availabilities, confirmation_tokens, departments, schedules, subteams, workers
+from app.router import (
+    authentication,
+    availabilities,
+    confirmation_tokens,
+    department_roles,
+    departments,
+    schedules,
+    subteams,
+    workers,
+)
 from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
 
@@ -96,6 +105,7 @@ app.include_router(departments.router, prefix="/api/v1")
 app.include_router(schedules.router, prefix="/api/v1")
 app.include_router(availabilities.router, prefix="/api/v1")
 app.include_router(subteams.router, prefix="/api/v1")
+app.include_router(department_roles.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(confirmation_tokens.router, prefix="/api/v1")
 

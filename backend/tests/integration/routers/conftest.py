@@ -8,6 +8,7 @@ from app.core.authentication import verify_token
 from app.core.dependencies import (
     get_authentication_service,
     get_availability_service,
+    get_department_role_service,
     get_department_service,
     get_reminder_service,
     get_schedule_service,
@@ -18,6 +19,7 @@ from app.main import app
 from app.schemas.models import TokenPayload, UserRole
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
+from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
@@ -55,6 +57,11 @@ def mock_subteam_service():
 
 
 @pytest.fixture
+def mock_department_role_service():
+    return MagicMock(spec=DepartmentRoleService)
+
+
+@pytest.fixture
 def mock_reminder_service():
     return MagicMock(spec=ReminderService)
 
@@ -71,6 +78,7 @@ def make_client(
     schedule_service=None,
     availability_service=None,
     subteam_service=None,
+    department_role_service=None,
     reminder_service=None,
     authentication_service=None,
 ) -> TestClient:
@@ -86,6 +94,8 @@ def make_client(
         app.dependency_overrides[get_availability_service] = lambda: availability_service
     if subteam_service:
         app.dependency_overrides[get_subteam_service] = lambda: subteam_service
+    if department_role_service:
+        app.dependency_overrides[get_department_role_service] = lambda: department_role_service
     if reminder_service:
         app.dependency_overrides[get_reminder_service] = lambda: reminder_service
     if authentication_service:

@@ -307,6 +307,36 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             log.warning("assignment_not_found")
         return assignment
 
+    def update_assignment_role(self, assignment_id: UUID, department_role_id: UUID | None) -> AssignmentResponse | None:
+        """
+        Update the department role of a schedule assignment.
+
+        Args:
+            assignment_id (UUID): The unique identifier of the assignment to update.
+            department_role_id (UUID | None): The role to set, or None to clear it.
+
+        Returns:
+            AssignmentResponse | None: The updated assignment if successful, None if the
+                                      assignment was not found.
+        """
+        log = self.logger.bind(
+            method="update_assignment_role",
+            assignment_id=str(assignment_id),
+            department_role_id=str(department_role_id) if department_role_id else None,
+        )
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update({q.AssignmentColumns.DEPARTMENT_ROLE_ID: str(department_role_id) if department_role_id else None})
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .execute()
+        )
+        assignment = AssignmentResponse.model_validate(response.data[0]) if response.data else None
+        if assignment:
+            log.info("assignment_role_updated")
+        else:
+            log.warning("assignment_not_found")
+        return assignment
+
     def delete_assignments_for_schedule(self, schedule_id: UUID) -> bool:
         """
         Delete all worker assignments associated with a specific schedule.

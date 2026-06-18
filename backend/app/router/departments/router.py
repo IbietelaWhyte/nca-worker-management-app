@@ -6,10 +6,12 @@ from app.core.dependencies import (
     AdminUser,
     CurrentUser,
     HODUser,
+    get_department_role_service,
     get_department_service,
     get_subteam_service,
     get_worker_service,
 )
+from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import (
     DepartmentCreate,
     DepartmentResponse,
@@ -19,6 +21,7 @@ from app.schemas.departments.models import (
 from app.schemas.models import MessageResponse, TokenPayload, UserRole
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerImportResult
+from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.subteams.service import SubteamService
 from app.service.workers.service import WorkerService
@@ -217,3 +220,12 @@ def list_subteams(
     service: SubteamService = Depends(get_subteam_service),
 ) -> list[SubteamResponse]:
     return service.get_subteams_by_department(department_id)
+
+
+@router.get("/{department_id}/roles", response_model=list[DepartmentRoleResponse])
+def list_roles(
+    department_id: UUID,
+    _: TokenPayload = CurrentUser,
+    service: DepartmentRoleService = Depends(get_department_role_service),
+) -> list[DepartmentRoleResponse]:
+    return service.get_roles_by_department(department_id)

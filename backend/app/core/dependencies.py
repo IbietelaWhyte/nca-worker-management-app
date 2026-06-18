@@ -9,6 +9,7 @@ from app.core.authentication import (
 from app.core.supabase import get_supabase
 from app.repository.availabilities.repository import AvailabilityRepository
 from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
+from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
@@ -16,6 +17,7 @@ from app.repository.workers.repository import WorkerRepository
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
+from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
@@ -101,6 +103,18 @@ def get_subteam_repository(client: Client = Depends(get_db)) -> SubteamRepositor
     return SubteamRepository(client)
 
 
+def get_department_role_repository(client: Client = Depends(get_db)) -> DepartmentRoleRepository:
+    """FastAPI dependency that provides a DepartmentRoleRepository instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+
+    Returns:
+        DepartmentRoleRepository: Repository for department role database operations.
+    """
+    return DepartmentRoleRepository(client)
+
+
 def get_confirmation_token_repository(client: Client = Depends(get_db)) -> ConfirmationTokenRepository:
     """FastAPI dependency that provides a ConfirmationTokenRepository instance.
 
@@ -122,6 +136,7 @@ def get_schedule_service(
     department_repo: DepartmentRepository = Depends(get_department_repository),
     subteam_repo: SubteamRepository = Depends(get_subteam_repository),
     availability_repo: AvailabilityRepository = Depends(get_availability_repository),
+    department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
 ) -> ScheduleService:
     """FastAPI dependency that provides a ScheduleService instance.
 
@@ -131,6 +146,7 @@ def get_schedule_service(
         department_repo: DepartmentRepository dependency.
         subteam_repo: SubteamRepository dependency.
         availability_repo: AvailabilityRepository dependency.
+        department_role_repo: DepartmentRoleRepository dependency for role auto-fill.
 
     Returns:
         ScheduleService: Service for schedule business logic operations.
@@ -141,6 +157,7 @@ def get_schedule_service(
         department_repo=department_repo,
         subteam_repo=subteam_repo,
         availability_repo=availability_repo,
+        department_role_repo=department_role_repo,
     )
 
 
@@ -266,6 +283,25 @@ def get_subteam_service(
     """
     return SubteamService(
         subteam_repo=subteam_repo,
+        department_repo=department_repo,
+    )
+
+
+def get_department_role_service(
+    department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
+    department_repo: DepartmentRepository = Depends(get_department_repository),
+) -> DepartmentRoleService:
+    """FastAPI dependency that provides a DepartmentRoleService instance.
+
+    Args:
+        department_role_repo: DepartmentRoleRepository dependency.
+        department_repo: DepartmentRepository dependency.
+
+    Returns:
+        DepartmentRoleService: Service for department role business logic operations.
+    """
+    return DepartmentRoleService(
+        department_role_repo=department_role_repo,
         department_repo=department_repo,
     )
 
