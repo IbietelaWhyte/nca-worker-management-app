@@ -21,7 +21,8 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
         setForm(prev => ({ ...prev, [name]: value }))
     }
 
-    const handleSubmit = async () => {
+    const handleSubmit = async e => {
+        e?.preventDefault()
         setError(null)
         setLoading(true)
         try {
@@ -34,7 +35,7 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
     }
 
     return (
-        <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
                 <Alert variant="destructive">
                     <p className="text-sm">{error}</p>
@@ -89,13 +90,13 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
-                <Button variant="outline" onClick={onCancel} disabled={loading}>
+                <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
                     Cancel
                 </Button>
-                <Button onClick={handleSubmit} disabled={loading}>
+                <Button type="submit" disabled={loading}>
                     {loading ? 'Saving...' : 'Save'}
                 </Button>
             </div>
-        </div>
+        </form>
     )
 }
