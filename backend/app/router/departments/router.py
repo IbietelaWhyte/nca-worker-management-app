@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -18,6 +18,7 @@ from app.schemas.departments.models import (
 )
 from app.schemas.models import MessageResponse, TokenPayload, UserRole
 from app.schemas.subteams.models import SubteamResponse
+from app.schemas.workers.models import WorkerImportResult
 from app.service.departments.service import DepartmentService
 from app.service.subteams.service import SubteamService
 from app.service.workers.service import WorkerService
@@ -147,6 +148,32 @@ def delete_department(
         service: Department service dependency.
     """
     service.delete_department(department_id)
+
+
+# NOTE: declared before "/{department_id}/workers/{worker_id}" so "import" is not parsed as a worker_id.
+@router.post("/{department_id}/workers/import", response_model=WorkerImportResult)
+async def import_workers(
+    department_id: UUID,
+    file: UploadFile = File(..., description="CSV file with columns: first_name, last_name, email, phone"),
+    dry_run: bool = Query(default=False, description="Validate and preview the import without writing any rows"),
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> WorkerImportResult:
+    """Bulk-import workers from a CSV file and assign them to a department (admin/HOD).
+
+    Args:
+        department_id: Department to assign the imported workers to.
+        file: Uploaded CSV file with a header row and the required columns.
+        dry_run: If True, validate and return a per-row preview without creating anything.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency.
+
+    Returns:
+        WorkerImportResult: Per-row outcomes and aggregate counts.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    file_bytes = await file.read()
+    return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run)
 
 
 @router.post("/{department_id}/workers/{worker_id}", response_model=MessageResponse)

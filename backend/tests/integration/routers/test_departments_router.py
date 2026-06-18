@@ -1,7 +1,8 @@
 from uuid import uuid4
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
+from app.schemas.workers.models import WorkerImportResult, WorkerImportRowResult
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_department, make_subteam
 
@@ -105,3 +106,66 @@ class TestSetHod:
         client = make_client(role=UserRole.HOD, department_service=mock_department_service)
         response = client.patch(f"/api/v1/departments/{uuid4()}/hod/{uuid4()}")
         assert response.status_code == 403
+
+
+def _csv_upload(rows: str = "Ann,Lee,a@example.com,+14165550111"):
+    content = f"first_name,last_name,email,phone\n{rows}".encode()
+    return {"file": ("workers.csv", content, "text/csv")}
+
+
+class TestImportWorkers:
+    def test_returns_403_for_worker_role(self, mock_worker_service):
+        client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)
+        response = client.post(f"/api/v1/departments/{uuid4()}/workers/import", files=_csv_upload())
+        assert response.status_code == 403
+        mock_worker_service.import_workers.assert_not_called()
+
+    def test_dry_run_previews_without_writing(self, mock_worker_service):
+        dept_id = uuid4()
+        mock_worker_service.import_workers.return_value = WorkerImportResult(
+            dry_run=True,
+            total_rows=1,
+            created=0,
+            valid=1,
+            skipped_duplicate=0,
+            errors=0,
+            results=[WorkerImportRowResult(row_number=1, status="valid", name="Ann Lee", email="a@example.com")],
+        )
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/departments/{dept_id}/workers/import?dry_run=true", files=_csv_upload())
+        assert response.status_code == 200
+        body = response.json()
+        assert body["dry_run"] is True
+        assert body["valid"] == 1
+        _, kwargs = mock_worker_service.import_workers.call_args
+        assert kwargs["dry_run"] is True
+
+    def test_commit_imports_and_reports(self, mock_worker_service):
+        dept_id = uuid4()
+        mock_worker_service.import_workers.return_value = WorkerImportResult(
+            dry_run=False,
+            total_rows=1,
+            created=1,
+            valid=0,
+            skipped_duplicate=0,
+            errors=0,
+            results=[
+                WorkerImportRowResult(
+                    row_number=1, status="created", name="Ann Lee", email="a@example.com", worker_id=uuid4()
+                )
+            ],
+        )
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/departments/{dept_id}/workers/import", files=_csv_upload())
+        assert response.status_code == 200
+        assert response.json()["created"] == 1
+
+    def test_returns_403_when_hod_does_not_manage_department(self, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("nope")
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/departments/{uuid4()}/workers/import", files=_csv_upload())
+        assert response.status_code == 403
+        mock_worker_service.import_workers.assert_not_called()

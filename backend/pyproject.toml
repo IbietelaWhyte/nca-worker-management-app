@@ -19,6 +19,7 @@ dependencies = [
     "twilio-stubs>=0.2.0",
     "types-python-jose>=3.5.0.20250531",
     "email-validator>=2.3.0",
+    "python-multipart>=0.0.32",
 ]
 
 [project.optional-dependencies]

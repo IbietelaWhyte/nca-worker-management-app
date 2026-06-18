@@ -5,6 +5,7 @@ import { useWorkers } from '@/hooks/useWorkers'
 import { useSubteams } from '@/hooks/useSubteams'
 import { useAuth } from '@/context/AuthContext'
 import SubteamForm from '@/components/subteams/SubteamForm'
+import CsvImportDialog from '@/components/departments/CsvImportDialog'
 import {
     getSubteamWithWorkers,
     assignWorkerToSubteam,
@@ -34,6 +35,7 @@ import {
     Users,
     ChevronRight,
     ChevronDown,
+    Upload,
 } from 'lucide-react'
 
 export default function DepartmentDetailPage() {
@@ -49,6 +51,7 @@ export default function DepartmentDetailPage() {
         addMember,
         removeMember,
         assignHod,
+        refetch,
     } = useDepartmentDetail(id)
     const { workers } = useWorkers()
 
@@ -63,6 +66,7 @@ export default function DepartmentDetailPage() {
 
     // Member dialog state
     const [addMemberOpen, setAddMemberOpen] = useState(false)
+    const [csvImportOpen, setCsvImportOpen] = useState(false)
     const [memberActionLoading, setMemberActionLoading] = useState(null)
 
     // Subteam dialog state
@@ -275,9 +279,18 @@ export default function DepartmentDetailPage() {
                             <p className="text-sm text-muted-foreground">
                                 {department.workers?.length ?? 0} workers in this department
                             </p>
-                            <Button size="sm" onClick={() => setAddMemberOpen(true)}>
-                                <UserPlus size={16} className="mr-2" /> Add Member
-                            </Button>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCsvImportOpen(true)}
+                                >
+                                    <Upload size={16} className="mr-2" /> Import CSV
+                                </Button>
+                                <Button size="sm" onClick={() => setAddMemberOpen(true)}>
+                                    <UserPlus size={16} className="mr-2" /> Add Member
+                                </Button>
+                            </div>
                         </div>
 
                         {!department.workers || department.workers.length === 0 ? (
@@ -685,6 +698,14 @@ export default function DepartmentDetailPage() {
                     </div>
                 </TabsContent>
             </Tabs>
+
+            {/* CSV import dialog */}
+            <CsvImportDialog
+                open={csvImportOpen}
+                onOpenChange={setCsvImportOpen}
+                departmentId={id}
+                onImported={refetch}
+            />
 
             {/* Add member dialog */}
             <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>
