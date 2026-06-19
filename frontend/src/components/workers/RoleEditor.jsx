@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getWorker, updateWorker } from '@/api/workers'
+import { getWorker, updateWorker, getWorkerAssistantHodDepartments } from '@/api/workers'
+import { useDepartments } from '@/hooks/useDepartments'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
@@ -18,7 +19,11 @@ const AVAILABLE_ROLES = [
 ]
 
 export default function RoleEditor({ workerId, workerName, currentUserRole, onClose, onSuccess }) {
+    const { departments, loading: loadingDepartments } = useDepartments()
     const [roles, setRoles] = useState([])
+    // Departments the worker manages as assistant HOD. The assistant_hod role alone grants no
+    // access — these rows are what actually scope an assistant HOD to a department.
+    const [assistantHodDepartments, setAssistantHodDepartments] = useState([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState(null)
@@ -35,8 +40,12 @@ export default function RoleEditor({ workerId, workerName, currentUserRole, onCl
         setLoading(true)
         setError(null)
         try {
-            const response = await getWorker(workerId)
-            setRoles(response.data.roles || [])
+            const [workerResponse, deptResponse] = await Promise.all([
+                getWorker(workerId),
+                getWorkerAssistantHodDepartments(workerId),
+            ])
+            setRoles(workerResponse.data.roles || [])
+            setAssistantHodDepartments(deptResponse.data.map(dept => dept.id))
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Failed to load roles')
         } finally {
@@ -64,6 +73,14 @@ export default function RoleEditor({ workerId, workerName, currentUserRole, onCl
         })
     }
 
+    const handleDepartmentToggle = departmentId => {
+        setAssistantHodDepartments(prev =>
+            prev.includes(departmentId)
+                ? prev.filter(id => id !== departmentId)
+                : [...prev, departmentId]
+        )
+    }
+
     const handleSave = async () => {
         if (roles.length === 0) {
             setError('Worker must have at least one role')
@@ -73,7 +90,14 @@ export default function RoleEditor({ workerId, workerName, currentUserRole, onCl
         setSaving(true)
         setError(null)
         try {
-            await updateWorker(workerId, { roles })
+            // Always send assistant_hod_departments: the selected list when assistant_hod is
+            // active, or an empty list to clear stale assignments when the role is removed.
+            await updateWorker(workerId, {
+                roles,
+                assistant_hod_departments: roles.includes('assistant_hod')
+                    ? assistantHodDepartments
+                    : [],
+            })
             onSuccess?.()
             onClose()
         } catch (err) {
@@ -137,6 +161,39 @@ export default function RoleEditor({ workerId, workerName, currentUserRole, onCl
                     </div>
                 ))}
             </div>
+
+            {roles.includes('assistant_hod') && (
+                <div className="space-y-2">
+                    <Label>Departments to manage as Assistant HOD</Label>
+                    {loadingDepartments ? (
+                        <p className="text-sm text-muted-foreground">Loading departments...</p>
+                    ) : departments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No departments available</p>
+                    ) : (
+                        <div className="border rounded-md p-4 space-y-3 max-h-48 overflow-y-auto">
+                            {departments.map(dept => (
+                                <div key={dept.id} className="flex items-center space-x-2">
+                                    <Checkbox
+                                        id={`role-dept-${dept.id}`}
+                                        checked={assistantHodDepartments.includes(dept.id)}
+                                        onCheckedChange={() => handleDepartmentToggle(dept.id)}
+                                        disabled={saving}
+                                    />
+                                    <Label
+                                        htmlFor={`role-dept-${dept.id}`}
+                                        className="text-sm font-normal cursor-pointer"
+                                    >
+                                        {dept.name}
+                                    </Label>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                        Without a department selected, an Assistant HOD can&apos;t manage anyone.
+                    </p>
+                </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2 border-t">
                 <Button variant="outline" onClick={onClose} disabled={saving}>

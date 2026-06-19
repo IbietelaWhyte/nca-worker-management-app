@@ -3,14 +3,18 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 
 from app.core.dependencies import (
+    AdminUser,
     CurrentUser,
     HODUser,
+    get_authentication_service,
     get_department_service,
     get_worker_service,
 )
+from app.schemas.authentication.models import GrantAccountRequest, RegisterResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import TokenPayload
 from app.schemas.workers.models import WorkerCreate, WorkerResponse, WorkerUpdate
+from app.service.authentication.service import AuthenticationService
 from app.service.departments.service import DepartmentService
 from app.service.workers.service import WorkerService
 
@@ -118,6 +122,30 @@ def update_worker(
     return service.update_worker(worker_id, data)
 
 
+@router.post("/{worker_id}/account", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+def create_worker_account(
+    worker_id: UUID,
+    data: GrantAccountRequest,
+    _: TokenPayload = AdminUser,
+    auth_service: AuthenticationService = Depends(get_authentication_service),
+) -> RegisterResponse:
+    """Give an existing worker profile a Supabase login account (admin only).
+
+    Creates a Supabase auth user with the provided password and role and links it to the worker
+    record, so a profile created without a login can sign in.
+
+    Args:
+        worker_id: Unique identifier of the worker to grant an account to.
+        data: The initial password and role for the new account.
+        _: Admin user token required.
+        auth_service: Authentication service dependency.
+
+    Returns:
+        RegisterResponse: Confirmation with the worker id and email.
+    """
+    return auth_service.create_account_for_worker(worker_id, data)
+
+
 @router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_worker(
     worker_id: UUID,
@@ -155,3 +183,25 @@ def get_worker_departments(
     """
     service.authorize_view_worker(current_user, worker_id)
     return service.get_worker_departments(worker_id)
+
+
+@router.get("/{worker_id}/assistant-hod-departments", response_model=list[DepartmentResponse])
+def get_worker_assistant_hod_departments(
+    worker_id: UUID,
+    current_user: TokenPayload = CurrentUser,
+    service: WorkerService = Depends(get_worker_service),
+) -> list[DepartmentResponse]:
+    """Retrieve the departments a worker manages as assistant HOD (admin, managing HOD, or self).
+
+    Used to pre-populate the assistant-HOD department picker when editing a worker's roles.
+
+    Args:
+        worker_id: Unique identifier of the worker.
+        current_user: Current authenticated user token.
+        service: Worker service dependency.
+
+    Returns:
+        list[DepartmentResponse]: Departments the worker is an assistant HOD of.
+    """
+    service.authorize_view_worker(current_user, worker_id)
+    return service.get_worker_assistant_hod_departments(worker_id)

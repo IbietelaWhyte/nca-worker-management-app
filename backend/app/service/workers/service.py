@@ -3,6 +3,8 @@ import io
 from uuid import UUID
 
 from pydantic import ValidationError
+from supabase import Client
+from supabase_auth.errors import AuthApiError
 
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.logging import get_logger
@@ -10,7 +12,7 @@ from app.core.redaction import mask_email
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.models import TokenPayload, UserRole
+from app.schemas.models import TokenPayload, UserRole, highest_role
 from app.schemas.workers.models import (
     WorkerCreate,
     WorkerImportResult,
@@ -31,18 +33,46 @@ class WorkerService:
         self,
         worker_repo: WorkerRepository,
         department_repo: DepartmentRepository,
+        client: Client,
     ) -> None:
         """Initialize the WorkerService with required repositories.
 
         Args:
             worker_repo: Repository for worker database operations.
             department_repo: Repository for department database operations.
+            client: Supabase client (service-role) for syncing roles into auth app_metadata.
         """
         self.worker_repo = worker_repo
         self.department_repo = department_repo
+        self.client = client
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="WorkerService")
+
+    def _sync_role_to_auth(self, worker: WorkerResponse, roles: list[UserRole]) -> None:
+        """Mirror the worker's most privileged role into their Supabase auth app_metadata.
+
+        Roles are stored in the worker_app_roles table, but authorization reads the single role
+        baked into the JWT (app_metadata.role). Without this sync, a role change would never take
+        effect for a logged-in user. No-op for workers without a login account (auth_user_id None).
+
+        Args:
+            worker: The worker whose auth account should be synced.
+            roles: The worker's complete current set of roles.
+
+        Raises:
+            AppError: If the Supabase admin update fails.
+        """
+        if not worker.auth_user_id:
+            return
+        role = highest_role(roles)
+        log = self.logger.bind(method="_sync_role_to_auth", worker_id=str(worker.id), role=role)
+        try:
+            self.client.auth.admin.update_user_by_id(str(worker.auth_user_id), {"app_metadata": {"role": role}})
+        except AuthApiError as exc:
+            log.error("auth_role_sync_failed", error=str(exc))
+            raise AppError(f"Failed to sync role to auth account: {exc}") from exc
+        log.info("auth_role_synced")
 
     def get_worker(self, worker_id: UUID) -> WorkerResponse:
         """Retrieve a worker by ID.
@@ -343,6 +373,9 @@ class WorkerService:
         # Update roles if provided (diff-based replace: batch-insert added, delete removed)
         if new_roles is not None:
             self.worker_repo.replace_worker_roles(worker_id, new_roles)
+            # Re-read the persisted roles and mirror the highest into the auth JWT so the
+            # change actually takes effect for a worker who has a login account.
+            self._sync_role_to_auth(worker, self.worker_repo.get_worker_roles(worker_id))
             log.info("roles_updated", new_roles=new_roles)
 
         # Update assistant_hod department assignments if provided
@@ -419,6 +452,23 @@ class WorkerService:
         departments = self.department_repo.get_departments_for_worker(worker_id)
         log.info("fetched_worker_departments", count=len(departments))
         return [DepartmentResponse.model_validate(dept) for dept in departments]
+
+    def get_worker_assistant_hod_departments(self, worker_id: UUID) -> list[DepartmentResponse]:
+        """Retrieve the departments a worker manages as assistant HOD.
+
+        Distinct from get_worker_departments (membership): this returns the department_assistant_hods
+        assignments, used to pre-populate the assistant-HOD department picker when editing roles.
+
+        Args:
+            worker_id: Unique identifier of the worker.
+
+        Returns:
+            list[DepartmentResponse]: Departments the worker is an assistant HOD of.
+        """
+        log = self.logger.bind(method="get_worker_assistant_hod_departments", worker_id=str(worker_id))
+        departments = self.department_repo.get_assistant_hod_departments(worker_id)
+        log.info("fetched_worker_assistant_hod_departments", count=len(departments))
+        return departments
 
     def can_manage_worker(self, manager_id: UUID, worker_id: UUID) -> bool:
         """Check if a manager (HOD or Assistant HOD) can manage a specific worker.

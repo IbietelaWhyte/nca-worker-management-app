@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.models import UserRole
 
@@ -27,6 +27,12 @@ class WorkerCreate(BaseModel):
 
 class WorkerResponse(Worker):
     roles: list[UserRole] = Field(default_factory=list)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def has_account(self) -> bool:
+        """Whether this worker has a Supabase login account (without leaking the auth_user_id)."""
+        return self.auth_user_id is not None
 
 
 class WorkerUpdate(BaseModel):
