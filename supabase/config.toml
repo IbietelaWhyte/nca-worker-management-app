@@ -220,15 +220,19 @@ otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
 otp_expiry = 3600
 
-# Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
-# host = "smtp.sendgrid.net"
-# port = 587
-# user = "apikey"
-# pass = "env(SENDGRID_API_KEY)"
-# admin_email = "admin@email.com"
-# sender_name = "Admin"
+# Use a production-ready SMTP server.
+# Disabled locally so auth emails are captured by Inbucket (http://127.0.0.1:54324) during dev;
+# production SMTP is configured in the Supabase dashboard. The Gmail values below are the
+# documented reference (see docs/smtp-setup.md) — set enabled = true + export GMAIL_APP_PASSWORD
+# to send real mail from a local/self-hosted instance.
+[auth.email.smtp]
+enabled = false
+host = "smtp.gmail.com"
+port = 587
+user = "wibietela99@gmail.com"
+pass = "env(GMAIL_APP_PASSWORD)"
+admin_email = "wibietela99@gmail.com"
+sender_name = "NCA Children's Church Worker Management"
 
 # Uncomment to customize email template
 # [auth.email.template.invite]
