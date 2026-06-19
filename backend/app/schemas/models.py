@@ -43,6 +43,18 @@ class UserRole(StrEnum):
     WORKER = "worker"
 
 
+def highest_role(roles: list[UserRole]) -> UserRole:
+    """Return the most privileged role (admin > hod > assistant_hod > worker).
+
+    The single role carried in a JWT's app_metadata must reflect a worker's most privileged
+    role, since authorization reads only that one value. UserRole is declared in
+    descending-privilege order, so the most privileged role is the earliest in the enum.
+    Defaults to WORKER for an empty list.
+    """
+    order = list(UserRole)
+    return min(roles, key=order.index, default=UserRole.WORKER)
+
+
 class TokenPayload(BaseModel):
     sub: str  # Supabase user UUID
     role: str = UserRole.WORKER

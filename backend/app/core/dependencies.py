@@ -221,12 +221,14 @@ def get_reminder_service(
 def get_worker_service(
     worker_repo: WorkerRepository = Depends(get_worker_repository),
     department_repo: DepartmentRepository = Depends(get_department_repository),
+    client: Client = Depends(get_db),
 ) -> WorkerService:
     """FastAPI dependency that provides a WorkerService instance.
 
     Args:
         worker_repo: WorkerRepository dependency.
         department_repo: DepartmentRepository dependency.
+        client: Supabase client (service-role) for syncing roles into auth app_metadata.
 
     Returns:
         WorkerService: Service for worker business logic operations.
@@ -234,6 +236,7 @@ def get_worker_service(
     return WorkerService(
         worker_repo=worker_repo,
         department_repo=department_repo,
+        client=client,
     )
 
 

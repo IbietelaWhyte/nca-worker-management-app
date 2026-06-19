@@ -14,8 +14,12 @@ def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.c
 
 
 @pytest.fixture
-def service(mock_worker_repo, mock_department_repo):
-    return WorkerService(worker_repo=mock_worker_repo, department_repo=mock_department_repo)
+def service(mock_worker_repo, mock_department_repo, mock_supabase_client):
+    return WorkerService(
+        worker_repo=mock_worker_repo,
+        department_repo=mock_department_repo,
+        client=mock_supabase_client,
+    )
 
 
 class TestGetWorker:
@@ -77,6 +81,54 @@ class TestUpdateWorker:
         mock_worker_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.update_worker(uuid4(), WorkerUpdate(first_name="Jane"))
+
+    def test_role_change_syncs_highest_role_to_auth(self, service, mock_worker_repo, mock_supabase_client):
+        auth_user_id = uuid4()
+        worker = make_worker(auth_user_id=auth_user_id)
+        mock_worker_repo.get_by_id.return_value = worker
+        # Worker ends up with both worker and admin roles; the JWT must reflect admin.
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.WORKER, UserRole.ADMIN]
+
+        service.update_worker(worker.id, WorkerUpdate(roles=[UserRole.WORKER, UserRole.ADMIN]))
+
+        mock_worker_repo.replace_worker_roles.assert_called_once_with(worker.id, [UserRole.WORKER, UserRole.ADMIN])
+        mock_supabase_client.auth.admin.update_user_by_id.assert_called_once_with(
+            str(auth_user_id), {"app_metadata": {"role": UserRole.ADMIN}}
+        )
+
+    def test_role_change_skips_auth_sync_without_account(self, service, mock_worker_repo, mock_supabase_client):
+        worker = make_worker(auth_user_id=None)
+        mock_worker_repo.get_by_id.return_value = worker
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.ADMIN]
+
+        service.update_worker(worker.id, WorkerUpdate(roles=[UserRole.ADMIN]))
+
+        mock_worker_repo.replace_worker_roles.assert_called_once()
+        mock_supabase_client.auth.admin.update_user_by_id.assert_not_called()
+
+    def test_demotion_syncs_new_highest_role(self, service, mock_worker_repo, mock_supabase_client):
+        auth_user_id = uuid4()
+        worker = make_worker(auth_user_id=auth_user_id)
+        mock_worker_repo.get_by_id.return_value = worker
+        # Admin removed; only worker remains.
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.WORKER]
+
+        service.update_worker(worker.id, WorkerUpdate(roles=[UserRole.WORKER]))
+
+        mock_supabase_client.auth.admin.update_user_by_id.assert_called_once_with(
+            str(auth_user_id), {"app_metadata": {"role": UserRole.WORKER}}
+        )
+
+    def test_profile_only_update_does_not_sync_auth(self, service, mock_worker_repo, mock_supabase_client):
+        worker = make_worker(auth_user_id=uuid4())
+        mock_worker_repo.get_by_id.return_value = worker
+        mock_worker_repo.update.return_value = make_worker(first_name="Jane")
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.WORKER]
+
+        service.update_worker(worker.id, WorkerUpdate(first_name="Jane"))
+
+        mock_worker_repo.replace_worker_roles.assert_not_called()
+        mock_supabase_client.auth.admin.update_user_by_id.assert_not_called()
 
 
 class TestDeactivateWorker:

@@ -4,6 +4,7 @@ import { useWorkers } from '@/hooks/useWorkers'
 import { useAuth } from '@/context/AuthContext'
 import WorkerForm from '@/components/workers/WorkerForm'
 import RoleEditor from '@/components/workers/RoleEditor'
+import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -16,7 +17,7 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, UserX, UserPlus, Shield } from 'lucide-react'
+import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound } from 'lucide-react'
 
 export default function WorkersPage() {
     const navigate = useNavigate()
@@ -27,6 +28,8 @@ export default function WorkersPage() {
     const [editingWorker, setEditingWorker] = useState(null)
     const [roleDialogOpen, setRoleDialogOpen] = useState(false)
     const [editingRoles, setEditingRoles] = useState(null)
+    const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+    const [accountWorker, setAccountWorker] = useState(null)
 
     const handleRegisterNewUser = () => {
         navigate('/workers/register')
@@ -49,6 +52,16 @@ export default function WorkersPage() {
 
     const handleRoleUpdateSuccess = () => {
         refetch()
+    }
+
+    const handleOpenCreateAccount = worker => {
+        setAccountWorker(worker)
+        setAccountDialogOpen(true)
+    }
+
+    const handleCloseAccountDialog = () => {
+        setAccountDialogOpen(false)
+        setAccountWorker(null)
     }
 
     const handleOpenCreate = () => {
@@ -204,6 +217,16 @@ export default function WorkersPage() {
                                                     Roles
                                                 </Button>
                                             )}
+                                            {isAdmin && !worker.has_account && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleOpenCreateAccount(worker)}
+                                                >
+                                                    <KeyRound size={14} className="mr-1" />
+                                                    Create Account
+                                                </Button>
+                                            )}
                                             {worker.is_active && (
                                                 <Button
                                                     variant="outline"
@@ -252,6 +275,25 @@ export default function WorkersPage() {
                                 currentUserRole={role}
                                 onClose={handleCloseRoleDialog}
                                 onSuccess={handleRoleUpdateSuccess}
+                            />
+                        )}
+                    </DialogContent>
+                </Dialog>
+            )}
+
+            {/* Create Account dialog */}
+            {isAdmin && (
+                <Dialog open={accountDialogOpen} onOpenChange={setAccountDialogOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Create Login Account</DialogTitle>
+                        </DialogHeader>
+                        {accountWorker && (
+                            <CreateAccountDialog
+                                workerId={accountWorker.id}
+                                workerName={`${accountWorker.first_name} ${accountWorker.last_name}`}
+                                onClose={handleCloseAccountDialog}
+                                onSuccess={refetch}
                             />
                         )}
                     </DialogContent>

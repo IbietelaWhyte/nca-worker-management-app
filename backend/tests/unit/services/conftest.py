@@ -80,6 +80,7 @@ def service(mock_supabase_client, mock_worker_repo, mock_department_repo):
 def make_worker(**kwargs) -> WorkerResponse:
     return WorkerResponse(
         id=kwargs.get("id", uuid4()),
+        auth_user_id=kwargs.get("auth_user_id", None),
         first_name=kwargs.get("first_name", "John"),
         last_name=kwargs.get("last_name", "Doe"),
         email=kwargs.get("email", "john.doe@example.com"),

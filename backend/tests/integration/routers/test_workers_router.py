@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from app.core.exceptions import ConflictError, NotFoundError, PermissionDeniedError
 from app.main import app
+from app.schemas.authentication.models import RegisterResponse
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_worker
@@ -129,6 +130,46 @@ class TestCreateWorker:
             },
         )
         assert response.status_code == 403
+
+
+class TestCreateWorkerAccount:
+    def test_returns_201_on_success(self, mock_authentication_service):
+        worker_id = uuid4()
+        mock_authentication_service.create_account_for_worker.return_value = RegisterResponse(
+            message="Account created successfully",
+            worker_id=str(worker_id),
+            email="john.doe@example.com",
+        )
+        client = make_client(role=UserRole.ADMIN, authentication_service=mock_authentication_service)
+
+        response = client.post(
+            f"/api/v1/workers/{worker_id}/account",
+            json={"password": "securepass1", "role": "admin"},
+        )
+        assert response.status_code == 201
+        assert response.json()["worker_id"] == str(worker_id)
+
+    def test_returns_403_for_non_admin(self, mock_authentication_service):
+        client = make_client(role=UserRole.HOD, authentication_service=mock_authentication_service)
+
+        response = client.post(
+            f"/api/v1/workers/{uuid4()}/account",
+            json={"password": "securepass1", "role": "worker"},
+        )
+        assert response.status_code == 403
+        mock_authentication_service.create_account_for_worker.assert_not_called()
+
+    def test_returns_409_when_already_has_account(self, mock_authentication_service):
+        mock_authentication_service.create_account_for_worker.side_effect = ConflictError(
+            "Worker already has a login account"
+        )
+        client = make_client(role=UserRole.ADMIN, authentication_service=mock_authentication_service)
+
+        response = client.post(
+            f"/api/v1/workers/{uuid4()}/account",
+            json={"password": "securepass1", "role": "worker"},
+        )
+        assert response.status_code == 409
 
 
 class TestUpdateWorker:
