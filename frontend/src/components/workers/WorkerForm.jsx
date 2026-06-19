@@ -26,7 +26,15 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
         setError(null)
         setLoading(true)
         try {
-            await onSubmit(form)
+            // Only submit editable profile fields. Sending the full worker object
+            // (e.g. roles: []) would 422 against WorkerUpdate and clobber roles,
+            // which are managed separately by RoleEditor.
+            await onSubmit({
+                first_name: form.first_name,
+                last_name: form.last_name,
+                email: form.email,
+                phone: form.phone,
+            })
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Something went wrong')
         } finally {

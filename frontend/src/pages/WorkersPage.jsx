@@ -194,18 +194,16 @@ export default function WorkersPage() {
                                                 <Pencil size={14} className="mr-1" />
                                                 Edit
                                             </Button>
-                                            {isDepartmentHead &&
-                                                worker.roles &&
-                                                worker.roles.length > 0 && (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => handleOpenRoleEdit(worker)}
-                                                    >
-                                                        <Shield size={14} className="mr-1" />
-                                                        Roles
-                                                    </Button>
-                                                )}
+                                            {isDepartmentHead && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleOpenRoleEdit(worker)}
+                                                >
+                                                    <Shield size={14} className="mr-1" />
+                                                    Roles
+                                                </Button>
+                                            )}
                                             {worker.is_active && (
                                                 <Button
                                                     variant="outline"
