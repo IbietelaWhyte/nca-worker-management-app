@@ -4,6 +4,9 @@ ASSIGNMENTS_TABLE = "schedule_assignments"
 SELECT_ALL = "*"
 SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*), subteams(*), department_roles(*))"
 SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
+# Inner join variant: required when filtering on a schedules column, otherwise PostgREST
+# nulls the embedded object instead of dropping the assignment row.
+SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
 SELECT_ASSIGNMENTS_WITH_WORKERS = "*, workers(*), schedules(*)"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 

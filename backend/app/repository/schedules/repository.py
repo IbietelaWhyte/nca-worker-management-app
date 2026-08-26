@@ -153,6 +153,39 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.debug("fetched_assignments_for_worker", count=len(assignments))
         return assignments
 
+    def get_upcoming_assignments_for_worker(self, worker_id: UUID, from_date: date) -> list[AssignmentResponse]:
+        """
+        Retrieve a worker's assignments scheduled on or after a given date.
+
+        Used to check whether a worker still has commitments before their profile is deleted.
+        Filtering happens on the joined schedules table, so the select must use the inner-join
+        variant for the filter to drop rows rather than null the embedded schedule.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+            from_date (date): Inclusive lower bound; assignments on this date or later are returned.
+
+        Returns:
+            list[AssignmentResponse]: The worker's assignments on or after from_date, ordered by
+                                     date (soonest first). Empty if the worker has none.
+        """
+        log = self.logger.bind(
+            method="get_upcoming_assignments_for_worker",
+            worker_id=str(worker_id),
+            from_date=from_date.isoformat(),
+        )
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER)
+            .eq(q.AssignmentColumns.WORKER_ID, str(worker_id))
+            .gte(f"{q.TABLE}.{q.Columns.SCHEDULED_DATE}", from_date.isoformat())
+            .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})")
+            .execute()
+        )
+        assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
+        log.debug("fetched_upcoming_assignments_for_worker", count=len(assignments))
+        return assignments
+
     def get_workers_scheduled_on_date(self, scheduled_date: date) -> list[UUID]:
         """
         Retrieve worker IDs who have schedule assignments on a specific date.

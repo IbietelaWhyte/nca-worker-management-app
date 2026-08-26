@@ -1,5 +1,6 @@
 import csv
 import io
+from datetime import date
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -10,6 +11,7 @@ from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFou
 from app.core.logging import get_logger
 from app.core.redaction import mask_email
 from app.repository.departments.repository import DepartmentRepository
+from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import TokenPayload, UserRole, highest_role
@@ -33,6 +35,7 @@ class WorkerService:
         self,
         worker_repo: WorkerRepository,
         department_repo: DepartmentRepository,
+        schedule_repo: ScheduleRepository,
         client: Client,
     ) -> None:
         """Initialize the WorkerService with required repositories.
@@ -40,10 +43,13 @@ class WorkerService:
         Args:
             worker_repo: Repository for worker database operations.
             department_repo: Repository for department database operations.
+            schedule_repo: Repository for schedule operations, used to check a worker's
+                remaining commitments before deleting their profile.
             client: Supabase client (service-role) for syncing roles into auth app_metadata.
         """
         self.worker_repo = worker_repo
         self.department_repo = department_repo
+        self.schedule_repo = schedule_repo
         self.client = client
 
         # bind the logger to the service name for structured logging
@@ -421,6 +427,71 @@ class WorkerService:
             raise AppError(f"Failed to deactivate worker {worker_id}")
         log.info("worker_deactivated")
         return updated
+
+    def delete_worker(self, worker_id: UUID) -> None:
+        """Permanently delete a worker profile and revoke their login.
+
+        This is irreversible. Deleting the row cascades away the worker's roles, department and
+        subteam memberships, assistant-HOD assignments, availability, confirmation tokens and
+        *past* schedule assignments, and nulls ``schedules.created_by`` on schedules they created.
+        Three guards keep that from happening by accident:
+
+        1. The worker must already be deactivated, so deletion is always a deliberate second step.
+        2. They must have no assignments on or after today, since deleting those would silently
+           leave holes in schedules that have already been published.
+        3. They must not head a department, because the FK would null ``departments.hod_id`` and
+           leave that department without a head.
+
+        The login is revoked before the row is deleted. ``workers.auth_user_id`` references
+        ``auth.users`` with ``on delete set null``, so if the row delete then fails the profile is
+        left deactivated and login-less and the caller can simply retry. The reverse order would
+        strand an auth user that can still sign in but has no profile and no way to be cleaned up.
+
+        Args:
+            worker_id: Unique identifier of the worker to delete.
+
+        Raises:
+            NotFoundError: If the worker does not exist.
+            BadRequestError: If the worker is still active.
+            ConflictError: If the worker has upcoming assignments or heads a department.
+            AppError: If revoking the login or deleting the row fails.
+        """
+        log = self.logger.bind(method="delete_worker", worker_id=str(worker_id))
+        worker = self.get_worker(worker_id)
+
+        if worker.is_active:
+            raise BadRequestError("Deactivate this worker before deleting their profile.")
+
+        upcoming = self.schedule_repo.get_upcoming_assignments_for_worker(worker_id, date.today())
+        if upcoming:
+            log.info("worker_delete_blocked_by_assignments", count=len(upcoming))
+            raise ConflictError(
+                f"This worker has {len(upcoming)} upcoming schedule "
+                f"{'assignment' if len(upcoming) == 1 else 'assignments'}. "
+                "Remove or reassign them before deleting the profile."
+            )
+
+        headed = self.department_repo.get_departments_by_hod(worker_id)
+        if headed:
+            names = ", ".join(department.name for department in headed)
+            log.info("worker_delete_blocked_by_hod_role", departments=names)
+            raise ConflictError(
+                f"This worker is the head of {names}. Assign a new department head before deleting the profile."
+            )
+
+        # Revoke the login first — see the ordering rationale in this method's docstring.
+        if worker.auth_user_id:
+            try:
+                self.client.auth.admin.delete_user(str(worker.auth_user_id))
+            except AuthApiError as exc:
+                log.error("worker_login_revocation_failed", error=str(exc))
+                raise AppError(f"Failed to revoke the worker's login: {exc}") from exc
+            log.info("worker_login_revoked")
+
+        if not self.worker_repo.delete(worker_id):
+            log.error("worker_deletion_failed")
+            raise AppError(f"Failed to delete worker {worker_id}")
+        log.info("worker_deleted", email=mask_email(worker.email))
 
     def search_workers(self, query: str) -> list[WorkerResponse]:
         """Search for workers by name.
