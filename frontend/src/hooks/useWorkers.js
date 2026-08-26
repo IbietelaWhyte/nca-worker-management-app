@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getWorkers, createWorker, updateWorker, deactivateWorker } from '@/api/workers'
+import {
+    getWorkers,
+    createWorker,
+    updateWorker,
+    deactivateWorker,
+    deleteWorkerPermanently,
+} from '@/api/workers'
 
 export function useWorkers() {
     const [workers, setWorkers] = useState([])
@@ -40,6 +46,14 @@ export function useWorkers() {
         setWorkers(prev => prev.map(w => (w.id === id ? { ...w, is_active: false } : w)))
     }
 
+    // Unlike removeWorker, the row is gone for good — drop it from the list rather than
+    // marking it inactive. Throws so the caller can surface the reason (e.g. a 409 for a
+    // worker who still has upcoming assignments).
+    const destroyWorker = async id => {
+        await deleteWorkerPermanently(id)
+        setWorkers(prev => prev.filter(w => w.id !== id))
+    }
+
     return {
         workers,
         loading,
@@ -48,5 +62,6 @@ export function useWorkers() {
         addWorker,
         editWorker,
         removeWorker,
+        destroyWorker,
     }
 }

@@ -2,7 +2,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
-from app.core.exceptions import ConflictError, NotFoundError, PermissionDeniedError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.main import app
 from app.schemas.authentication.models import RegisterResponse
 from app.schemas.models import UserRole
@@ -229,3 +229,70 @@ class TestDeactivateWorker:
         response = client.delete(f"/api/v1/workers/{uuid4()}")
         assert response.status_code == 403
         mock_worker_service.deactivate_worker.assert_not_called()
+
+
+class TestDeleteWorker:
+    def test_returns_204_on_delete(self, mock_worker_service):
+        worker = make_worker(is_active=False)
+        mock_worker_service.delete_worker.return_value = None
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{worker.id}/permanent")
+        assert response.status_code == 204
+        mock_worker_service.delete_worker.assert_called_once_with(worker.id)
+
+    def test_allows_assistant_hod(self, mock_worker_service):
+        worker = make_worker(is_active=False)
+        client = make_client(role=UserRole.ASSISTANT_HOD, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{worker.id}/permanent")
+        assert response.status_code == 204
+
+    def test_returns_403_for_worker_role(self, mock_worker_service):
+        client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
+        assert response.status_code == 403
+        mock_worker_service.delete_worker.assert_not_called()
+
+    def test_returns_403_when_not_manager(self, mock_worker_service):
+        mock_worker_service.authorize_manage_worker.side_effect = PermissionDeniedError("nope")
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
+        assert response.status_code == 403
+        mock_worker_service.delete_worker.assert_not_called()
+
+    def test_returns_409_when_worker_has_upcoming_assignments(self, mock_worker_service):
+        mock_worker_service.delete_worker.side_effect = ConflictError(
+            "This worker has 2 upcoming schedule assignments."
+        )
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
+        assert response.status_code == 409
+        assert "upcoming schedule assignments" in response.json()["detail"]
+
+    def test_returns_400_when_worker_still_active(self, mock_worker_service):
+        mock_worker_service.delete_worker.side_effect = BadRequestError("Deactivate this worker first.")
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
+        assert response.status_code == 400
+
+    def test_returns_404_when_worker_missing(self, mock_worker_service):
+        mock_worker_service.delete_worker.side_effect = NotFoundError("Worker not found")
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
+        assert response.status_code == 404
+
+    def test_deactivate_route_is_unaffected(self, mock_worker_service):
+        """The soft-delete route must keep its own behaviour despite the new sibling path."""
+        worker = make_worker()
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.delete(f"/api/v1/workers/{worker.id}")
+        assert response.status_code == 204
+        mock_worker_service.deactivate_worker.assert_called_once_with(worker.id)
+        mock_worker_service.delete_worker.assert_not_called()

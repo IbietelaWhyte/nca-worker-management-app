@@ -165,6 +165,27 @@ def deactivate_worker(
     service.deactivate_worker(worker_id)
 
 
+@router.delete("/{worker_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+def delete_worker(
+    worker_id: UUID,
+    current_user: TokenPayload = HODUser,
+    service: WorkerService = Depends(get_worker_service),
+) -> None:
+    """Permanently delete a worker (admin, or HOD/Assistant HOD managing the worker's department).
+
+    Unlike the deactivate endpoint this removes the record outright, along with the worker's
+    login, roles, memberships, availability and past assignments. The worker must already be
+    deactivated, have no upcoming assignments, and not head a department.
+
+    Args:
+        worker_id: Unique identifier of the worker to delete.
+        current_user: Admin or HOD user token required.
+        service: Worker service dependency.
+    """
+    service.authorize_manage_worker(current_user, worker_id)
+    service.delete_worker(worker_id)
+
+
 @router.get("/{worker_id}/departments", response_model=list[DepartmentResponse])
 def get_worker_departments(
     worker_id: UUID,

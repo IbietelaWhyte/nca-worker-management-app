@@ -5,6 +5,7 @@ import { useAuth } from '@/context/AuthContext'
 import WorkerForm from '@/components/workers/WorkerForm'
 import RoleEditor from '@/components/workers/RoleEditor'
 import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
+import DeleteWorkerDialog from '@/components/workers/DeleteWorkerDialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -17,12 +18,13 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound } from 'lucide-react'
+import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound, Trash2 } from 'lucide-react'
 
 export default function WorkersPage() {
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead, role } = useAuth()
-    const { workers, loading, error, addWorker, editWorker, removeWorker, refetch } = useWorkers()
+    const { workers, loading, error, addWorker, editWorker, removeWorker, destroyWorker, refetch } =
+        useWorkers()
 
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingWorker, setEditingWorker] = useState(null)
@@ -30,6 +32,8 @@ export default function WorkersPage() {
     const [editingRoles, setEditingRoles] = useState(null)
     const [accountDialogOpen, setAccountDialogOpen] = useState(false)
     const [accountWorker, setAccountWorker] = useState(null)
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+    const [deletingWorker, setDeletingWorker] = useState(null)
 
     const handleRegisterNewUser = () => {
         navigate('/workers/register')
@@ -86,6 +90,11 @@ export default function WorkersPage() {
     const handleDeactivate = async worker => {
         if (!confirm(`Deactivate ${worker.first_name} ${worker.last_name}?`)) return
         await removeWorker(worker.id)
+    }
+
+    const handleOpenDelete = worker => {
+        setDeletingWorker(worker)
+        setDeleteDialogOpen(true)
     }
 
     if (loading) {
@@ -238,6 +247,19 @@ export default function WorkersPage() {
                                                     Deactivate
                                                 </Button>
                                             )}
+                                            {/* Only offered once a worker is deactivated, so
+                                                removal is always a deliberate second step. */}
+                                            {isDepartmentHead && !worker.is_active && (
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => handleOpenDelete(worker)}
+                                                    className="text-destructive hover:text-destructive"
+                                                >
+                                                    <Trash2 size={14} className="mr-1" />
+                                                    Delete
+                                                </Button>
+                                            )}
                                         </div>
                                     </TableCell>
                                 </TableRow>
@@ -298,6 +320,16 @@ export default function WorkersPage() {
                         )}
                     </DialogContent>
                 </Dialog>
+            )}
+
+            {/* Delete dialog — gated identically to the Delete button that opens it */}
+            {isDepartmentHead && (
+                <DeleteWorkerDialog
+                    worker={deletingWorker}
+                    open={deleteDialogOpen}
+                    onOpenChange={setDeleteDialogOpen}
+                    onDeleted={destroyWorker}
+                />
             )}
         </div>
     )

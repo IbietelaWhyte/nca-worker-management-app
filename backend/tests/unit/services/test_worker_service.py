@@ -1,12 +1,13 @@
 from uuid import uuid4
 
 import pytest
+from supabase_auth.errors import AuthApiError
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
+from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import TokenPayload, UserRole
 from app.schemas.workers.models import WorkerCreate, WorkerUpdate
 from app.service.workers.service import WorkerService
-from tests.unit.services.conftest import make_department, make_worker
+from tests.unit.services.conftest import make_assignment, make_department, make_worker
 
 
 def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.com") -> TokenPayload:
@@ -14,10 +15,11 @@ def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.c
 
 
 @pytest.fixture
-def service(mock_worker_repo, mock_department_repo, mock_supabase_client):
+def service(mock_worker_repo, mock_department_repo, mock_schedule_repo, mock_supabase_client):
     return WorkerService(
         worker_repo=mock_worker_repo,
         department_repo=mock_department_repo,
+        schedule_repo=mock_schedule_repo,
         client=mock_supabase_client,
     )
 
@@ -145,6 +147,104 @@ class TestDeactivateWorker:
         mock_worker_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.deactivate_worker(uuid4())
+
+
+def _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo, **worker_kwargs):
+    """Configure mocks so delete_worker passes every guard, returning the worker."""
+    worker = make_worker(is_active=False, **worker_kwargs)
+    mock_worker_repo.get_by_id.return_value = worker
+    mock_worker_repo.delete.return_value = True
+    mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = []
+    mock_department_repo.get_departments_by_hod.return_value = []
+    return worker
+
+
+class TestDeleteWorker:
+    def test_deletes_inactive_worker(self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo)
+
+        service.delete_worker(worker.id)
+
+        mock_worker_repo.delete.assert_called_once_with(worker.id)
+
+    def test_raises_when_not_found(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_id.return_value = None
+        with pytest.raises(NotFoundError, match="not found"):
+            service.delete_worker(uuid4())
+
+    def test_rejects_active_worker(self, service, mock_worker_repo):
+        worker = make_worker(is_active=True)
+        mock_worker_repo.get_by_id.return_value = worker
+
+        with pytest.raises(BadRequestError, match="Deactivate"):
+            service.delete_worker(worker.id)
+        mock_worker_repo.delete.assert_not_called()
+
+    def test_rejects_worker_with_upcoming_assignments(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo
+    ):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo)
+        mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [make_assignment(), make_assignment()]
+
+        with pytest.raises(ConflictError, match="2 upcoming schedule assignments"):
+            service.delete_worker(worker.id)
+        mock_worker_repo.delete.assert_not_called()
+
+    def test_pluralises_a_single_upcoming_assignment(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo
+    ):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo)
+        mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [make_assignment()]
+
+        with pytest.raises(ConflictError, match="1 upcoming schedule assignment\\."):
+            service.delete_worker(worker.id)
+
+    def test_rejects_department_head(self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo)
+        mock_department_repo.get_departments_by_hod.return_value = [make_department(name="Ushers")]
+
+        with pytest.raises(ConflictError, match="head of Ushers"):
+            service.delete_worker(worker.id)
+        mock_worker_repo.delete.assert_not_called()
+
+    def test_revokes_login_before_deleting_row(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo, mock_supabase_client
+    ):
+        auth_user_id = uuid4()
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo, auth_user_id=auth_user_id)
+
+        service.delete_worker(worker.id)
+
+        mock_supabase_client.auth.admin.delete_user.assert_called_once_with(str(auth_user_id))
+
+    def test_skips_login_revocation_without_an_account(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo, mock_supabase_client
+    ):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo, auth_user_id=None)
+
+        service.delete_worker(worker.id)
+
+        mock_supabase_client.auth.admin.delete_user.assert_not_called()
+        mock_worker_repo.delete.assert_called_once_with(worker.id)
+
+    def test_does_not_delete_row_when_login_revocation_fails(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo, mock_supabase_client
+    ):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo, auth_user_id=uuid4())
+        mock_supabase_client.auth.admin.delete_user.side_effect = AuthApiError("boom", 500, "500")
+
+        with pytest.raises(AppError, match="revoke"):
+            service.delete_worker(worker.id)
+        mock_worker_repo.delete.assert_not_called()
+
+    def test_raises_when_row_delete_reports_no_rows(
+        self, service, mock_worker_repo, mock_department_repo, mock_schedule_repo
+    ):
+        worker = _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo)
+        mock_worker_repo.delete.return_value = False
+
+        with pytest.raises(AppError, match="Failed to delete worker"):
+            service.delete_worker(worker.id)
 
 
 class TestSearchWorkers:
