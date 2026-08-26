@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from supabase import Client
 from supabase_auth.errors import AuthApiError
 
+from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.logging import get_logger
 from app.core.redaction import mask_email
@@ -18,6 +19,7 @@ from app.schemas.models import TokenPayload, UserRole, highest_role
 from app.schemas.workers.models import (
     WorkerCreate,
     WorkerImportResult,
+    WorkerImportRow,
     WorkerImportRowResult,
     WorkerResponse,
     WorkerUpdate,
@@ -28,6 +30,38 @@ logger = get_logger(__name__)
 # Columns a CSV must provide for a bulk worker import. Email is required (it is the dedup key
 # and the DB declares workers.email NOT NULL UNIQUE); phone is required for SMS reminders.
 REQUIRED_IMPORT_COLUMNS = ("first_name", "last_name", "email", "phone")
+
+# Pydantic's own messages are written for developers. These are the ones a volunteer fixing a
+# spreadsheet sees, keyed by the error "type" Pydantic reports.
+_VALIDATION_MESSAGES = {
+    "string_too_short": "Cannot be empty",
+    "string_too_long": "Is too long (maximum 100 characters)",
+    "value_error": "",  # Our own validators already raise a readable message; use it verbatim.
+}
+
+
+def _describe_validation_error(exc: ValidationError) -> tuple[str, str]:
+    """Turn a Pydantic ValidationError into a (column, message) pair fit to show a user.
+
+    Reports only the first failure for the row — a row with a bad email and a bad phone is fixed one
+    cell at a time anyway, and listing every complaint at once makes the report harder to scan.
+
+    Args:
+        exc: The error raised while validating a WorkerImportRow.
+
+    Returns:
+        tuple[str, str]: The offending CSV column and a plain-English description of the problem.
+    """
+    error = exc.errors()[0]
+    field = str(error["loc"][0]) if error["loc"] else "row"
+    message = _VALIDATION_MESSAGES.get(str(error["type"]))
+    if message:
+        return field, message
+    # Pydantic prefixes messages raised by a validator with "Value error, "; strip it.
+    raw = str(error["msg"]).removeprefix("Value error, ")
+    if field == "email" and str(error["type"]).startswith("value_error"):
+        return field, f"'{error.get('input')}' is not a valid email address"
+    return field, raw[:1].upper() + raw[1:]
 
 
 class WorkerService:
@@ -169,8 +203,8 @@ class WorkerService:
     def create_worker(self, data: WorkerCreate) -> WorkerResponse:
         """Create a new worker.
 
-        Validates that either email or phone is provided and checks for existing workers
-        with the same contact information.
+        Checks both contact fields against existing workers before inserting. Email and phone are
+        already normalized by WorkerCreate, so the comparison is case- and format-insensitive.
 
         Args:
             data: Worker creation data including name, contact info.
@@ -179,43 +213,59 @@ class WorkerService:
             WorkerResponse: The newly created worker.
 
         Raises:
-            ValueError: If contact info is missing or worker already exists.
+            ConflictError: If a worker already exists with the same email or phone number.
         """
         # bind the method and email for better traceability in logs
         log = self.logger.bind(method="create_worker", email=mask_email(data.email))
-        if data.email:
-            existing = self.worker_repo.get_by_email(data.email)
-        elif data.phone:
-            existing = self.worker_repo.get_by_phone(data.phone)
-        else:
-            log.error("missing_contact_info")
-            raise BadRequestError("Either email or phone number must be provided")
-        if existing:
-            log.warning("worker_already_exists")
-            raise ConflictError(f"Worker with email {data.email} already exists")
+
+        # Check both contact fields, not just whichever was supplied first: phone is the SMS
+        # reminder key, so two workers sharing one number sends a person somebody else's reminders.
+        if self.worker_repo.get_by_email(data.email):
+            log.warning("worker_already_exists", conflict_field="email")
+            raise ConflictError(f"A worker with email {data.email} already exists")
+        if data.phone and self.worker_repo.get_by_phone(data.phone):
+            log.warning("worker_already_exists", conflict_field="phone")
+            raise ConflictError(f"A worker with phone number {data.phone} already exists")
+
         worker = self.worker_repo.create(data.model_dump())
         log.info("worker_created", worker_id=str(worker.id))
         return worker
 
-    def import_workers(self, file_bytes: bytes, department_id: UUID, *, dry_run: bool) -> WorkerImportResult:
+    def import_workers(
+        self,
+        file_bytes: bytes,
+        department_id: UUID,
+        *,
+        dry_run: bool,
+        skip_duplicates: bool = False,
+    ) -> WorkerImportResult:
         """Bulk-create workers from a CSV file and assign them to a department.
 
-        Each row is processed independently: invalid or duplicate rows are skipped and reported,
-        while valid rows are created (unless ``dry_run`` is set, in which case nothing is written
-        and valid rows are flagged as ``valid``). Duplicates are detected both within the file
-        (by email) and against existing workers in the database.
+        All-or-nothing: the whole file is parsed and validated before anything is written, and a
+        single invalid row rejects the entire import. This keeps a typo in one row from leaving a
+        half-imported roster that nobody can tell apart from a complete one.
+
+        Rows matching a worker who already exists are reported separately from validation errors,
+        since re-uploading a roster is a normal thing to do and is not a mistake. They also block the
+        import by default, but the caller can pass ``skip_duplicates`` to import the remainder — an
+        explicit choice made after seeing the preview, not a silent skip.
 
         Args:
             file_bytes: Raw bytes of the uploaded CSV file.
             department_id: Department to assign newly created workers to.
             dry_run: If True, validate and report only — perform no writes.
+            skip_duplicates: If True, already-existing workers no longer block the import; they are
+                reported and passed over while the remaining rows are created.
 
         Returns:
-            WorkerImportResult: Per-row outcomes plus aggregate counts.
+            WorkerImportResult: Per-row outcomes plus aggregate counts. ``ok`` reports whether the
+                import would proceed (dry run) or did proceed.
 
         Raises:
             NotFoundError: If the target department does not exist.
-            BadRequestError: If the file is not decodable, empty, or missing required columns.
+            BadRequestError: If the file is too large, not decodable, empty, missing required
+                columns, or has more rows than ``settings.max_import_rows``.
+            AppError: If the workers were created but assigning them to the department failed.
         """
         log = self.logger.bind(method="import_workers", department_id=str(department_id), dry_run=dry_run)
 
@@ -223,6 +273,66 @@ class WorkerService:
         if not self.department_repo.get_by_id(department_id):
             log.warning("import_department_not_found")
             raise NotFoundError(f"Department {department_id} not found")
+
+        rows = self._parse_import_rows(file_bytes)
+        results, validated = self._validate_import_rows(rows)
+
+        errors = sum(1 for r in results if r.status == "error")
+        duplicates = sum(1 for r in results if r.status == "duplicate")
+        duplicates_inactive = sum(1 for r in results if r.status == "duplicate_inactive")
+        valid = [r for r in results if r.status == "valid"]
+
+        # Validation errors always block. Duplicates block too, unless the caller has seen the
+        # preview and explicitly opted to skip them.
+        ok = errors == 0 and bool(valid) and (duplicates + duplicates_inactive == 0 or skip_duplicates)
+        committed = ok and not dry_run
+
+        if committed:
+            self._commit_import(valid, validated, department_id)
+
+        result = WorkerImportResult(
+            dry_run=dry_run,
+            ok=ok,
+            total_rows=len(results),
+            valid=0 if committed else len(valid),
+            created=len(valid) if committed else 0,
+            duplicates=duplicates,
+            duplicates_inactive=duplicates_inactive,
+            errors=errors,
+            results=results,
+        )
+        log.info(
+            "import_workers_complete",
+            ok=result.ok,
+            total=result.total_rows,
+            created=result.created,
+            valid=result.valid,
+            duplicates=result.duplicates,
+            duplicates_inactive=result.duplicates_inactive,
+            errors=result.errors,
+        )
+        return result
+
+    def _parse_import_rows(self, file_bytes: bytes) -> list[dict[str, str]]:
+        """Decode and parse an import CSV into normalized, whitespace-trimmed row dicts.
+
+        Failures here are whole-file problems, so they raise rather than producing row results.
+
+        Args:
+            file_bytes: Raw bytes of the uploaded CSV file.
+
+        Returns:
+            list[dict[str, str]]: One dict per data row, keys lowercased and values stripped.
+
+        Raises:
+            BadRequestError: If the file is too large, not UTF-8, empty, missing a required column,
+                or exceeds the configured row limit.
+        """
+        if len(file_bytes) > settings.max_import_file_bytes:
+            raise BadRequestError(
+                f"CSV file is too large ({len(file_bytes) // 1024} KB); "
+                f"the limit is {settings.max_import_file_bytes // 1024} KB"
+            )
 
         try:
             text = file_bytes.decode("utf-8-sig")  # utf-8-sig tolerates the BOM Excel exports add
@@ -237,105 +347,182 @@ class WorkerService:
         if missing:
             raise BadRequestError(f"CSV is missing required column(s): {', '.join(missing)}")
 
-        results: list[WorkerImportRowResult] = []
-        seen_emails: set[str] = set()
+        # Normalize keys and trim whitespace; unmatched/extra columns are ignored.
+        rows = [{(key or "").strip().lower(): (value or "").strip() for key, value in raw.items()} for raw in reader]
+        if not rows:
+            raise BadRequestError("CSV file has a header row but no workers")
+        if len(rows) > settings.max_import_rows:
+            raise BadRequestError(f"CSV has {len(rows)} rows; the limit is {settings.max_import_rows} per import")
+        return rows
 
-        for index, raw in enumerate(reader, start=1):
-            # Normalize keys and trim whitespace; unmatched/extra columns are ignored.
-            row = {(key or "").strip().lower(): (value or "").strip() for key, value in raw.items()}
-            email = row.get("email", "")
+    def _validate_import_rows(
+        self, rows: list[dict[str, str]]
+    ) -> tuple[list[WorkerImportRowResult], dict[int, WorkerImportRow]]:
+        """Validate every parsed row against the schema, the rest of the file, and existing workers.
+
+        Runs in full even once a row has failed, so the user sees every problem in one pass rather
+        than fixing them one upload at a time.
+
+        Args:
+            rows: Parsed CSV rows from _parse_import_rows.
+
+        Returns:
+            tuple: The per-row results in file order, and the validated rows keyed by line number
+                (only for rows that came out ``valid``).
+        """
+        # One query for the whole file instead of one per row.
+        contact_index = self.worker_repo.get_contact_index()
+        seen_emails: dict[str, int] = {}
+        seen_phones: dict[str, int] = {}
+        results: list[WorkerImportRowResult] = []
+        validated: dict[int, WorkerImportRow] = {}
+
+        for offset, row in enumerate(rows):
+            # Line 1 of the spreadsheet is the header, so the first data row is line 2. Reporting the
+            # row index instead would send the user to the wrong line in their file.
+            line_number = offset + 2
             name = f"{row.get('first_name', '')} {row.get('last_name', '')}".strip() or None
+            email = row.get("email") or None
 
             blanks = [col for col in REQUIRED_IMPORT_COLUMNS if not row.get(col)]
             if blanks:
                 results.append(
                     WorkerImportRowResult(
-                        row_number=index,
+                        line_number=line_number,
                         status="error",
                         name=name,
-                        email=email or None,
-                        error=f"Missing value(s) for: {', '.join(blanks)}",
+                        email=email,
+                        field=blanks[0],
+                        error=f"Missing value for: {', '.join(blanks)}",
                     )
                 )
                 continue
 
             try:
-                data = WorkerCreate(
+                data = WorkerImportRow(
                     first_name=row["first_name"],
                     last_name=row["last_name"],
-                    email=email,
+                    email=row["email"],
                     phone=row["phone"],
                 )
             except ValidationError as exc:
-                results.append(
-                    WorkerImportRowResult(row_number=index, status="error", name=name, email=email, error=str(exc))
-                )
-                continue
-
-            email_key = email.lower()
-            if email_key in seen_emails:
+                field, message = _describe_validation_error(exc)
                 results.append(
                     WorkerImportRowResult(
-                        row_number=index,
-                        status="skipped_duplicate",
+                        line_number=line_number,
+                        status="error",
                         name=name,
                         email=email,
-                        error="Duplicate email within file",
-                    )
-                )
-                continue
-            seen_emails.add(email_key)
-
-            if self.worker_repo.get_by_email(email):
-                results.append(
-                    WorkerImportRowResult(
-                        row_number=index,
-                        status="skipped_duplicate",
-                        name=name,
-                        email=email,
-                        error="Worker with this email already exists",
+                        field=field,
+                        value=row.get(field),
+                        error=message,
                     )
                 )
                 continue
 
-            if dry_run:
-                results.append(WorkerImportRowResult(row_number=index, status="valid", name=name, email=email))
+            # A repeat within the same file is a mistake in the file, not an already-imported worker.
+            # It is an error the user must fix, and is never skippable — silently picking one of two
+            # identical rows would be a coin flip over which one's details win.
+            if (first_seen := seen_emails.get(data.email)) is not None:
+                results.append(
+                    WorkerImportRowResult(
+                        line_number=line_number,
+                        status="error",
+                        name=name,
+                        email=data.email,
+                        field="email",
+                        value=data.email,
+                        error=f"Same email as line {first_seen} in this file",
+                    )
+                )
+                continue
+            if (first_seen := seen_phones.get(data.phone)) is not None:
+                results.append(
+                    WorkerImportRowResult(
+                        line_number=line_number,
+                        status="error",
+                        name=name,
+                        email=data.email,
+                        field="phone",
+                        value=data.phone,
+                        error=f"Same phone number as line {first_seen} in this file",
+                    )
+                )
+                continue
+            seen_emails[data.email] = line_number
+            seen_phones[data.phone] = line_number
+
+            # Both keys are normalized on each side, so this catches "Jane@x.com" against an existing
+            # "jane@x.com" and "(416) 555-0101" against an existing "+14165550101".
+            existing = contact_index.get(data.email) or contact_index.get(data.phone)
+            if existing:
+                results.append(
+                    WorkerImportRowResult(
+                        line_number=line_number,
+                        status="duplicate" if existing.is_active else "duplicate_inactive",
+                        name=name,
+                        email=data.email,
+                        worker_id=existing.worker_id,
+                        error=(
+                            "Already in the system"
+                            if existing.is_active
+                            else "Already in the system but deactivated — reactivate them instead of re-importing"
+                        ),
+                    )
+                )
                 continue
 
+            validated[line_number] = data
+            results.append(WorkerImportRowResult(line_number=line_number, status="valid", name=name, email=data.email))
+
+        return results, validated
+
+    def _commit_import(
+        self,
+        valid: list[WorkerImportRowResult],
+        validated: dict[int, WorkerImportRow],
+        department_id: UUID,
+    ) -> None:
+        """Create the validated workers, assign them to the department, and mark the rows created.
+
+        Two batched statements rather than two per row. Each is atomic on its own, so if the
+        membership insert fails the just-created workers are deleted to undo the first half — the
+        import must never leave workers who belong to no department, since no HOD can then see them.
+
+        Args:
+            valid: The rows that passed validation, mutated in place to ``created``.
+            validated: The validated row data, keyed by line number.
+            department_id: Department to assign the new workers to.
+
+        Raises:
+            AppError: If the department assignment failed. The worker creation is rolled back first.
+        """
+        log = self.logger.bind(method="_commit_import", department_id=str(department_id), count=len(valid))
+
+        created = self.worker_repo.create_many([validated[r.line_number].model_dump() for r in valid])
+        created_by_email = {worker.email.lower(): worker for worker in created}
+
+        try:
+            self.department_repo.assign_workers(department_id, [worker.id for worker in created])
+        except Exception as exc:
+            log.error("import_assign_failed_rolling_back", error=str(exc))
             try:
-                worker = self.worker_repo.create(data.model_dump())
-                self.department_repo.assign_worker(department_id, worker.id)
-                results.append(
-                    WorkerImportRowResult(
-                        row_number=index, status="created", name=name, email=email, worker_id=worker.id
-                    )
+                self.worker_repo.delete_many([worker.id for worker in created])
+            except Exception as cleanup_exc:
+                # Both halves failed: the workers exist but belong to no department and could not be
+                # removed. Log the ids so they can be cleaned up by hand.
+                log.error(
+                    "import_rollback_failed",
+                    error=str(cleanup_exc),
+                    orphaned_worker_ids=[str(worker.id) for worker in created],
                 )
-            except Exception as exc:  # one row's failure must not abort the rest of the batch
-                log.warning("import_row_failed", row_number=index, error=str(exc))
-                results.append(
-                    WorkerImportRowResult(
-                        row_number=index, status="error", name=name, email=email, error="Failed to create worker"
-                    )
-                )
+            raise AppError("Workers could not be assigned to the department, so no changes were saved") from exc
 
-        result = WorkerImportResult(
-            dry_run=dry_run,
-            total_rows=len(results),
-            created=sum(1 for r in results if r.status == "created"),
-            valid=sum(1 for r in results if r.status == "valid"),
-            skipped_duplicate=sum(1 for r in results if r.status == "skipped_duplicate"),
-            errors=sum(1 for r in results if r.status == "error"),
-            results=results,
-        )
-        log.info(
-            "import_workers_complete",
-            total=result.total_rows,
-            created=result.created,
-            valid=result.valid,
-            skipped=result.skipped_duplicate,
-            errors=result.errors,
-        )
-        return result
+        for result in valid:
+            worker = created_by_email.get((result.email or "").lower())
+            result.status = "created"
+            result.worker_id = worker.id if worker else None
+        log.info("import_committed", created_count=len(created))
 
     def update_worker(self, worker_id: UUID, data: WorkerUpdate) -> WorkerResponse:
         """Update a worker's information.

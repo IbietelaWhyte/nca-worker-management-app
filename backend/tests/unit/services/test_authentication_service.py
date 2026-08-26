@@ -177,7 +177,8 @@ class TestCreateAccountForWorker:
             service.create_account_for_worker(worker.id, GrantAccountRequest(password="securepass1"))
 
     def test_raises_when_no_email(self, service, mock_worker_repo):
-        worker = make_worker(auth_user_id=None, email=None)
+        # workers.email is NOT NULL, so the only way to reach this guard is a blank one.
+        worker = make_worker(auth_user_id=None, email="")
         mock_worker_repo.get_by_id.return_value = worker
         with pytest.raises(BadRequestError, match="must have an email"):
             service.create_account_for_worker(worker.id, GrantAccountRequest(password="securepass1"))

@@ -1,14 +1,16 @@
+from typing import Any
 from uuid import UUID
 
 from supabase import Client
 
 from app.core.logging import get_logger
+from app.core.phone import try_normalize_phone
 from app.core.redaction import mask_email, mask_phone
 from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
-from app.schemas.models import UserRole, WorkerStatus
-from app.schemas.workers.models import WorkerResponse
+from app.schemas.models import UserRole
+from app.schemas.workers.models import WorkerContactMatch, WorkerResponse
 
 logger = get_logger(__name__)
 
@@ -72,17 +74,14 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
 
     def get_active_workers(self) -> list[WorkerResponse]:
         """
-        Retrieve all workers with an active status.
-
-        This method queries the workers table and filters for workers whose status is set
-        to ACTIVE. It returns all matching worker records as a list of Worker instances.
+        Retrieve all active workers.
 
         Returns:
-            list[WorkerResponse]: A list of WorkerResponse model instances with active status. Returns an
+            list[WorkerResponse]: A list of WorkerResponse model instances that are active. Returns an
                          empty list if no active workers are found or if the response contains no data.
         """
         log = self.logger.bind(method="get_active_workers")
-        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.STATUS, WorkerStatus.ACTIVE).execute()
+        response = self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.IS_ACTIVE, True).execute()
         workers = self._to_model_list(response.data or [])
         log.debug("fetched_active_workers", count=len(workers))
         return workers
@@ -155,28 +154,70 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log.debug("fetched_department_only_workers", count=len(workers))
         return workers
 
-    def update_status(self, id: UUID, status: WorkerStatus) -> WorkerResponse | None:
-        """
-        Update the status of a worker.
+    def get_contact_index(self) -> dict[str, WorkerContactMatch]:
+        """Build a lookup of every existing worker's contact details, for duplicate detection.
 
-        This method updates only the status field of a worker record identified by the given UUID.
-        It delegates to the base repository's update method to perform the actual database operation.
+        Returns one map keyed by both lowercased email and E.164-normalized phone, so a caller can
+        test either against it. Normalizing both sides here is what makes the check case-insensitive
+        and format-insensitive — the ``workers.email`` unique index is case-sensitive and
+        ``workers.phone`` has no constraint at all, so ``Jane@x.com`` would otherwise slip past both
+        the app check and the database and create a second profile for the same person.
 
-        Args:
-            id (UUID): The unique identifier of the worker whose status is to be updated.
-            status (WorkerStatus): The new status to assign to the worker (e.g., ACTIVE, INACTIVE).
+        Fetches the whole table in a single query rather than filtering by the values being imported:
+        at this app's scale that is one cheap round trip instead of one per CSV row, and it avoids
+        building a several-hundred-term PostgREST ``or()`` filter. Revisit if ``workers`` ever grows
+        past a few thousand rows.
 
         Returns:
-            WorkerResponse | None: The updated WorkerResponse model instance if the update was successful,
-                          None if the worker was not found or the update failed.
+            dict[str, WorkerContactMatch]: Map of normalized email/phone to the owning worker.
         """
-        log = self.logger.bind(method="update_status", worker_id=str(id), status=status)
-        worker = self.update(id, {q.Columns.STATUS: status})
-        if worker:
-            log.info("worker_status_updated")
-        else:
-            log.warning("worker_not_found")
-        return worker
+        log = self.logger.bind(method="get_contact_index")
+        response = self.client.table(q.TABLE).select(q.SELECT_CONTACT_INDEX).execute()
+        rows: list[dict[str, Any]] = response.data or []  # type: ignore[assignment]
+
+        index: dict[str, WorkerContactMatch] = {}
+        for row in rows:
+            match = WorkerContactMatch(worker_id=UUID(row["id"]), is_active=bool(row["is_active"]))
+            if email := row.get("email"):
+                index[email.strip().lower()] = match
+            if phone := try_normalize_phone(row.get("phone")):
+                index[phone] = match
+
+        log.debug("built_contact_index", workers=len(rows), keys=len(index))
+        return index
+
+    def create_many(self, rows: list[dict[str, Any]]) -> list[WorkerResponse]:
+        """Create many workers in a single insert.
+
+        One statement, so Postgres applies it atomically — either every row lands or none does.
+
+        Args:
+            rows: Field values for each worker to create.
+
+        Returns:
+            list[WorkerResponse]: The created workers, with database-generated fields populated.
+        """
+        if not rows:
+            return []
+        log = self.logger.bind(method="create_many", count=len(rows))
+        response = self.client.table(q.TABLE).insert(rows).execute()
+        workers = self._to_model_list(response.data or [])
+        log.info("workers_created", created_count=len(workers))
+        return workers
+
+    def delete_many(self, ids: list[UUID]) -> None:
+        """Delete many workers by id in a single statement.
+
+        Used to compensate a partially-applied bulk import; see ``WorkerService.import_workers``.
+
+        Args:
+            ids: Unique identifiers of the workers to delete.
+        """
+        if not ids:
+            return
+        log = self.logger.bind(method="delete_many", count=len(ids))
+        self.client.table(q.TABLE).delete().in_(q.Columns.ID, [str(i) for i in ids]).execute()
+        log.info("workers_deleted")
 
     def search(self, query: str) -> list[WorkerResponse]:
         """

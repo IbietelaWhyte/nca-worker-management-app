@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from app.core.exceptions import ConflictError, NotFoundError, PermissionDeniedError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from app.schemas.workers.models import WorkerImportResult, WorkerImportRowResult
 from tests.integration.routers.conftest import make_client
@@ -113,6 +113,22 @@ def _csv_upload(rows: str = "Ann,Lee,a@example.com,+14165550111"):
     return {"file": ("workers.csv", content, "text/csv")}
 
 
+def _result(**kwargs) -> WorkerImportResult:
+    """Build a WorkerImportResult, defaulting every count so tests only state what they assert on."""
+    results = kwargs.get("results", [])
+    return WorkerImportResult(
+        dry_run=kwargs.get("dry_run", False),
+        ok=kwargs.get("ok", True),
+        total_rows=kwargs.get("total_rows", len(results)),
+        valid=kwargs.get("valid", 0),
+        created=kwargs.get("created", 0),
+        duplicates=kwargs.get("duplicates", 0),
+        duplicates_inactive=kwargs.get("duplicates_inactive", 0),
+        errors=kwargs.get("errors", 0),
+        results=results,
+    )
+
+
 class TestImportWorkers:
     def test_returns_403_for_worker_role(self, mock_worker_service):
         client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)
@@ -122,14 +138,11 @@ class TestImportWorkers:
 
     def test_dry_run_previews_without_writing(self, mock_worker_service):
         dept_id = uuid4()
-        mock_worker_service.import_workers.return_value = WorkerImportResult(
+        mock_worker_service.import_workers.return_value = _result(
             dry_run=True,
-            total_rows=1,
-            created=0,
+            ok=True,
             valid=1,
-            skipped_duplicate=0,
-            errors=0,
-            results=[WorkerImportRowResult(row_number=1, status="valid", name="Ann Lee", email="a@example.com")],
+            results=[WorkerImportRowResult(line_number=2, status="valid", name="Ann Lee", email="a@example.com")],
         )
         client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
 
@@ -137,22 +150,20 @@ class TestImportWorkers:
         assert response.status_code == 200
         body = response.json()
         assert body["dry_run"] is True
+        assert body["ok"] is True
         assert body["valid"] == 1
         _, kwargs = mock_worker_service.import_workers.call_args
         assert kwargs["dry_run"] is True
+        assert kwargs["skip_duplicates"] is False
 
     def test_commit_imports_and_reports(self, mock_worker_service):
         dept_id = uuid4()
-        mock_worker_service.import_workers.return_value = WorkerImportResult(
-            dry_run=False,
-            total_rows=1,
+        mock_worker_service.import_workers.return_value = _result(
+            ok=True,
             created=1,
-            valid=0,
-            skipped_duplicate=0,
-            errors=0,
             results=[
                 WorkerImportRowResult(
-                    row_number=1, status="created", name="Ann Lee", email="a@example.com", worker_id=uuid4()
+                    line_number=2, status="created", name="Ann Lee", email="a@example.com", worker_id=uuid4()
                 )
             ],
         )
@@ -161,6 +172,52 @@ class TestImportWorkers:
         response = client.post(f"/api/v1/departments/{dept_id}/workers/import", files=_csv_upload())
         assert response.status_code == 200
         assert response.json()["created"] == 1
+
+    def test_forwards_skip_duplicates(self, mock_worker_service):
+        mock_worker_service.import_workers.return_value = _result(ok=True, created=1)
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.post(
+            f"/api/v1/departments/{uuid4()}/workers/import?skip_duplicates=true", files=_csv_upload()
+        )
+        assert response.status_code == 200
+        _, kwargs = mock_worker_service.import_workers.call_args
+        assert kwargs["skip_duplicates"] is True
+
+    def test_returns_200_with_ok_false_when_rejected(self, mock_worker_service):
+        # A rejected file is a report, not an error status — the per-row detail is the payload.
+        mock_worker_service.import_workers.return_value = _result(
+            dry_run=True,
+            ok=False,
+            errors=1,
+            results=[
+                WorkerImportRowResult(
+                    line_number=2,
+                    status="error",
+                    name="Ann Lee",
+                    email="banana",
+                    field="email",
+                    value="banana",
+                    error="'banana' is not a valid email address",
+                )
+            ],
+        )
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/departments/{uuid4()}/workers/import?dry_run=true", files=_csv_upload())
+        assert response.status_code == 200
+        body = response.json()
+        assert body["ok"] is False
+        assert body["results"][0]["field"] == "email"
+        assert body["results"][0]["line_number"] == 2
+
+    def test_returns_400_when_file_is_not_a_valid_csv(self, mock_worker_service):
+        mock_worker_service.import_workers.side_effect = BadRequestError("CSV is missing required column(s): phone")
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/departments/{uuid4()}/workers/import", files=_csv_upload())
+        assert response.status_code == 400
+        assert "missing required column" in response.json()["detail"]
 
     def test_returns_403_when_hod_does_not_manage_department(self, mock_worker_service):
         mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("nope")

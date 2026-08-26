@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import Depends, FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from supabase import Client
@@ -125,6 +126,31 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
     """
     logger.info("app_error", status_code=exc.status_code, detail=exc.detail)
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Flatten FastAPI's 422 body to the same ``{"detail": "<string>"}`` shape as every other error.
+
+    FastAPI's default 422 returns ``detail`` as a *list of objects* while AppError and HTTPException
+    return it as a *string*. The frontend renders ``err.response.data.detail`` directly in a dozen
+    places, so the default shape crashes the render ("Objects are not valid as a React child").
+
+    Args:
+        request: The incoming request (unused, required by the handler signature).
+        exc: The validation error raised while parsing the request.
+
+    Returns:
+        JSONResponse: A 422 response whose detail is a human-readable summary of the failures.
+    """
+    messages = []
+    for error in exc.errors():
+        # loc is like ("body", "email"); drop the source segment and name the field itself.
+        field = ".".join(str(part) for part in error["loc"][1:]) or "request"
+        messages.append(f"{field}: {error['msg']}")
+    detail = "; ".join(messages) or "Invalid request"
+    logger.info("request_validation_error", detail=detail)
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": detail})
 
 
 @app.exception_handler(Exception)
