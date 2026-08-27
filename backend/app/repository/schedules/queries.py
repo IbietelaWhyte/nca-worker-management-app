@@ -7,19 +7,21 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 # Inner join variant: required when filtering on a schedules column, otherwise PostgREST
 # nulls the embedded object instead of dropping the assignment row.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
-SELECT_ASSIGNMENTS_WITH_WORKERS = "*, workers(*), schedules(*)"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 
 
 class Columns:
     ID = "id"
     DEPARTMENT_ID = "department_id"
+    TITLE = "title"
     SCHEDULED_DATE = "scheduled_date"
     START_TIME = "start_time"
     END_TIME = "end_time"
     SUBTEAM_ID = "subteam_id"
     NOTES = "notes"
     REMINDER_DAYS_BEFORE = "reminder_days_before"
+    CREATED_BY = "created_by"
+    CREATED_AT = "created_at"
 
 
 class AssignmentColumns:

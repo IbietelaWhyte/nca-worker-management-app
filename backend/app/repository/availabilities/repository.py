@@ -42,6 +42,59 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
         log.debug("fetched_availabilities_by_worker", count=len(availabilities))
         return availabilities
 
+    def get_for_workers(self, worker_ids: list[UUID], start_date: date, end_date: date) -> list[AvailabilityResponse]:
+        """
+        Retrieve every availability record relevant to a set of workers over a date range.
+
+        Returns both kinds of record in two round-trips total: all recurring day-of-week
+        rows for these workers, plus any specific-date overrides falling inside the range.
+        Callers resolve precedence themselves (specific date beats recurring).
+
+        This is the batched replacement for calling `get_by_worker_and_type` and
+        `get_by_worker_and_day` once per worker per date, which costs two queries per
+        worker per date.
+
+        Args:
+            worker_ids (list[UUID]): The workers to fetch availability for.
+            start_date (date): Start of the range for specific-date overrides (inclusive).
+            end_date (date): End of the range for specific-date overrides (inclusive).
+
+        Returns:
+            list[AvailabilityResponse]: Recurring and in-range specific-date records.
+                                       Empty if `worker_ids` is empty.
+        """
+        log = self.logger.bind(
+            method="get_for_workers",
+            worker_count=len(worker_ids),
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+        )
+        if not worker_ids:
+            return []
+
+        ids = [str(wid) for wid in worker_ids]
+
+        recurring = (
+            self.client.table(q.TABLE)
+            .select(q.SELECT_ALL)
+            .in_(q.Columns.WORKER_ID, ids)
+            .eq(q.Columns.AVAILABILITY_TYPE, AvailabilityType.RECURRING)
+            .execute()
+        )
+        specific = (
+            self.client.table(q.TABLE)
+            .select(q.SELECT_ALL)
+            .in_(q.Columns.WORKER_ID, ids)
+            .eq(q.Columns.AVAILABILITY_TYPE, AvailabilityType.SPECIFIC_DATE)
+            .gte(q.Columns.SPECIFIC_DATE, start_date.isoformat())
+            .lte(q.Columns.SPECIFIC_DATE, end_date.isoformat())
+            .execute()
+        )
+
+        records = self._to_model_list((recurring.data or []) + (specific.data or []))
+        log.debug("fetched_availability_for_workers", count=len(records))
+        return records
+
     def get_by_worker_and_day(self, worker_id: UUID, day_of_week: int) -> AvailabilityResponse | None:
         """
         Retrieve a worker's availability for a specific day of the week.

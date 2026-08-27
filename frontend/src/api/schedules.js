@@ -1,11 +1,22 @@
 import apiClient from './client'
 
-export const getSchedulesByDepartment = departmentId =>
-    apiClient.get(`/schedules/departments/${departmentId}`)
+// `range` is an optional { from, to } pair of yyyy-MM-dd strings; omitting it returns
+// every schedule the department has.
+export const getSchedulesByDepartment = (departmentId, range) =>
+    apiClient.get(`/schedules/departments/${departmentId}`, {
+        params: range?.from && range?.to ? { from: range.from, to: range.to } : {},
+    })
 
 export const getSchedule = scheduleId => apiClient.get(`/schedules/${scheduleId}`)
 
 export const generateSchedule = data => apiClient.post('/schedules/generate', data)
+
+// Plans a whole month without saving anything — the HOD reviews the result first.
+export const previewMonthlySchedule = data =>
+    apiClient.post('/schedules/generate-month/preview', data)
+
+// Saves the month the HOD approved, using the exact per-date worker selection.
+export const generateMonthlySchedule = data => apiClient.post('/schedules/generate-month', data)
 
 export const deleteSchedule = scheduleId => apiClient.delete(`/schedules/${scheduleId}`)
 

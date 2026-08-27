@@ -18,3 +18,4 @@ class Columns:
 class JunctionColumns:
     WORKER_ID = "worker_id"
     DEPARTMENT_ID = "department_id"
+    SUBTEAM_ID = "subteam_id"

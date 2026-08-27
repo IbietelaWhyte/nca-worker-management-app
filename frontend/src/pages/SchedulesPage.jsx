@@ -4,10 +4,13 @@ import { useDepartments } from '@/hooks/useDepartments'
 import { useSchedules } from '@/hooks/useSchedules'
 import { useAuth } from '@/context/AuthContext'
 import GenerateScheduleForm from '@/components/schedules/GenerateScheduleForm'
+import GenerateMonthDialog from '@/components/schedules/GenerateMonthDialog'
+import MonthCalendar from '@/components/schedules/MonthCalendar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
     Table,
     TableBody,
@@ -16,8 +19,8 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, ChevronRight, Trash2, Calendar } from 'lucide-react'
-import { format } from 'date-fns'
+import { Plus, ChevronLeft, ChevronRight, Trash2, Calendar, CalendarRange } from 'lucide-react'
+import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
 
 const STATUS_SUMMARY = schedule_assignments => {
     const confirmed = (schedule_assignments ?? []).filter(a => a.status === 'confirmed').length
@@ -31,6 +34,7 @@ export default function SchedulesPage() {
     const { departments } = useDepartments()
     const [selectedDepartmentId, setSelectedDepartmentId] = useState('')
     const [generateOpen, setGenerateOpen] = useState(false)
+    const [generateMonthOpen, setGenerateMonthOpen] = useState(false)
 
     // For assistant_hod users, auto-select first department if only one available
     const isAssistantHod = role === 'assistant_hod'
@@ -42,14 +46,30 @@ export default function SchedulesPage() {
         }
     }, [departments, isAssistantHod, selectedDepartmentId])
 
-    const { schedules, loading, error, createSchedule, removeSchedule } =
-        useSchedules(selectedDepartmentId)
+    const {
+        schedules,
+        loading,
+        error,
+        month,
+        setMonth,
+        refetch,
+        createSchedule,
+        previewMonth,
+        commitMonth,
+        removeSchedule,
+    } = useSchedules(selectedDepartmentId)
 
     const selectedDepartment = departments.find(d => d.id === selectedDepartmentId)
 
     const handleGenerate = async formData => {
         await createSchedule(formData)
         setGenerateOpen(false)
+    }
+
+    const handleMonthDone = () => {
+        setGenerateMonthOpen(false)
+        // The commit may have landed in a different month than the one on screen.
+        refetch()
     }
 
     const handleDelete = async schedule => {
@@ -67,10 +87,16 @@ export default function SchedulesPage() {
                     </p>
                 </div>
                 {(isAdmin || isDepartmentHead) && selectedDepartmentId && (
-                    <Button onClick={() => setGenerateOpen(true)}>
-                        <Plus size={16} className="mr-2" />
-                        Generate Schedule
-                    </Button>
+                    <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setGenerateOpen(true)}>
+                            <Plus size={16} className="mr-2" />
+                            Generate Schedule
+                        </Button>
+                        <Button onClick={() => setGenerateMonthOpen(true)}>
+                            <CalendarRange size={16} className="mr-2" />
+                            Generate Month
+                        </Button>
+                    </div>
                 )}
             </div>
 
@@ -124,124 +150,197 @@ export default function SchedulesPage() {
                         </Alert>
                     )}
 
+                    {/* Month navigation — scopes both views, and bounds what is fetched */}
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="icon-sm"
+                            onClick={() => setMonth(prev => subMonths(prev, 1))}
+                        >
+                            <ChevronLeft size={16} />
+                        </Button>
+                        <span className="text-sm font-medium w-36 text-center">
+                            {format(month, 'MMMM yyyy')}
+                        </span>
+                        <Button
+                            variant="outline"
+                            size="icon-sm"
+                            onClick={() => setMonth(prev => addMonths(prev, 1))}
+                        >
+                            <ChevronRight size={16} />
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMonth(startOfMonth(new Date()))}
+                        >
+                            Today
+                        </Button>
+                    </div>
+
                     {loading && (
                         <div className="flex items-center justify-center h-40">
                             <p className="text-muted-foreground">Loading schedules...</p>
                         </div>
                     )}
 
-                    {!loading && !error && schedules.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-48 border rounded-lg border-dashed">
-                            <Calendar size={32} className="text-muted-foreground mb-3" />
-                            <p className="text-muted-foreground text-sm">
-                                No schedules yet for {selectedDepartment?.name}
-                            </p>
-                            {(isAdmin || isDepartmentHead) && (
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="mt-3"
-                                    onClick={() => setGenerateOpen(true)}
-                                >
-                                    Generate first schedule
-                                </Button>
-                            )}
-                        </div>
-                    )}
+                    {!loading && !error && (
+                        <Tabs defaultValue="month">
+                            <TabsList>
+                                <TabsTrigger value="month">Month</TabsTrigger>
+                                <TabsTrigger value="list">
+                                    List
+                                    <Badge variant="secondary" className="ml-2">
+                                        {schedules.length}
+                                    </Badge>
+                                </TabsTrigger>
+                            </TabsList>
 
-                    {!loading && schedules.length > 0 && (
-                        <div className="border rounded-lg overflow-hidden">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Title</TableHead>
-                                        <TableHead>Date</TableHead>
-                                        <TableHead>Time</TableHead>
-                                        <TableHead>Assignments</TableHead>
-                                        <TableHead className="text-right">Actions</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {[...schedules]
-                                        .sort((a, b) =>
-                                            b.scheduled_date.localeCompare(a.scheduled_date)
-                                        )
-                                        .map(schedule => {
-                                            const { confirmed, total } = STATUS_SUMMARY(
-                                                schedule.schedule_assignments
-                                            )
+                            <TabsContent value="month" className="mt-4">
+                                <MonthCalendar
+                                    month={month}
+                                    schedules={schedules}
+                                    onDayClick={schedule => navigate(`/schedules/${schedule.id}`)}
+                                />
+                            </TabsContent>
 
-                                            return (
-                                                <TableRow
-                                                    key={schedule.id}
-                                                    className="cursor-pointer"
-                                                    onClick={() =>
-                                                        navigate(`/schedules/${schedule.id}`)
-                                                    }
-                                                >
-                                                    <TableCell className="font-medium">
-                                                        {schedule.title}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        {format(
-                                                            new Date(
-                                                                schedule.scheduled_date +
-                                                                    'T00:00:00'
-                                                            ),
-                                                            'PPP'
-                                                        )}
-                                                    </TableCell>
-                                                    <TableCell className="text-muted-foreground">
-                                                        {schedule.start_time?.slice(0, 5)} –{' '}
-                                                        {schedule.end_time?.slice(0, 5)}
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <Badge
-                                                            variant={
-                                                                confirmed === total && total > 0
-                                                                    ? 'default'
-                                                                    : 'secondary'
-                                                            }
-                                                        >
-                                                            {confirmed}/{total} confirmed
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div
-                                                            className="flex justify-end gap-2"
-                                                            onClick={e => e.stopPropagation()}
-                                                        >
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
+                            <TabsContent value="list" className="mt-4">
+                                {schedules.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-48 border rounded-lg border-dashed">
+                                        <Calendar
+                                            size={32}
+                                            className="text-muted-foreground mb-3"
+                                        />
+                                        <p className="text-muted-foreground text-sm">
+                                            No schedules in {format(month, 'MMMM yyyy')} for{' '}
+                                            {selectedDepartment?.name}
+                                        </p>
+                                        {(isAdmin || isDepartmentHead) && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="mt-3"
+                                                onClick={() => setGenerateMonthOpen(true)}
+                                            >
+                                                Generate this month
+                                            </Button>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="border rounded-lg overflow-hidden">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Title</TableHead>
+                                                    <TableHead>Date</TableHead>
+                                                    <TableHead>Time</TableHead>
+                                                    <TableHead>Assignments</TableHead>
+                                                    <TableHead className="text-right">
+                                                        Actions
+                                                    </TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {[...schedules]
+                                                    .sort((a, b) =>
+                                                        b.scheduled_date.localeCompare(
+                                                            a.scheduled_date
+                                                        )
+                                                    )
+                                                    .map(schedule => {
+                                                        const { confirmed, total } = STATUS_SUMMARY(
+                                                            schedule.schedule_assignments
+                                                        )
+
+                                                        return (
+                                                            <TableRow
+                                                                key={schedule.id}
+                                                                className="cursor-pointer"
                                                                 onClick={() =>
                                                                     navigate(
                                                                         `/schedules/${schedule.id}`
                                                                     )
                                                                 }
                                                             >
-                                                                <ChevronRight size={14} />
-                                                            </Button>
-                                                            {(isAdmin || isDepartmentHead) && (
-                                                                <Button
-                                                                    variant="outline"
-                                                                    size="sm"
-                                                                    onClick={() =>
-                                                                        handleDelete(schedule)
-                                                                    }
-                                                                    className="text-destructive hover:text-destructive"
-                                                                >
-                                                                    <Trash2 size={14} />
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    </TableCell>
-                                                </TableRow>
-                                            )
-                                        })}
-                                </TableBody>
-                            </Table>
-                        </div>
+                                                                <TableCell className="font-medium">
+                                                                    {schedule.title}
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    {format(
+                                                                        new Date(
+                                                                            schedule.scheduled_date +
+                                                                                'T00:00:00'
+                                                                        ),
+                                                                        'PPP'
+                                                                    )}
+                                                                </TableCell>
+                                                                <TableCell className="text-muted-foreground">
+                                                                    {schedule.start_time?.slice(
+                                                                        0,
+                                                                        5
+                                                                    )}{' '}
+                                                                    –{' '}
+                                                                    {schedule.end_time?.slice(0, 5)}
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <Badge
+                                                                        variant={
+                                                                            confirmed === total &&
+                                                                            total > 0
+                                                                                ? 'default'
+                                                                                : 'secondary'
+                                                                        }
+                                                                    >
+                                                                        {confirmed}/{total}{' '}
+                                                                        confirmed
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <div
+                                                                        className="flex justify-end gap-2"
+                                                                        onClick={e =>
+                                                                            e.stopPropagation()
+                                                                        }
+                                                                    >
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            onClick={() =>
+                                                                                navigate(
+                                                                                    `/schedules/${schedule.id}`
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <ChevronRight
+                                                                                size={14}
+                                                                            />
+                                                                        </Button>
+                                                                        {(isAdmin ||
+                                                                            isDepartmentHead) && (
+                                                                            <Button
+                                                                                variant="outline"
+                                                                                size="sm"
+                                                                                onClick={() =>
+                                                                                    handleDelete(
+                                                                                        schedule
+                                                                                    )
+                                                                                }
+                                                                                className="text-destructive hover:text-destructive"
+                                                                            >
+                                                                                <Trash2 size={14} />
+                                                                            </Button>
+                                                                        )}
+                                                                    </div>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        )
+                                                    })}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                )}
+                            </TabsContent>
+                        </Tabs>
                     )}
                 </>
             )}
@@ -257,6 +356,24 @@ export default function SchedulesPage() {
                         onSubmit={handleGenerate}
                         onCancel={() => setGenerateOpen(false)}
                     />
+                </DialogContent>
+            </Dialog>
+
+            {/* Generate a whole month — preview, then commit */}
+            <Dialog open={generateMonthOpen} onOpenChange={setGenerateMonthOpen}>
+                <DialogContent className="sm:max-w-xl">
+                    <DialogHeader>
+                        <DialogTitle>Generate Month</DialogTitle>
+                    </DialogHeader>
+                    {generateMonthOpen && (
+                        <GenerateMonthDialog
+                            departmentId={selectedDepartmentId}
+                            onPreview={previewMonth}
+                            onCommit={commitMonth}
+                            onDone={handleMonthDone}
+                            onCancel={() => setGenerateMonthOpen(false)}
+                        />
+                    )}
                 </DialogContent>
             </Dialog>
         </div>
