@@ -1,7 +1,15 @@
+from datetime import date
 from uuid import uuid4
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.models import AssignmentStatus, UserRole
+from app.schemas.schedules.models import (
+    DatePlan,
+    DatePlanStatus,
+    MonthlySchedulePreview,
+    MonthlyScheduleResult,
+    SkippedDate,
+)
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_assignment, make_schedule
 
@@ -202,3 +210,171 @@ class TestTriggerReminders:
         )
         response = client.post("/api/v1/schedules/reminders/trigger")
         assert response.status_code == 403
+
+
+MONTH_PREVIEW_BODY = {
+    "scope": "department_only",
+    "title": "Sunday Service",
+    "year": 2026,
+    "month": 3,
+    "days_of_week": ["sunday"],
+    "start_time": "09:00:00",
+    "end_time": "11:00:00",
+    "reminder_days_before": 1,
+}
+
+
+class TestListSchedulesByDepartmentRange:
+    def test_passes_date_range_to_service(self, mock_schedule_service):
+        dept_id = uuid4()
+        mock_schedule_service.get_schedules_by_department.return_value = []
+        client = make_client(schedule_service=mock_schedule_service)
+
+        response = client.get(
+            f"/api/v1/schedules/departments/{dept_id}",
+            params={"from": "2026-03-01", "to": "2026-03-31"},
+        )
+
+        assert response.status_code == 200
+        mock_schedule_service.get_schedules_by_department.assert_called_once_with(
+            dept_id, date(2026, 3, 1), date(2026, 3, 31)
+        )
+
+    def test_returns_422_for_a_malformed_date(self, mock_schedule_service):
+        client = make_client(schedule_service=mock_schedule_service)
+        response = client.get(f"/api/v1/schedules/departments/{uuid4()}", params={"from": "not-a-date"})
+        assert response.status_code == 422
+
+
+class TestPreviewMonthlySchedule:
+    def test_returns_200_with_the_plan(self, mock_schedule_service):
+        mock_schedule_service.preview_monthly_schedule.return_value = MonthlySchedulePreview(
+            year=2026,
+            month=3,
+            workers_needed=2,
+            dates=[
+                DatePlan(scheduled_date=date(2026, 3, 1), status=DatePlanStatus.PLANNED),
+                DatePlan(
+                    scheduled_date=date(2026, 3, 8),
+                    status=DatePlanStatus.SKIPPED_EXISTING,
+                    message="A schedule already exists for this date.",
+                ),
+            ],
+        )
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={**MONTH_PREVIEW_BODY, "department_id": str(uuid4())},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["workers_needed"] == 2
+        assert [d["status"] for d in body["dates"]] == ["planned", "skipped_existing"]
+
+    def test_returns_403_for_worker_role(self, mock_schedule_service):
+        client = make_client(role=UserRole.WORKER, schedule_service=mock_schedule_service)
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={**MONTH_PREVIEW_BODY, "department_id": str(uuid4())},
+        )
+        assert response.status_code == 403
+        mock_schedule_service.preview_monthly_schedule.assert_not_called()
+
+    def test_returns_422_when_no_weekdays_given(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={**MONTH_PREVIEW_BODY, "department_id": str(uuid4()), "days_of_week": []},
+        )
+        assert response.status_code == 422
+
+    def test_returns_422_when_end_time_precedes_start_time(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={
+                **MONTH_PREVIEW_BODY,
+                "department_id": str(uuid4()),
+                "start_time": "11:00:00",
+                "end_time": "09:00:00",
+            },
+        )
+        assert response.status_code == 422
+
+    def test_returns_422_when_subteam_missing_for_subteam_scope(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={**MONTH_PREVIEW_BODY, "department_id": str(uuid4()), "scope": "subteam"},
+        )
+        assert response.status_code == 422
+
+    def test_returns_400_when_scope_has_no_workers(self, mock_schedule_service):
+        mock_schedule_service.preview_monthly_schedule.side_effect = BadRequestError("No workers found")
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post(
+            "/api/v1/schedules/generate-month/preview",
+            json={**MONTH_PREVIEW_BODY, "department_id": str(uuid4())},
+        )
+        assert response.status_code == 400
+
+
+class TestGenerateMonthlySchedule:
+    def _commit_body(self, worker_id=None):
+        return {
+            "department_id": str(uuid4()),
+            "scope": "department_only",
+            "title": "Sunday Service",
+            "start_time": "09:00:00",
+            "end_time": "11:00:00",
+            "reminder_days_before": 1,
+            "dates": [
+                {"scheduled_date": "2026-03-01", "worker_ids": [str(worker_id or uuid4())]},
+            ],
+        }
+
+    def test_returns_201_with_created_and_skipped(self, mock_schedule_service):
+        mock_schedule_service.commit_monthly_schedule.return_value = MonthlyScheduleResult(
+            created=[make_schedule(scheduled_date=date(2026, 3, 1))],
+            skipped=[SkippedDate(scheduled_date=date(2026, 3, 8), reason="A schedule already exists for this date.")],
+        )
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post("/api/v1/schedules/generate-month", json=self._commit_body())
+
+        assert response.status_code == 201
+        body = response.json()
+        assert len(body["created"]) == 1
+        assert body["skipped"][0]["scheduled_date"] == "2026-03-08"
+
+    def test_returns_403_for_worker_role(self, mock_schedule_service):
+        client = make_client(role=UserRole.WORKER, schedule_service=mock_schedule_service)
+        response = client.post("/api/v1/schedules/generate-month", json=self._commit_body())
+        assert response.status_code == 403
+        mock_schedule_service.commit_monthly_schedule.assert_not_called()
+
+    def test_returns_409_when_every_date_exists(self, mock_schedule_service):
+        mock_schedule_service.commit_monthly_schedule.side_effect = ConflictError("already has a schedule")
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post("/api/v1/schedules/generate-month", json=self._commit_body())
+        assert response.status_code == 409
+
+    def test_returns_422_when_a_date_has_no_workers(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        body = self._commit_body()
+        body["dates"][0]["worker_ids"] = []
+
+        response = client.post("/api/v1/schedules/generate-month", json=body)
+        assert response.status_code == 422
+
+    def test_returns_422_for_duplicate_dates(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        body = self._commit_body()
+        body["dates"].append({"scheduled_date": "2026-03-01", "worker_ids": [str(uuid4())]})
+
+        response = client.post("/api/v1/schedules/generate-month", json=body)
+        assert response.status_code == 422

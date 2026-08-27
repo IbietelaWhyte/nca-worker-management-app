@@ -123,6 +123,47 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log.debug("fetched_workers_by_department", count=len(workers))
         return workers
 
+    def get_workers_by_department_grouped_by_subteam(
+        self, department_id: UUID
+    ) -> dict[UUID | None, list[WorkerResponse]]:
+        """
+        Retrieve a department's workers bucketed by the subteam they belong to.
+
+        One round-trip for the whole department, rather than a `get_with_workers` call
+        per subteam. A worker holds at most one row per department (the junction is
+        unique on worker_id + department_id), so the buckets are disjoint.
+
+        Args:
+            department_id (UUID): The unique identifier of the department.
+
+        Returns:
+            dict[UUID | None, list[WorkerResponse]]: Subteam ID -> its workers, with the
+                                                    None key holding workers in no subteam.
+                                                    Subteams with no members are absent.
+        """
+        log = self.logger.bind(method="get_workers_by_department_grouped_by_subteam", department_id=str(department_id))
+        response = (
+            self.client.table(q.JUNCTION_TABLE)
+            .select(f"{q.JunctionColumns.SUBTEAM_ID}, workers(*)")
+            .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
+            .execute()
+        )
+
+        grouped: dict[UUID | None, list[WorkerResponse]] = {}
+        for row in response.data or []:
+            if not isinstance(row, dict) or not row.get("workers"):
+                continue
+            raw_subteam_id = row.get(q.JunctionColumns.SUBTEAM_ID)
+            subteam_id = UUID(str(raw_subteam_id)) if raw_subteam_id else None
+            grouped.setdefault(subteam_id, []).append(self._to_model(row["workers"]))
+
+        log.debug(
+            "fetched_workers_grouped_by_subteam",
+            groups=len(grouped),
+            total=sum(len(w) for w in grouped.values()),
+        )
+        return grouped
+
     def get_department_only_workers(self, department_id: UUID) -> list[WorkerResponse]:
         """
         Get workers assigned to a department but NOT assigned to any subteam.

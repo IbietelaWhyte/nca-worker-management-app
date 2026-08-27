@@ -24,29 +24,42 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         super().__init__(client, q.TABLE, ScheduleResponse)
         self.logger = logger.bind(repository="ScheduleRepository")
 
-    def get_by_department(self, department_id: UUID) -> list[ScheduleResponse]:
+    def get_by_department(
+        self,
+        department_id: UUID,
+        from_date: date | None = None,
+        to_date: date | None = None,
+    ) -> list[ScheduleResponse]:
         """
-        Retrieve all schedules for a specific department.
+        Retrieve schedules for a specific department, newest scheduled_date first.
 
-        This method fetches all schedule records associated with the given department,
-        ordered by start date in descending order (most recent first).
+        Assignments are embedded so callers can show who is on each schedule without a
+        second round-trip — the month grid needs names and confirmed counts per day.
 
         Args:
             department_id (UUID): The unique identifier of the department.
+            from_date (date | None): Optional inclusive lower bound on scheduled_date.
+            to_date (date | None): Optional inclusive upper bound on scheduled_date.
 
         Returns:
-            list[ScheduleResponse]: A list of schedules for the department, ordered by
-                                   start date (newest first). Returns an empty list if
-                                   no schedules exist for the department.
+            list[ScheduleResponse]: Schedules for the department with their assignments,
+                                   ordered by scheduled_date (newest first). Empty if none match.
         """
-        log = self.logger.bind(method="get_by_department", department_id=str(department_id))
-        response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .eq(q.Columns.DEPARTMENT_ID, str(department_id))
-            .order(q.Columns.START_TIME, desc=True)
-            .execute()
+        log = self.logger.bind(
+            method="get_by_department",
+            department_id=str(department_id),
+            from_date=from_date.isoformat() if from_date else None,
+            to_date=to_date.isoformat() if to_date else None,
         )
+        query = (
+            self.client.table(q.TABLE).select(q.SELECT_WITH_ASSIGNMENTS).eq(q.Columns.DEPARTMENT_ID, str(department_id))
+        )
+        if from_date is not None:
+            query = query.gte(q.Columns.SCHEDULED_DATE, from_date.isoformat())
+        if to_date is not None:
+            query = query.lte(q.Columns.SCHEDULED_DATE, to_date.isoformat())
+
+        response = query.order(q.Columns.SCHEDULED_DATE, desc=True).execute()
         schedules = self._to_model_list(response.data or [])
         log.debug("fetched_schedules_by_department", count=len(schedules))
         return schedules
@@ -218,37 +231,127 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.debug("found_workers_scheduled_on_date", count=len(worker_ids), worker_ids=[str(wid) for wid in worker_ids])
         return worker_ids
 
-    def get_assignments_in_range(self, start_date: date, end_date: date) -> list[AssignmentResponse]:
+    def get_workers_scheduled_in_range(self, start_date: date, end_date: date) -> dict[date, set[UUID]]:
         """
-        Retrieve all pending assignments within a specific date range.
+        Retrieve, per date, the workers already assigned anywhere in the org.
 
-        This method fetches assignments with embedded worker information for a given
-        date range, filtered to only include assignments with PENDING status.
+        The range equivalent of `get_workers_scheduled_on_date` — one round-trip for a
+        whole month instead of one per date, which is what makes monthly generation
+        viable against the capped connection pool.
 
         Args:
-            start_date (date): The start date of the range (inclusive).
-            end_date (date): The end date of the range (inclusive).
+            start_date (date): The start of the range (inclusive).
+            end_date (date): The end of the range (inclusive).
 
         Returns:
-            list[AssignmentResponse]: A list of pending assignments within the date range
-                                     with embedded worker data. Returns an empty list if
-                                     no pending assignments exist in the range.
+            dict[date, set[UUID]]: Scheduled date -> worker IDs booked that day. Dates
+                                  with no assignments are absent from the mapping.
         """
         log = self.logger.bind(
-            method="get_assignments_in_range", start_date=start_date.isoformat(), end_date=end_date.isoformat()
+            method="get_workers_scheduled_in_range",
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
         )
+        # Dot syntax + !inner is required to filter on the embedded schedules table;
+        # the parenthesis form silently fails to filter.
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
-            .select(q.SELECT_ASSIGNMENTS_WITH_WORKERS)
-            .gte(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", start_date.isoformat())
-            .lte(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", end_date.isoformat())
-            .eq(q.AssignmentColumns.STATUS, AssignmentStatus.PENDING)
-            .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", desc=True)
+            .select(f"{q.AssignmentColumns.WORKER_ID}, {q.TABLE}!inner({q.Columns.SCHEDULED_DATE})")
+            .gte(f"{q.TABLE}.{q.Columns.SCHEDULED_DATE}", start_date.isoformat())
+            .lte(f"{q.TABLE}.{q.Columns.SCHEDULED_DATE}", end_date.isoformat())
+            .execute()
+        )
+
+        booked: dict[date, set[UUID]] = {}
+        for row in response.data or []:
+            if not isinstance(row, dict):
+                continue
+            schedule = row.get(q.TABLE)
+            worker_id = row.get(q.AssignmentColumns.WORKER_ID)
+            if not isinstance(schedule, dict) or worker_id is None:
+                continue
+            raw_date = schedule.get(q.Columns.SCHEDULED_DATE)
+            if raw_date is None:
+                continue
+            scheduled_date = date.fromisoformat(str(raw_date))
+            booked.setdefault(scheduled_date, set()).add(UUID(str(worker_id)))
+
+        log.debug("found_workers_scheduled_in_range", dates=len(booked))
+        return booked
+
+    def get_assignment_history_for_workers(
+        self, worker_ids: list[UUID], department_id: UUID
+    ) -> list[AssignmentResponse]:
+        """
+        Retrieve the full in-department assignment history for several workers at once.
+
+        Replaces N calls to `get_assignments_for_worker` when planning a month. The
+        caller filters by subteam in memory — scoping that here would need a second
+        query shape for the department-level (subteam_id IS NULL) case.
+
+        Args:
+            worker_ids (list[UUID]): The workers whose history is needed.
+            department_id (UUID): Restricts history to this department.
+
+        Returns:
+            list[AssignmentResponse]: Assignments with their schedule embedded. Empty if
+                                     `worker_ids` is empty or nothing matches.
+        """
+        log = self.logger.bind(
+            method="get_assignment_history_for_workers",
+            worker_count=len(worker_ids),
+            department_id=str(department_id),
+        )
+        if not worker_ids:
+            return []
+
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER)
+            .in_(q.AssignmentColumns.WORKER_ID, [str(wid) for wid in worker_ids])
+            .eq(f"{q.TABLE}.{q.Columns.DEPARTMENT_ID}", str(department_id))
             .execute()
         )
         assignments = [AssignmentResponse.model_validate(row) for row in response.data or []]
-        log.debug("fetched_assignments_in_range", count=len(assignments))
+        log.debug("fetched_assignment_history", count=len(assignments))
         return assignments
+
+    def bulk_create_schedules(self, schedules: list[dict[str, Any]]) -> list[ScheduleResponse]:
+        """
+        Create multiple schedules in a single database operation.
+
+        One statement rather than one per date, so a monthly commit is atomic across all
+        its schedule rows.
+
+        Args:
+            schedules (list[dict[str, Any]]): Schedule rows to insert.
+
+        Returns:
+            list[ScheduleResponse]: The created schedules.
+        """
+        log = self.logger.bind(method="bulk_create_schedules", count=len(schedules))
+        if not schedules:
+            return []
+        response = self.client.table(q.TABLE).insert(schedules).execute()
+        created = self._to_model_list(response.data or [])
+        log.info("bulk_schedules_created", created_count=len(created))
+        return created
+
+    def delete_schedules(self, schedule_ids: list[UUID]) -> None:
+        """
+        Delete several schedules by id.
+
+        Used as a compensating action when a monthly commit writes its schedules but
+        then fails to write their assignments — there is no transaction to roll back.
+
+        Args:
+            schedule_ids (list[UUID]): The schedules to delete.
+        """
+        log = self.logger.bind(method="delete_schedules", count=len(schedule_ids))
+        if not schedule_ids:
+            return
+        self.client.table(q.TABLE).delete().in_(q.Columns.ID, [str(sid) for sid in schedule_ids]).execute()
+        log.info("schedules_deleted", count=len(schedule_ids))
 
     def create_assignment(self, data: dict[str, Any]) -> AssignmentResponse:
         """

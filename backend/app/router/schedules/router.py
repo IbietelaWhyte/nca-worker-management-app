@@ -1,6 +1,7 @@
+from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.core.dependencies import (
     CurrentUser,
@@ -12,6 +13,10 @@ from app.core.exceptions import AppError, BadRequestError
 from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
+    MonthlyScheduleCommitRequest,
+    MonthlySchedulePreview,
+    MonthlySchedulePreviewRequest,
+    MonthlyScheduleResult,
     ScheduleCreate,
     ScheduleResponse,
 )
@@ -24,10 +29,13 @@ router = APIRouter(prefix="/schedules", tags=["schedules"])
 @router.get("/departments/{department_id}", response_model=list[ScheduleResponse])
 def list_schedules_by_department(
     department_id: UUID,
+    from_date: date | None = Query(None, alias="from", description="Inclusive lower bound on scheduled_date"),
+    to_date: date | None = Query(None, alias="to", description="Inclusive upper bound on scheduled_date"),
     _: TokenPayload = CurrentUser,
     service: ScheduleService = Depends(get_schedule_service),
 ) -> list[ScheduleResponse]:
-    return service.get_schedules_by_department(department_id)
+    """List a department's schedules, optionally bounded to a date range (e.g. one month)."""
+    return service.get_schedules_by_department(department_id, from_date, to_date)
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
@@ -59,6 +67,43 @@ def generate_schedule(
     if schedule is None:
         raise AppError("Failed to generate schedule")
     return schedule
+
+
+@router.post("/generate-month/preview", response_model=MonthlySchedulePreview)
+def preview_monthly_schedule(
+    data: MonthlySchedulePreviewRequest,
+    _: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+) -> MonthlySchedulePreview:
+    """
+    Plan a whole month's rota without saving anything.
+
+    Expands the chosen weekdays across the month and balances assignments over every
+    date, so nobody serves twice before everyone has served once. Requires HOD or admin.
+    """
+    return service.preview_monthly_schedule(data)
+
+
+@router.post(
+    "/generate-month",
+    response_model=MonthlyScheduleResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def generate_monthly_schedule(
+    data: MonthlyScheduleCommitRequest,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+) -> MonthlyScheduleResult:
+    """
+    Save the month reviewed via the preview endpoint.
+
+    Takes the approved per-date worker selection verbatim, so manual swaps are kept.
+    Dates that gained a schedule since the preview come back as skipped rather than
+    failing the run. Requires HOD or admin role.
+    """
+    if token.email is None:
+        raise BadRequestError("User email is required to create schedule")
+    return service.commit_monthly_schedule(data, created_by=token.email)
 
 
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
