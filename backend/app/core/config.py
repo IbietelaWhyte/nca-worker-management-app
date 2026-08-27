@@ -32,6 +32,15 @@ class Settings(BaseSettings):
     db_pool_timeout: float = 10.0
     request_thread_pool_size: int = 20
 
+    # Bulk CSV worker import (see service/workers/service.py). The uploaded file is read fully into
+    # memory and parsed synchronously on a request thread, so both bounds are needed to keep a
+    # mis-selected file from occupying a worker thread indefinitely.
+    max_import_file_bytes: int = 2_000_000
+    max_import_rows: int = 1_000
+
+    # Country code applied to phone numbers entered without one, e.g. "4165550101" -> "+14165550101".
+    default_phone_country_code: str = "+1"
+
     @model_validator(mode="after")
     def _check_pool_sizes(self) -> "Settings":
         """Fail fast if the request thread pool would outsize the DB connection pool.

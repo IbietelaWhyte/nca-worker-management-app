@@ -363,13 +363,15 @@ export default function DepartmentDetailPage() {
                                 {department.workers?.length ?? 0} workers in this department
                             </p>
                             <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setCsvImportOpen(true)}
-                                >
-                                    <Upload size={16} className="mr-2" /> Import CSV
-                                </Button>
+                                {canManage && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setCsvImportOpen(true)}
+                                    >
+                                        <Upload size={16} className="mr-2" /> Import CSV
+                                    </Button>
+                                )}
                                 <Button size="sm" onClick={() => setAddMemberOpen(true)}>
                                     <UserPlus size={16} className="mr-2" /> Add Member
                                 </Button>
@@ -943,13 +945,15 @@ export default function DepartmentDetailPage() {
                 </TabsContent>
             </Tabs>
 
-            {/* CSV import dialog */}
-            <CsvImportDialog
-                open={csvImportOpen}
-                onOpenChange={setCsvImportOpen}
-                departmentId={id}
-                onImported={refetch}
-            />
+            {/* CSV import dialog — gated identically to the Import CSV button that opens it */}
+            {canManage && (
+                <CsvImportDialog
+                    open={csvImportOpen}
+                    onOpenChange={setCsvImportOpen}
+                    departmentId={id}
+                    onImported={refetch}
+                />
+            )}
 
             {/* Add member dialog */}
             <Dialog open={addMemberOpen} onOpenChange={setAddMemberOpen}>

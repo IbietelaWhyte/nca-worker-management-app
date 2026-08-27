@@ -164,6 +164,30 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         log.info("worker_assigned_to_department")
         return cast(dict[str, Any], response.data[0])
 
+    def assign_workers(self, department_id: UUID, worker_ids: list[UUID]) -> None:
+        """Assign many workers to a department in a single insert.
+
+        Batched counterpart to assign_worker. One statement, so Postgres applies it atomically —
+        either every membership row lands or none does.
+
+        Args:
+            department_id: The unique identifier of the department.
+            worker_ids: The unique identifiers of the workers to assign.
+        """
+        if not worker_ids:
+            return
+        log = self.logger.bind(method="assign_workers", department_id=str(department_id), count=len(worker_ids))
+        self.client.table(q.JUNCTION_TABLE).insert(
+            [
+                {
+                    q.JunctionColumns.DEPARTMENT_ID: str(department_id),
+                    q.JunctionColumns.WORKER_ID: str(worker_id),
+                }
+                for worker_id in worker_ids
+            ]
+        ).execute()
+        log.info("workers_assigned_to_department")
+
     def unassign_worker(self, department_id: UUID, worker_id: UUID) -> bool:
         """
         Remove a worker's assignment from a specific department.

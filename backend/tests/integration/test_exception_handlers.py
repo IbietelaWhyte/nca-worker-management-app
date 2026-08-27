@@ -7,6 +7,7 @@ from app.core.authentication import verify_token
 from app.core.dependencies import get_worker_service
 from app.core.exceptions import GoneError, NotFoundError
 from app.main import app
+from app.schemas.models import UserRole
 from app.service.workers.service import WorkerService
 from tests.integration.routers.conftest import make_client, make_token_payload
 
@@ -36,6 +37,33 @@ class TestAppErrorHandler:
             app.dependency_overrides.clear()
         assert response.status_code == 410
         assert response.json() == {"detail": "This link has expired"}
+
+
+class TestValidationErrorHandler:
+    def test_detail_is_a_string_not_a_list(self):
+        # FastAPI's default 422 makes detail a list of objects while every other error makes it a
+        # string. The frontend renders err.response.data.detail directly, so the default shape
+        # crashes the render ("Objects are not valid as a React child").
+        mock_service = MagicMock(spec=WorkerService)
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_service)
+
+        response = client.post("/api/v1/workers", json={"first_name": "Ann", "last_name": "Lee"})
+
+        assert response.status_code == 422
+        assert isinstance(response.json()["detail"], str)
+        mock_service.create_worker.assert_not_called()
+
+    def test_detail_names_the_offending_field(self):
+        mock_service = MagicMock(spec=WorkerService)
+        client = make_client(role=UserRole.ADMIN, worker_service=mock_service)
+
+        response = client.post(
+            "/api/v1/workers",
+            json={"first_name": "Ann", "last_name": "Lee", "email": "banana", "phone": "+14165550111"},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"].startswith("email:")
 
 
 class TestUnhandledExceptionHandler:

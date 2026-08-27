@@ -159,15 +159,24 @@ async def import_workers(
     department_id: UUID,
     file: UploadFile = File(..., description="CSV file with columns: first_name, last_name, email, phone"),
     dry_run: bool = Query(default=False, description="Validate and preview the import without writing any rows"),
+    skip_duplicates: bool = Query(
+        default=False,
+        description="Import the remaining rows even though some workers already exist, instead of rejecting the file",
+    ),
     current_user: TokenPayload = HODUser,
     worker_service: WorkerService = Depends(get_worker_service),
 ) -> WorkerImportResult:
     """Bulk-import workers from a CSV file and assign them to a department (admin/HOD).
 
+    The import is all-or-nothing: any row that fails validation rejects the whole file. Rows for
+    workers who already exist also block it unless ``skip_duplicates`` is set, which callers should
+    only do once the user has seen the dry-run preview and chosen to proceed.
+
     Args:
         department_id: Department to assign the imported workers to.
         file: Uploaded CSV file with a header row and the required columns.
         dry_run: If True, validate and return a per-row preview without creating anything.
+        skip_duplicates: If True, already-existing workers are passed over rather than blocking.
         current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
         worker_service: Worker service dependency.
 
@@ -176,7 +185,7 @@ async def import_workers(
     """
     worker_service.authorize_create_assignment(current_user, department_id)
     file_bytes = await file.read()
-    return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run)
+    return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run, skip_duplicates=skip_duplicates)
 
 
 @router.post("/{department_id}/workers/{worker_id}", response_model=MessageResponse)

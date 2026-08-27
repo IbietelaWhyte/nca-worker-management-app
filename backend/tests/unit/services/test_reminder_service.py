@@ -28,6 +28,7 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
             id=worker_id,
             first_name=kwargs.get("first_name", "John"),
             last_name=kwargs.get("last_name", "Doe"),
+            email=kwargs.get("email", "john.doe@example.com"),
             phone=kwargs.get("phone", "+14165550101"),
             is_active=True,
             created_at=kwargs.get("worker_created_at", "2026-01-01T08:00:00Z"),

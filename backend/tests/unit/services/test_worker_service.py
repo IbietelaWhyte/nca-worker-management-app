@@ -3,9 +3,10 @@ from uuid import uuid4
 import pytest
 from supabase_auth.errors import AuthApiError
 
+from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import TokenPayload, UserRole
-from app.schemas.workers.models import WorkerCreate, WorkerUpdate
+from app.schemas.workers.models import WorkerContactMatch, WorkerCreate, WorkerUpdate
 from app.service.workers.service import WorkerService
 from tests.unit.services.conftest import make_assignment, make_department, make_worker
 
@@ -42,6 +43,7 @@ class TestCreateWorker:
     def test_creates_worker_successfully(self, service, mock_worker_repo):
         worker = make_worker()
         mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.get_by_phone.return_value = None
         mock_worker_repo.create.return_value = worker
 
         data = WorkerCreate(
@@ -67,6 +69,40 @@ class TestCreateWorker:
         with pytest.raises(ConflictError, match="already exists"):
             service.create_worker(data)
         mock_worker_repo.create.assert_not_called()
+
+    def test_raises_on_duplicate_phone(self, service, mock_worker_repo):
+        # Phone is the SMS reminder key, so it is checked even when the email is free. Regression
+        # test: this branch used to be unreachable whenever an email was supplied.
+        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.get_by_phone.return_value = make_worker(phone="+14165550101")
+
+        data = WorkerCreate(
+            first_name="John",
+            last_name="Doe",
+            email="fresh@example.com",
+            phone="+14165550101",
+        )
+        with pytest.raises(ConflictError, match="phone number"):
+            service.create_worker(data)
+        mock_worker_repo.create.assert_not_called()
+
+    def test_normalizes_email_and_phone_before_saving(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.get_by_phone.return_value = None
+        mock_worker_repo.create.return_value = make_worker()
+
+        data = WorkerCreate(
+            first_name="  John  ",
+            last_name="Doe",
+            email="John.Doe@Example.com",
+            phone="(416) 555-0101",
+        )
+        service.create_worker(data)
+
+        saved = mock_worker_repo.create.call_args.args[0]
+        assert saved["email"] == "john.doe@example.com"
+        assert saved["phone"] == "+14165550101"
+        assert saved["first_name"] == "John"
 
 
 class TestUpdateWorker:
@@ -566,84 +602,208 @@ def _csv(rows: str) -> bytes:
     return f"first_name,last_name,email,phone\n{rows}".encode()
 
 
+def _contact(worker) -> WorkerContactMatch:
+    """Build the contact-index entry the repository would return for an existing worker."""
+    return WorkerContactMatch(worker_id=worker.id, is_active=worker.is_active)
+
+
 class TestImportWorkers:
     @pytest.fixture(autouse=True)
     def _department_exists(self, mock_department_repo):
         # Every import targets an existing department unless a test overrides this.
         mock_department_repo.get_by_id.return_value = make_department()
 
+    @pytest.fixture(autouse=True)
+    def _no_existing_workers(self, mock_worker_repo):
+        # Empty contact index means nothing in the CSV collides with an existing worker.
+        mock_worker_repo.get_contact_index.return_value = {}
+
     def test_creates_and_assigns_valid_rows(self, service, mock_worker_repo, mock_department_repo):
         dept_id = uuid4()
-        mock_worker_repo.get_by_email.return_value = None
-        mock_worker_repo.create.side_effect = [
-            make_worker(email="a@example.com"),
-            make_worker(email="b@example.com"),
-        ]
+        created = [make_worker(email="a@example.com"), make_worker(email="b@example.com")]
+        mock_worker_repo.create_many.return_value = created
 
         csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nBob,Kim,b@example.com,+14165550112")
         result = service.import_workers(csv_bytes, dept_id, dry_run=False)
 
+        assert result.ok is True
         assert result.total_rows == 2
         assert result.created == 2
-        assert result.skipped_duplicate == 0
         assert result.errors == 0
         assert all(r.status == "created" for r in result.results)
-        assert mock_worker_repo.create.call_count == 2
-        assert mock_department_repo.assign_worker.call_count == 2
+        assert [r.worker_id for r in result.results] == [w.id for w in created]
+        # Two batched statements for the whole file, not two per row.
+        mock_worker_repo.create_many.assert_called_once()
+        mock_department_repo.assign_workers.assert_called_once_with(dept_id, [w.id for w in created])
+
+    def test_reports_spreadsheet_line_numbers(self, service, mock_worker_repo):
+        # The header is line 1, so the first data row must report as line 2 — otherwise the user is
+        # sent to the wrong row of their spreadsheet.
+        mock_worker_repo.create_many.return_value = [make_worker(email="a@example.com")]
+
+        result = service.import_workers(_csv("Ann,Lee,a@example.com,+14165550111"), uuid4(), dry_run=True)
+
+        assert result.results[0].line_number == 2
 
     def test_dry_run_performs_no_writes(self, service, mock_worker_repo, mock_department_repo):
-        mock_worker_repo.get_by_email.return_value = None
-
         csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
         result = service.import_workers(csv_bytes, uuid4(), dry_run=True)
 
         assert result.dry_run is True
+        assert result.ok is True
         assert result.valid == 1
         assert result.created == 0
         assert result.results[0].status == "valid"
-        mock_worker_repo.create.assert_not_called()
-        mock_department_repo.assign_worker.assert_not_called()
+        mock_worker_repo.create_many.assert_not_called()
+        mock_department_repo.assign_workers.assert_not_called()
 
-    def test_skips_existing_worker_in_db(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker(email="a@example.com")
+    def test_normalizes_phone_numbers(self, service, mock_worker_repo):
+        mock_worker_repo.create_many.return_value = [make_worker(email="a@example.com")]
 
-        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
+        csv_bytes = _csv("Ann,Lee,a@example.com,(416) 555-0111")
+        service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+        saved = mock_worker_repo.create_many.call_args.args[0]
+        assert saved[0]["phone"] == "+14165550111"
+
+    def test_rejects_whole_file_on_one_invalid_email(self, service, mock_worker_repo, mock_department_repo):
+        # All-or-nothing: the valid second row must not be created either.
+        csv_bytes = _csv("Ann,Lee,banana,+14165550111\nBob,Kim,b@example.com,+14165550112")
         result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
 
-        assert result.skipped_duplicate == 1
-        assert result.created == 0
-        assert result.results[0].status == "skipped_duplicate"
-        mock_worker_repo.create.assert_not_called()
-
-    def test_skips_duplicate_email_within_file(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = None
-        mock_worker_repo.create.return_value = make_worker(email="a@example.com")
-
-        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nAnna,Lee,A@example.com,+14165550112")
-        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
-
-        assert result.created == 1
-        assert result.skipped_duplicate == 1
-        assert result.results[1].status == "skipped_duplicate"
-        # Email match is case-insensitive, so the DB is only checked for the first occurrence.
-        mock_worker_repo.get_by_email.assert_called_once()
-
-    def test_reports_invalid_row_but_processes_others(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = None
-        mock_worker_repo.create.return_value = make_worker(email="b@example.com")
-
-        # First row is missing the email cell; second row is valid.
-        csv_bytes = _csv("Ann,Lee,,+14165550111\nBob,Kim,b@example.com,+14165550112")
-        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
-
+        assert result.ok is False
         assert result.errors == 1
-        assert result.created == 1
         assert result.results[0].status == "error"
+        assert result.results[0].field == "email"
+        assert result.results[0].value == "banana"
+        assert result.results[1].status == "valid"
+        mock_worker_repo.create_many.assert_not_called()
+        mock_department_repo.assign_workers.assert_not_called()
+
+    def test_rejects_whole_file_on_invalid_phone(self, service, mock_worker_repo):
+        result = service.import_workers(_csv("Ann,Lee,a@example.com,555"), uuid4(), dry_run=False)
+
+        assert result.ok is False
+        assert result.results[0].status == "error"
+        assert result.results[0].field == "phone"
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_reports_blank_cells_without_leaking_pydantic_text(self, service, mock_worker_repo):
+        result = service.import_workers(_csv("Ann,Lee,,+14165550111"), uuid4(), dry_run=False)
+
+        assert result.ok is False
+        assert result.results[0].status == "error"
+        assert result.results[0].error == "Missing value for: email"
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_matches_existing_worker_case_insensitively(self, service, mock_worker_repo):
+        # Regression: workers.email is a case-sensitive unique index, so "A@example.com" against an
+        # existing "a@example.com" used to sail past both checks and create a second profile.
+        existing = make_worker(email="a@example.com")
+        mock_worker_repo.get_contact_index.return_value = {"a@example.com": _contact(existing)}
+
+        result = service.import_workers(_csv("Ann,Lee,A@example.com,+14165550111"), uuid4(), dry_run=False)
+
+        assert result.ok is False
+        assert result.duplicates == 1
+        assert result.results[0].status == "duplicate"
+        assert result.results[0].worker_id == existing.id
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_matches_existing_worker_by_phone(self, service, mock_worker_repo):
+        existing = make_worker(email="other@example.com")
+        mock_worker_repo.get_contact_index.return_value = {"+14165550111": _contact(existing)}
+
+        result = service.import_workers(_csv("Ann,Lee,a@example.com,(416) 555-0111"), uuid4(), dry_run=False)
+
+        assert result.duplicates == 1
+        assert result.results[0].status == "duplicate"
+
+    def test_flags_deactivated_worker_distinctly(self, service, mock_worker_repo):
+        existing = make_worker(email="a@example.com", is_active=False)
+        mock_worker_repo.get_contact_index.return_value = {"a@example.com": _contact(existing)}
+
+        result = service.import_workers(_csv("Ann,Lee,a@example.com,+14165550111"), uuid4(), dry_run=True)
+
+        assert result.ok is False
+        assert result.duplicates_inactive == 1
+        assert result.results[0].status == "duplicate_inactive"
+        assert "reactivate" in (result.results[0].error or "")
+
+    def test_skip_duplicates_imports_the_remainder(self, service, mock_worker_repo, mock_department_repo):
+        existing = make_worker(email="a@example.com")
+        mock_worker_repo.get_contact_index.return_value = {"a@example.com": _contact(existing)}
+        fresh = make_worker(email="b@example.com")
+        mock_worker_repo.create_many.return_value = [fresh]
+
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nBob,Kim,b@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False, skip_duplicates=True)
+
+        assert result.ok is True
+        assert result.created == 1
+        assert result.duplicates == 1
+        assert result.results[0].status == "duplicate"
         assert result.results[1].status == "created"
+        assert len(mock_worker_repo.create_many.call_args.args[0]) == 1
+
+    def test_skip_duplicates_does_not_override_validation_errors(self, service, mock_worker_repo):
+        csv_bytes = _csv("Ann,Lee,banana,+14165550111\nBob,Kim,b@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False, skip_duplicates=True)
+
+        assert result.ok is False
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_duplicate_email_within_file_is_an_error(self, service, mock_worker_repo):
+        # A repeat inside the file is the user's mistake to fix, not an already-imported worker, so
+        # it blocks the import outright rather than being skippable.
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nAnna,Lee,A@example.com,+14165550112")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False, skip_duplicates=True)
+
+        assert result.ok is False
+        assert result.errors == 1
+        assert result.results[1].status == "error"
+        assert "line 2" in (result.results[1].error or "")
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_duplicate_phone_within_file_is_an_error(self, service, mock_worker_repo):
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nBob,Kim,b@example.com,416-555-0111")
+        result = service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+        assert result.ok is False
+        assert result.results[1].status == "error"
+        assert result.results[1].field == "phone"
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_rolls_back_created_workers_when_assignment_fails(self, service, mock_worker_repo, mock_department_repo):
+        # The two halves are separate statements, so a failed assignment must not leave workers who
+        # belong to no department — no HOD would ever see them.
+        created = [make_worker(email="a@example.com")]
+        mock_worker_repo.create_many.return_value = created
+        mock_department_repo.assign_workers.side_effect = Exception("DB error")
+
+        with pytest.raises(AppError, match="no changes were saved"):
+            service.import_workers(_csv("Ann,Lee,a@example.com,+14165550111"), uuid4(), dry_run=False)
+
+        mock_worker_repo.delete_many.assert_called_once_with([created[0].id])
 
     def test_raises_on_missing_required_column(self, service):
         csv_bytes = b"first_name,last_name,email\nAnn,Lee,a@example.com"
         with pytest.raises(BadRequestError, match="missing required column"):
+            service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+    def test_raises_when_header_has_no_rows(self, service):
+        with pytest.raises(BadRequestError, match="no workers"):
+            service.import_workers(b"first_name,last_name,email,phone\n", uuid4(), dry_run=False)
+
+    def test_raises_when_file_exceeds_size_limit(self, service, monkeypatch):
+        monkeypatch.setattr(settings, "max_import_file_bytes", 10)
+        with pytest.raises(BadRequestError, match="too large"):
+            service.import_workers(_csv("Ann,Lee,a@example.com,+14165550111"), uuid4(), dry_run=False)
+
+    def test_raises_when_row_count_exceeds_limit(self, service, monkeypatch):
+        monkeypatch.setattr(settings, "max_import_rows", 1)
+        csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111\nBob,Kim,b@example.com,+14165550112")
+        with pytest.raises(BadRequestError, match="the limit is 1"):
             service.import_workers(csv_bytes, uuid4(), dry_run=False)
 
     def test_raises_when_department_not_found(self, service, mock_department_repo):
