@@ -45,12 +45,18 @@ class TestCreateRole:
             service.create_role(DepartmentRoleCreate(name="Teacher", department_id=dept_id))
         mock_department_role_repo.create.assert_not_called()
 
+    def test_rejects_permission_level_as_name(self, service, mock_department_role_repo):
+        with pytest.raises(BadRequestError, match="permission level"):
+            service.create_role(DepartmentRoleCreate(name="HOD", department_id=uuid4()))
+        mock_department_role_repo.create.assert_not_called()
+
 
 class TestUpdateRole:
     def test_updates_successfully(self, service, mock_department_role_repo):
         role = make_department_role()
         updated = make_department_role(name="Helper")
         mock_department_role_repo.get_by_id.return_value = role
+        mock_department_role_repo.get_by_name_in_department.return_value = None
         mock_department_role_repo.update.return_value = updated
 
         result = service.update_role(role.id, DepartmentRoleUpdate(name="Helper"))
@@ -60,6 +66,81 @@ class TestUpdateRole:
         mock_department_role_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.update_role(uuid4(), DepartmentRoleUpdate(name="New Name"))
+
+    def test_rejects_permission_level_as_name(self, service, mock_department_role_repo):
+        role = make_department_role()
+        mock_department_role_repo.get_by_id.return_value = role
+
+        with pytest.raises(BadRequestError, match="permission level"):
+            service.update_role(role.id, DepartmentRoleUpdate(name="Head of Department"))
+        mock_department_role_repo.update.assert_not_called()
+
+    def test_raises_on_rename_onto_existing_name(self, service, mock_department_role_repo):
+        dept_id = uuid4()
+        role = make_department_role(name="Teacher", department_id=dept_id)
+        other = make_department_role(name="Helper", department_id=dept_id)
+        mock_department_role_repo.get_by_id.return_value = role
+        mock_department_role_repo.get_by_name_in_department.return_value = other
+
+        with pytest.raises(ConflictError, match="already exists"):
+            service.update_role(role.id, DepartmentRoleUpdate(name="Helper"))
+        mock_department_role_repo.update.assert_not_called()
+
+    def test_allows_renaming_a_role_to_its_own_name(self, service, mock_department_role_repo):
+        role = make_department_role(name="Teacher")
+        mock_department_role_repo.get_by_id.return_value = role
+        # The uniqueness probe finds the role being renamed, which is not a collision.
+        mock_department_role_repo.get_by_name_in_department.return_value = role
+        mock_department_role_repo.update.return_value = role
+
+        assert service.update_role(role.id, DepartmentRoleUpdate(name="Teacher")).name == "Teacher"
+
+    def test_skips_name_checks_when_only_description_changes(self, service, mock_department_role_repo):
+        role = make_department_role()
+        mock_department_role_repo.get_by_id.return_value = role
+        mock_department_role_repo.update.return_value = role
+
+        service.update_role(role.id, DepartmentRoleUpdate(description="Leads the under-fives"))
+        mock_department_role_repo.get_by_name_in_department.assert_not_called()
+
+
+class TestReservedRoleNames:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "HOD",
+            "hod",
+            "H.O.D.",
+            " hod ",
+            "Head of Department",
+            "head-of-department",
+            "Department Head",
+            "Assistant HOD",
+            "Asst. HOD",
+            "assistant_hod",
+            "Assistant Head of Department",
+            "Admin",
+            "Administrator",
+            "Worker",
+        ],
+    )
+    def test_rejects_permission_level_names(self, service, mock_department_role_repo, name):
+        with pytest.raises(BadRequestError, match="permission level"):
+            service.create_role(DepartmentRoleCreate(name=name, department_id=uuid4()))
+        mock_department_role_repo.create.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "name",
+        # Every one of these is a real seeded role — a substring rule on "head" or "assistant"
+        # would wrongly reject them.
+        ["Head Usher", "Assistant", "Ministry Lead", "Teacher", "Choir Director", "Technical Lead"],
+    )
+    def test_allows_real_job_names(self, service, mock_department_role_repo, name):
+        dept_id = uuid4()
+        mock_department_role_repo.get_by_name_in_department.return_value = None
+        mock_department_role_repo.create.return_value = make_department_role(name=name, department_id=dept_id)
+
+        assert service.create_role(DepartmentRoleCreate(name=name, department_id=dept_id)).name == name
 
 
 class TestDeleteRole:

@@ -1,3 +1,4 @@
+import re
 from uuid import UUID
 
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError
@@ -11,6 +12,47 @@ from app.schemas.department_roles.models import (
 )
 
 logger = get_logger(__name__)
+
+# A department_role is a job ("Head Usher"); a worker_app_role is a permission level (UserRole).
+# A job named "HOD" reads as if it grants the HOD permission level, so those names are refused.
+# Only canonical spellings are listed — _is_reserved_name normalizes before comparing, so
+# "H.O.D.", "hod" and "Asst. HOD" are all caught without being spelled out here.
+_RESERVED_ROLE_NAMES = frozenset(
+    {
+        "admin",
+        "administrator",
+        "worker",
+        "hod",
+        "head of department",
+        "department head",
+        "assistant hod",
+        "asst hod",
+        "assistant head of department",
+    }
+)
+
+# Any run of characters that is neither a letter nor a digit, treated as a word separator.
+_SEPARATORS = re.compile(r"[^a-z0-9]+")
+
+
+def _is_reserved_name(name: str) -> bool:
+    """Report whether a role name collides with a permission level.
+
+    Matching is exact against `_RESERVED_ROLE_NAMES` after normalizing, deliberately not a
+    substring test: seeded roles include "Assistant" and "Head Usher", which a substring rule
+    on "assistant" or "head" would wrongly reject.
+
+    Args:
+        name: The role name as entered.
+
+    Returns:
+        bool: True if the name is a reserved permission-level name.
+    """
+    # Periods are dropped rather than split on, so the abbreviation "H.O.D." collapses to "hod"
+    # instead of "h o d"; every other separator run becomes a space, so "head-of-department" and
+    # "assistant_hod" split into words.
+    cleaned = _SEPARATORS.sub(" ", name.casefold().replace(".", ""))
+    return " ".join(cleaned.split()) in _RESERVED_ROLE_NAMES
 
 
 class DepartmentRoleService:
@@ -61,7 +103,8 @@ class DepartmentRoleService:
     def create_role(self, data: DepartmentRoleCreate) -> DepartmentRoleResponse:
         """Create a new department role.
 
-        Validates that no role with the same name exists within the department.
+        Validates that the name is not a permission level and that no role with the same name
+        exists within the department.
 
         Args:
             data: Role creation data including name and department.
@@ -70,9 +113,13 @@ class DepartmentRoleService:
             DepartmentRoleResponse: The newly created role.
 
         Raises:
+            BadRequestError: If the name collides with a permission level.
             ConflictError: If a role with the same name already exists in the department.
         """
         log = self.logger.bind(method="create_role", data=data.model_dump())
+        if _is_reserved_name(data.name):
+            log.warning("role_name_reserved")
+            raise BadRequestError(f"'{data.name}' is a permission level, not a job. Pick a different role name.")
         existing = self.department_role_repo.get_by_name_in_department(data.department_id, data.name)
         if existing:
             log.warning("role_already_exists")
@@ -85,6 +132,10 @@ class DepartmentRoleService:
     def update_role(self, role_id: UUID, data: DepartmentRoleUpdate) -> DepartmentRoleResponse:
         """Update a department role's information.
 
+        A rename is held to the same rules as a create: the name must not be a permission level,
+        and it must not already be taken in the same department. `DepartmentRoleUpdate` carries no
+        department_id, so the department is read off the existing role.
+
         Args:
             role_id: Unique identifier of the role to update.
             data: Partial role data with fields to update.
@@ -94,10 +145,21 @@ class DepartmentRoleService:
 
         Raises:
             NotFoundError: If the role is not found.
+            BadRequestError: If the new name collides with a permission level.
+            ConflictError: If another role in the department already has the new name.
             AppError: If the update fails.
         """
         log = self.logger.bind(method="update_role", role_id=str(role_id), data=data.model_dump(exclude_none=True))
-        self.get_role(role_id)
+        role = self.get_role(role_id)
+        if data.name is not None:
+            if _is_reserved_name(data.name):
+                log.warning("role_name_reserved")
+                raise BadRequestError(f"'{data.name}' is a permission level, not a job. Pick a different role name.")
+            existing = self.department_role_repo.get_by_name_in_department(role.department_id, data.name)
+            # Renaming a role to the name it already has is a no-op, not a collision.
+            if existing and existing.id != role_id:
+                log.warning("role_already_exists")
+                raise ConflictError(f"Role '{data.name}' already exists in this department")
         updated = self.department_role_repo.update(role_id, data.model_dump(exclude_none=True))
         if not updated:
             log.error("role_update_failed")
