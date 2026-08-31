@@ -5,6 +5,7 @@ import { useSchedules } from '@/hooks/useSchedules'
 import { useAuth } from '@/context/AuthContext'
 import GenerateScheduleForm from '@/components/schedules/GenerateScheduleForm'
 import GenerateMonthDialog from '@/components/schedules/GenerateMonthDialog'
+import RotaExportDialog from '@/components/schedules/RotaExportDialog'
 import MonthCalendar from '@/components/schedules/MonthCalendar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +20,15 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, ChevronLeft, ChevronRight, Trash2, Calendar, CalendarRange } from 'lucide-react'
+import {
+    Plus,
+    ChevronLeft,
+    ChevronRight,
+    Trash2,
+    Calendar,
+    CalendarRange,
+    ImageDown,
+} from 'lucide-react'
 import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
 
 const STATUS_SUMMARY = schedule_assignments => {
@@ -35,6 +44,7 @@ export default function SchedulesPage() {
     const [selectedDepartmentId, setSelectedDepartmentId] = useState('')
     const [generateOpen, setGenerateOpen] = useState(false)
     const [generateMonthOpen, setGenerateMonthOpen] = useState(false)
+    const [exportOpen, setExportOpen] = useState(false)
 
     // For assistant_hod users, auto-select first department if only one available
     const isAssistantHod = role === 'assistant_hod'
@@ -88,6 +98,10 @@ export default function SchedulesPage() {
                 </div>
                 {(isAdmin || isDepartmentHead) && selectedDepartmentId && (
                     <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setExportOpen(true)}>
+                            <ImageDown size={16} className="mr-2" />
+                            Export as Image
+                        </Button>
                         <Button variant="outline" onClick={() => setGenerateOpen(true)}>
                             <Plus size={16} className="mr-2" />
                             Generate Schedule
@@ -372,6 +386,24 @@ export default function SchedulesPage() {
                             onCommit={commitMonth}
                             onDone={handleMonthDone}
                             onCancel={() => setGenerateMonthOpen(false)}
+                        />
+                    )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Export the month on screen as a shareable image */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="sm:max-w-4xl">
+                    <DialogHeader>
+                        <DialogTitle>Export as Image</DialogTitle>
+                    </DialogHeader>
+                    {exportOpen && (
+                        <RotaExportDialog
+                            departmentId={selectedDepartmentId}
+                            departmentName={selectedDepartment?.name ?? 'Schedule'}
+                            month={month}
+                            schedules={schedules}
+                            onClose={() => setExportOpen(false)}
                         />
                     )}
                 </DialogContent>

@@ -23,8 +23,5 @@ node_modules/
 .pytest_cache/
 .ruff_cache/
 
-# Local Claude Code guidance (not committed)
-CLAUDE.md
-
 # Supabase branch files
 supabase/.branches/

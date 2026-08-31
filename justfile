@@ -4,7 +4,7 @@ install:
 
 # Install git hooks
 install-hooks:
-    ./install-hooks.sh
+    ./scripts/install-hooks.sh
 
 # Run dev server with hot reload
 dev:
