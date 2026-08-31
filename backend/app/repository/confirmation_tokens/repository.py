@@ -29,30 +29,45 @@ class ConfirmationTokenRepository(BaseRepository[ConfirmationTokenResponse]):
         response = self.client.table(TABLE).select("*").eq("id", str(token_id)).maybe_single().execute()
         return self._to_model(response.data) if response else None
 
-    def get_by_assignment(self, assignment_id: UUID) -> ConfirmationTokenResponse | None:
-        """Fetch the token row for a given assignment, if one exists.
+    def get_live_for_worker(self, worker_id: UUID, now: datetime) -> ConfirmationTokenResponse | None:
+        """Fetch the worker's newest token that has not expired yet, if any.
+
+        A worker may accumulate several token rows over time (an old per-assignment one, a
+        superseded one), so this cannot use `maybe_single()` — it takes the newest live row.
 
         Args:
-            assignment_id: The schedule assignment UUID.
+            worker_id: The worker the token identifies.
+            now: Current time; rows expiring at or before this are ignored.
 
         Returns:
-            ConfirmationTokenResponse if a token exists for this assignment, None otherwise.
+            ConfirmationTokenResponse if the worker has a live token, None otherwise.
         """
-        response = self.client.table(TABLE).select("*").eq("assignment_id", str(assignment_id)).maybe_single().execute()
-        return self._to_model(response.data) if response else None
+        response = (
+            self.client.table(TABLE)
+            .select("*")
+            .eq("worker_id", str(worker_id))
+            .gt("expires_at", now.isoformat())
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        return self._to_model(rows[0]) if rows else None
 
     def mark_used(self, token_id: UUID) -> bool:
-        """Set used_at to now, marking the token as consumed.
+        """Record that the link was just acted on.
+
+        This does not consume the token — a worker may come back to answer another date.
 
         Args:
-            token_id: The UUID of the token to mark as used.
+            token_id: The UUID of the token that was used.
 
         Returns:
             True if the row was updated, False if not found.
         """
         response = (
             self.client.table(TABLE)
-            .update({"used_at": datetime.now(timezone.utc).isoformat()})
+            .update({"last_used_at": datetime.now(timezone.utc).isoformat()})
             .eq("id", str(token_id))
             .execute()
         )

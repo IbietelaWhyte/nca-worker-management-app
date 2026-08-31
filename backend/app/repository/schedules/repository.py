@@ -525,6 +525,49 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.debug("fetched_assignments_due_for_reminder", count=len(assignments))
         return assignments
 
+    def get_assignments_due_for_notice(self) -> list[AssignmentResponse]:
+        """
+        Retrieve assignments that have been created but not yet announced to the worker.
+
+        Backs the "you have been scheduled" message. Rows come back ordered by worker so the
+        caller can group a whole month of dates into one SMS per person.
+
+        Returns:
+            list[AssignmentResponse]: Un-notified future assignments for contactable workers.
+        """
+        log = self.logger.bind(method="get_assignments_due_for_notice")
+        response = self.client.rpc(q.FUNCTION_GET_ASSIGNMENTS_DUE_FOR_NOTICE, {}).execute()
+        data = response.data if isinstance(response.data, list) else []
+        assignments = [AssignmentResponse.model_validate(row) for row in data]
+        log.debug("fetched_assignments_due_for_notice", count=len(assignments))
+        return assignments
+
+    def mark_notice_sent(self, assignment_ids: list[UUID]) -> int:
+        """
+        Mark assignments as having had their initial notice sent.
+
+        Takes a list because one SMS covers every date in a worker's batch — they are marked
+        together, in one statement, so a partial failure cannot leave some dates looking
+        un-notified and re-announce them on the next run.
+
+        Args:
+            assignment_ids (list[UUID]): The assignments covered by a single notice.
+        Returns:
+            int: How many rows were updated.
+        """
+        if not assignment_ids:
+            return 0
+        log = self.logger.bind(method="mark_notice_sent", count=len(assignment_ids))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update({q.AssignmentColumns.NOTICE_SENT_AT: datetime.now(timezone.utc).isoformat()})
+            .in_(q.AssignmentColumns.ID, [str(assignment_id) for assignment_id in assignment_ids])
+            .execute()
+        )
+        updated = len(response.data or [])
+        log.info("notice_marked_sent", updated=updated)
+        return updated
+
     def mark_reminder_sent(self, assignment_id: UUID) -> bool:
         """
         Mark an assignment as having had its reminder sent.

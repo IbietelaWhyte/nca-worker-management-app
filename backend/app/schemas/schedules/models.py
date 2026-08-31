@@ -57,6 +57,9 @@ class AssignmentResponse(BaseModel):
     department_role_id: UUID | None = None
     subteam_id: UUID | None = None
     status: str
+    # Two separate notifications: notice_sent_at is the "you have been scheduled" message sent
+    # shortly after creation, reminder_sent_at the one sent reminder_days_before the service.
+    notice_sent_at: datetime | None = None
     reminder_sent_at: datetime | None = None
     workers: WorkerResponse | None = None  # Nested worker object from joined query
     subteams: SubteamResponse | None = None  # Nested subteam object from joined query

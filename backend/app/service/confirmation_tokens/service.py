@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from app.core.config import settings
@@ -8,18 +8,25 @@ from app.repository.confirmation_tokens.repository import ConfirmationTokenRepos
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.confirmation_tokens.models import (
+    ConfirmableAssignment,
     ConfirmationDetailsResponse,
     ConfirmationTokenCreate,
+    ConfirmationTokenResponse,
 )
 from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import AssignmentResponse
 
 logger = get_logger(__name__)
 
-TOKEN_TTL_HOURS = 48
-
 
 class ConfirmationTokenService:
+    """Issues and resolves the public links workers use to confirm or decline duties.
+
+    A token identifies a *worker*, not a single assignment. One link therefore covers every
+    upcoming duty that worker holds, which is what lets a month of dates be announced in a single
+    SMS, and it stays usable until it expires so they can answer one date now and another later.
+    """
+
     def __init__(
         self,
         token_repo: ConfirmationTokenRepository,
@@ -38,139 +45,179 @@ class ConfirmationTokenService:
         self.worker_repo = worker_repo
         self.logger = logger.bind(service="ConfirmationTokenService")
 
-    def create_token(self, assignment_id: UUID, worker_id: UUID) -> str:
-        """Create a confirmation token for an assignment and return the full confirmation URL.
+    def create_token(self, worker_id: UUID) -> str:
+        """Return the worker's confirmation URL, minting a token only if they have no live one.
 
-        If a token already exists for this assignment and it is still valid (not expired,
-        not used), return the existing URL rather than creating a duplicate.
+        Reuse is deliberate rather than an optimisation: the initial notice and the pre-service
+        reminder are sent weeks apart and must lead to the same page, so the link in the first
+        message keeps working when the second arrives.
 
         Args:
-            assignment_id: The UUID of the schedule assignment.
-            worker_id: The UUID of the worker being reminded.
+            worker_id: The UUID of the worker the link identifies.
 
         Returns:
-            str: The full public URL the worker can visit to confirm/decline,
-                 e.g. "https://app.example.com/confirm/{token_uuid}".
+            str: The full public URL the worker can visit, e.g.
+                 "https://app.example.com/confirm/{token_uuid}".
         """
-        log = self.logger.bind(method="create_token", assignment_id=str(assignment_id))
+        log = self.logger.bind(method="create_token", worker_id=str(worker_id))
 
-        # Return the existing token if one is still valid to avoid hitting the unique constraint
-        existing = self.token_repo.get_by_assignment(assignment_id)
-        if existing and existing.used_at is None:
-            now = datetime.now(timezone.utc)
-            # Make existing.expires_at offset-aware for comparison if needed
-            expires_at = existing.expires_at
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if expires_at > now:
-                log.info("confirmation_token_reused", token_id=str(existing.id))
-                return f"{settings.frontend_url}/confirm/{existing.id}"
+        now = datetime.now(timezone.utc)
+        existing = self.token_repo.get_live_for_worker(worker_id, now)
+        if existing:
+            log.info("confirmation_token_reused")
+            return f"{settings.frontend_url}/confirm/{existing.id}"
 
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)
-        token_data = ConfirmationTokenCreate(
-            worker_id=worker_id,
-            assignment_id=assignment_id,
-            expires_at=expires_at,
-        )
-        # Log the assignment linkage only — never the token id/value itself (it's the link credential).
-        log.info("creating_confirmation_token", assignment_id=str(assignment_id))
+        expires_at = now + timedelta(days=settings.confirmation_token_ttl_days)
+        token_data = ConfirmationTokenCreate(worker_id=worker_id, expires_at=expires_at)
+        # Log the worker linkage only — never the token id itself (it's the link credential).
+        log.info("creating_confirmation_token")
         token = self.token_repo.create(token_data.model_dump(mode="json"))
-        log.info("confirmation_token_created", token_id=str(token.id), expires_at=expires_at.isoformat())
+        log.info("confirmation_token_created", expires_at=expires_at.isoformat())
         return f"{settings.frontend_url}/confirm/{token.id}"
 
     def get_confirmation_details(self, token_id: UUID) -> ConfirmationDetailsResponse:
-        """Fetch the assignment details associated with a token for the public confirmation page.
+        """List the worker's upcoming duties for the public confirmation page.
 
-        Always returns a response — the `expired` and `already_used` flags signal
-        invalid states to the frontend rather than raising HTTP errors here.
+        Always returns a response for a token that exists — `expired` signals the invalid state to
+        the frontend rather than raising here, so the page can explain itself.
 
         Args:
             token_id: The UUID from the SMS link path parameter.
 
         Returns:
-            ConfirmationDetailsResponse with assignment details and token state flags.
+            ConfirmationDetailsResponse with the worker's name, their upcoming duties, and
+            whether the link has expired.
 
         Raises:
-            ValueError: If the token does not exist.
+            NotFoundError: If the token or its worker does not exist.
         """
-        log = self.logger.bind(method="get_confirmation_details", token_id=str(token_id))
+        log = self.logger.bind(method="get_confirmation_details")
 
-        token = self.token_repo.get_by_token(token_id)
-        if not token:
-            log.warning("confirmation_token_not_found")
-            raise NotFoundError("Token not found")
-
-        now = datetime.now(timezone.utc)
-        expires_at = token.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-        already_used = token.used_at is not None
-        expired = expires_at <= now
-
-        assignment = self.schedule_repo.get_assignment_by_id(token.assignment_id)
-        if not assignment:
-            log.warning("confirmation_token_assignment_not_found", assignment_id=str(token.assignment_id))
-            raise NotFoundError("Assignment not found")
-
-        schedule = self.schedule_repo.get_by_id(assignment.schedule_id)
+        token = self._require_token(token_id)
         worker = self.worker_repo.get_by_id(token.worker_id)
+        if not worker:
+            log.warning("confirmation_token_worker_not_found")
+            raise NotFoundError("Worker not found")
 
-        if not schedule or not worker:
-            log.warning("confirmation_token_missing_schedule_or_worker")
-            raise NotFoundError("Schedule or worker data not found")
+        worker_name = f"{worker.first_name} {worker.last_name}".strip()
+        if self._is_expired(token.expires_at):
+            log.info("confirmation_token_expired")
+            return ConfirmationDetailsResponse(worker_name=worker_name, expired=True)
 
+        assignments = self._upcoming_for(token.worker_id)
+        log.info("confirmation_details_served", count=len(assignments))
         return ConfirmationDetailsResponse(
-            worker_name=f"{worker.first_name} {worker.last_name}".strip(),
-            schedule_title=schedule.title,
-            scheduled_date=schedule.scheduled_date.strftime("%A, %d %B %Y"),
-            start_time=schedule.start_time.strftime("%H:%M"),
-            end_time=schedule.end_time.strftime("%H:%M"),
-            current_status=assignment.status,
-            already_used=already_used,
-            expired=expired,
+            worker_name=worker_name,
+            expired=False,
+            assignments=[self._to_confirmable(a) for a in assignments],
         )
 
-    def confirm(self, token_id: UUID, action: str) -> AssignmentResponse:
-        """Validate a token and update the assignment status.
+    def confirm(self, token_id: UUID, assignment_id: UUID, action: str) -> AssignmentResponse:
+        """Validate a token and set one assignment's status.
 
         Args:
             token_id: The UUID from the SMS link.
+            assignment_id: Which of the worker's duties is being answered.
             action: Either "confirmed" or "declined".
 
         Returns:
             Updated AssignmentResponse.
 
         Raises:
-            ValueError: If the token is invalid, expired, or already used.
+            BadRequestError: If the action is not a valid status.
+            NotFoundError: If the token or assignment does not exist, or the assignment belongs
+                to a different worker (reported as not-found so a link cannot be used to probe
+                for other people's assignment ids).
+            GoneError: If the link has expired.
         """
-        log = self.logger.bind(method="confirm", token_id=str(token_id), action=action)
+        log = self.logger.bind(method="confirm", assignment_id=str(assignment_id), action=action)
 
-        if action not in ("confirmed", "declined"):
+        if action not in (AssignmentStatus.CONFIRMED, AssignmentStatus.DECLINED):
             raise BadRequestError("Action must be 'confirmed' or 'declined'")
 
-        token = self.token_repo.get_by_token(token_id)
-        if not token:
-            log.warning("confirmation_token_not_found")
-            raise NotFoundError("Token not found")
-
-        if token.used_at is not None:
-            log.warning("confirmation_token_already_used")
-            raise GoneError("This link has already been used")
-
-        now = datetime.now(timezone.utc)
-        expires_at = token.expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
-
-        if expires_at <= now:
+        token = self._require_token(token_id)
+        if self._is_expired(token.expires_at):
             log.warning("confirmation_token_expired")
             raise GoneError("This link has expired")
 
-        updated = self.schedule_repo.update_assignment_status(token.assignment_id, AssignmentStatus(action))
+        assignment = self.schedule_repo.get_assignment_by_id(assignment_id)
+        if not assignment:
+            log.warning("confirmation_assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+        # A token speaks for one worker only. Without this, anyone holding a link could answer
+        # for somebody else by editing the assignment id.
+        if assignment.worker_id != token.worker_id:
+            log.warning("confirmation_assignment_worker_mismatch")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+
+        updated = self.schedule_repo.update_assignment_status(assignment_id, AssignmentStatus(action))
         if not updated:
-            raise NotFoundError(f"Assignment {token.assignment_id} not found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
 
         self.token_repo.mark_used(token_id)
-        log.info("assignment_status_updated", assignment_id=str(token.assignment_id), action=action)
+        log.info("assignment_status_updated")
         return updated
+
+    def _require_token(self, token_id: UUID) -> ConfirmationTokenResponse:
+        """Fetch a token or raise NotFoundError.
+
+        Args:
+            token_id: The UUID from the SMS link.
+
+        Returns:
+            The token row.
+
+        Raises:
+            NotFoundError: If no such token exists.
+        """
+        token = self.token_repo.get_by_token(token_id)
+        if not token:
+            self.logger.warning("confirmation_token_not_found", method="_require_token")
+            raise NotFoundError("Token not found")
+        return token
+
+    @staticmethod
+    def _is_expired(expires_at: datetime) -> bool:
+        """Whether a token's expiry has passed, tolerating a naive timestamp from the DB.
+
+        Args:
+            expires_at: The token's expiry.
+
+        Returns:
+            bool: True if the token is no longer usable.
+        """
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return expires_at <= datetime.now(timezone.utc)
+
+    def _upcoming_for(self, worker_id: UUID) -> list[AssignmentResponse]:
+        """The worker's duties from today onwards, excluding ones they already declined.
+
+        Args:
+            worker_id: The worker whose duties to list.
+
+        Returns:
+            list[AssignmentResponse]: Soonest first.
+        """
+        assignments = self.schedule_repo.get_upcoming_assignments_for_worker(worker_id, date.today())
+        return [a for a in assignments if a.status != AssignmentStatus.DECLINED]
+
+    @staticmethod
+    def _to_confirmable(assignment: AssignmentResponse) -> ConfirmableAssignment:
+        """Flatten an assignment and its embedded schedule into a row for the public page.
+
+        Args:
+            assignment: An assignment with its schedule embedded.
+
+        Returns:
+            ConfirmableAssignment: Display-ready values.
+        """
+        schedule = assignment.schedules
+        return ConfirmableAssignment(
+            assignment_id=assignment.id,
+            schedule_title=schedule.title if schedule else "Service",
+            scheduled_date=schedule.scheduled_date.strftime("%A, %d %B %Y") if schedule else "",
+            start_time=schedule.start_time.strftime("%H:%M") if schedule else "",
+            end_time=schedule.end_time.strftime("%H:%M") if schedule else "",
+            status=assignment.status,
+        )

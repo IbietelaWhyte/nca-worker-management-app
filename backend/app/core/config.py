@@ -1,4 +1,4 @@
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,6 +40,18 @@ class Settings(BaseSettings):
 
     # Country code applied to phone numbers entered without one, e.g. "4165550101" -> "+14165550101".
     default_phone_country_code: str = "+1"
+
+    # Reminder scheduling (see service/reminders/service.py). Two jobs run on the background
+    # scheduler: the pre-service reminder sweep once a day, and the "you have been scheduled"
+    # notice frequently enough to feel immediate without polling hard. The notice interval is the
+    # worst-case delay between a schedule being created and its workers hearing about it.
+    reminder_hour: int = Field(default=8, ge=0, le=23)
+    notice_interval_minutes: int = Field(default=10, ge=1, le=1440)
+
+    # How long a worker's confirmation link stays valid. This has to outlast the gap between the
+    # two messages — a month's rota is generated weeks before its reminders fire, and the same
+    # token backs both — so it is measured in days, not hours.
+    confirmation_token_ttl_days: int = Field(default=45, ge=1)
 
     @model_validator(mode="after")
     def _check_pool_sizes(self) -> "Settings":

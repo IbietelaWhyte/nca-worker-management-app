@@ -13,11 +13,11 @@ router = APIRouter(prefix="/confirm", tags=["confirmation"])
 @router.get(
     "/{token}",
     response_model=ConfirmationDetailsResponse,
-    summary="Get assignment details for a confirmation token",
+    summary="List the worker's upcoming duties for a confirmation token",
     description=(
         "Public endpoint — no authentication required. "
-        "Returns the schedule and worker details associated with the token "
-        "so the confirmation page can render before the worker takes action."
+        "Returns the worker's name and every upcoming duty they hold, so one SMS can cover a "
+        "whole month of dates and each can be answered separately."
     ),
 )
 def get_confirmation_details(
@@ -30,16 +30,18 @@ def get_confirmation_details(
 @router.post(
     "/{token}",
     response_model=AssignmentResponse,
-    summary="Confirm or decline an assignment via token",
+    summary="Confirm or decline one assignment via token",
     description=(
         "Public endpoint — no authentication required. "
-        "Validates the token (not expired, not already used) and updates "
-        "the assignment status to 'confirmed' or 'declined'."
+        "Validates the token and sets one of the worker's assignments to 'confirmed' or "
+        "'declined'. The link stays usable afterwards so the worker can answer their other "
+        "dates, or change an answer."
     ),
 )
 def submit_confirmation(
     token: UUID,
+    assignment_id: UUID,
     action: str,
     service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> AssignmentResponse:
-    return service.confirm(token, action)
+    return service.confirm(token, assignment_id, action)

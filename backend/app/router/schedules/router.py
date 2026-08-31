@@ -162,6 +162,16 @@ def trigger_reminders(
     return MessageResponse(message=f"Sent {sent} reminder(s)")
 
 
+@router.post("/notices/trigger", response_model=MessageResponse)
+def trigger_notices(
+    _: TokenPayload = HODUser,
+    reminder_service: ReminderService = Depends(get_reminder_service),
+) -> MessageResponse:
+    """Send any outstanding "you have been scheduled" notices now, rather than waiting for the job."""
+    notified = reminder_service.trigger_notices()
+    return MessageResponse(message=f"Notified {notified} worker(s)")
+
+
 @router.post("/{schedule_id}/reminders/trigger", response_model=MessageResponse)
 def send_reminders_for_schedule(
     schedule_id: UUID,
