@@ -8,6 +8,7 @@ from app.core.authentication import (
 )
 from app.core.supabase import get_supabase
 from app.repository.availabilities.repository import AvailabilityRepository
+from app.repository.availability_prompts.repository import AvailabilityPromptRepository
 from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
 from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
@@ -17,6 +18,7 @@ from app.repository.workers.repository import WorkerRepository
 from app.service.account.service import AccountService
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
+from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
@@ -90,6 +92,18 @@ def get_availability_repository(client: Client = Depends(get_db)) -> Availabilit
         AvailabilityRepository: Repository for availability database operations.
     """
     return AvailabilityRepository(client)
+
+
+def get_availability_prompt_repository(client: Client = Depends(get_db)) -> AvailabilityPromptRepository:
+    """FastAPI dependency that provides an AvailabilityPromptRepository instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+
+    Returns:
+        AvailabilityPromptRepository: Repository for scheduled availability prompts.
+    """
+    return AvailabilityPromptRepository(client)
 
 
 def get_subteam_repository(client: Client = Depends(get_db)) -> SubteamRepository:
@@ -262,17 +276,48 @@ def get_department_service(
 
 def get_availability_service(
     availability_repo: AvailabilityRepository = Depends(get_availability_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
 ) -> AvailabilityService:
     """FastAPI dependency that provides an AvailabilityService instance.
 
     Args:
         availability_repo: AvailabilityRepository dependency.
+        worker_repo: WorkerRepository dependency, for the public page's greeting.
 
     Returns:
         AvailabilityService: Service for availability business logic operations.
     """
     return AvailabilityService(
         availability_repo=availability_repo,
+        worker_repo=worker_repo,
+    )
+
+
+def get_availability_prompt_service(
+    prompt_repo: AvailabilityPromptRepository = Depends(get_availability_prompt_repository),
+    department_repo: DepartmentRepository = Depends(get_department_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+    sms_service: SMSService = Depends(get_sms_service),
+    token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
+) -> AvailabilityPromptService:
+    """FastAPI dependency that provides an AvailabilityPromptService instance.
+
+    Args:
+        prompt_repo: AvailabilityPromptRepository dependency.
+        department_repo: DepartmentRepository dependency.
+        worker_repo: WorkerRepository dependency, to resolve recipients.
+        sms_service: SMSService dependency.
+        token_service: ConfirmationTokenService dependency, for the per-worker link.
+
+    Returns:
+        AvailabilityPromptService: Service for prompting workers to enter availability.
+    """
+    return AvailabilityPromptService(
+        prompt_repo=prompt_repo,
+        department_repo=department_repo,
+        worker_repo=worker_repo,
+        sms_service=sms_service,
+        token_service=token_service,
     )
 
 

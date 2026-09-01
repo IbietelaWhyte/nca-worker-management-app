@@ -6,10 +6,16 @@ from app.core.dependencies import (
     AdminUser,
     CurrentUser,
     HODUser,
+    get_availability_prompt_service,
     get_department_role_service,
     get_department_service,
     get_subteam_service,
     get_worker_service,
+)
+from app.schemas.availability_prompts.models import (
+    AvailabilityPromptCreate,
+    AvailabilityPromptResponse,
+    PromptSendResult,
 )
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import (
@@ -21,6 +27,7 @@ from app.schemas.departments.models import (
 from app.schemas.models import MessageResponse, TokenPayload, UserRole
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerImportResult
+from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.subteams.service import SubteamService
@@ -186,6 +193,103 @@ async def import_workers(
     worker_service.authorize_create_assignment(current_user, department_id)
     file_bytes = await file.read()
     return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run, skip_duplicates=skip_duplicates)
+
+
+@router.get("/{department_id}/availability-prompts", response_model=list[AvailabilityPromptResponse])
+def list_availability_prompts(
+    department_id: UUID,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+    prompt_service: AvailabilityPromptService = Depends(get_availability_prompt_service),
+) -> list[AvailabilityPromptResponse]:
+    """List the availability prompts configured for a department (admin/HOD).
+
+    Args:
+        department_id: The department whose prompts to list.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
+        prompt_service: Availability prompt service dependency.
+
+    Returns:
+        list[AvailabilityPromptResponse]: The department's prompts, newest first.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    return prompt_service.get_prompts(department_id)
+
+
+@router.post(
+    "/{department_id}/availability-prompts",
+    response_model=AvailabilityPromptResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_availability_prompt(
+    department_id: UUID,
+    data: AvailabilityPromptCreate,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+    prompt_service: AvailabilityPromptService = Depends(get_availability_prompt_service),
+) -> AvailabilityPromptResponse:
+    """Schedule an availability prompt for a department, once or monthly (admin/HOD).
+
+    Args:
+        department_id: The department whose workers will be prompted.
+        data: Mode plus the matching date fields.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
+        prompt_service: Availability prompt service dependency.
+
+    Returns:
+        AvailabilityPromptResponse: The stored prompt.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    actor = None if current_user.role == UserRole.ADMIN else worker_service.get_worker_for_token(current_user)
+    return prompt_service.create_prompt(department_id, data, created_by=actor.id if actor else None)
+
+
+@router.post("/{department_id}/availability-prompts/send", response_model=PromptSendResult)
+def send_availability_prompt_now(
+    department_id: UUID,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+    prompt_service: AvailabilityPromptService = Depends(get_availability_prompt_service),
+) -> PromptSendResult:
+    """Text a department's active workers now, asking them to enter their availability (admin/HOD).
+
+    Args:
+        department_id: The department to prompt.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
+        prompt_service: Availability prompt service dependency.
+
+    Returns:
+        PromptSendResult: How many were texted, skipped for want of a phone number, or failed.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    return prompt_service.send_now(department_id)
+
+
+@router.delete(
+    "/{department_id}/availability-prompts/{prompt_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_availability_prompt(
+    department_id: UUID,
+    prompt_id: UUID,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+    prompt_service: AvailabilityPromptService = Depends(get_availability_prompt_service),
+) -> None:
+    """Remove a scheduled availability prompt (admin/HOD).
+
+    Args:
+        department_id: The department the prompt belongs to.
+        prompt_id: The prompt to delete.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
+        prompt_service: Availability prompt service dependency.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    prompt_service.delete_prompt(prompt_id)
 
 
 @router.post("/{department_id}/workers/{worker_id}", response_model=MessageResponse)

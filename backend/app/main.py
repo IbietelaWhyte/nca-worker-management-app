@@ -42,23 +42,35 @@ def create_reminder_service() -> ReminderService:
     Returns:
         ReminderService: Configured reminder service instance ready to send notifications.
     """
+    from app.repository.availability_prompts.repository import AvailabilityPromptRepository
     from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
+    from app.repository.departments.repository import DepartmentRepository
     from app.repository.workers.repository import WorkerRepository
+    from app.service.availability_prompts.service import AvailabilityPromptService
     from app.service.confirmation_tokens.service import ConfirmationTokenService
 
     client = get_supabase()
     schedule_repo = ScheduleRepository(client)
     worker_repo = WorkerRepository(client)
+    sms_service = SMSService()
     token_service = ConfirmationTokenService(
         token_repo=ConfirmationTokenRepository(client),
         schedule_repo=schedule_repo,
         worker_repo=worker_repo,
     )
+    prompt_service = AvailabilityPromptService(
+        prompt_repo=AvailabilityPromptRepository(client),
+        department_repo=DepartmentRepository(client),
+        worker_repo=worker_repo,
+        sms_service=sms_service,
+        token_service=token_service,
+    )
     return ReminderService(
         schedule_repo=schedule_repo,
-        sms_service=SMSService(),
+        sms_service=sms_service,
         worker_repo=worker_repo,
         token_service=token_service,
+        prompt_service=prompt_service,
     )
 
 

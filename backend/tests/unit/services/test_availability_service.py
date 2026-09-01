@@ -11,8 +11,8 @@ from tests.unit.services.conftest import make_availability
 
 
 @pytest.fixture
-def service(mock_availability_repo):
-    return AvailabilityService(availability_repo=mock_availability_repo)
+def service(mock_availability_repo, mock_worker_repo):
+    return AvailabilityService(availability_repo=mock_availability_repo, worker_repo=mock_worker_repo)
 
 
 class TestGetWorkerAvailability:

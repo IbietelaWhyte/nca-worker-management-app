@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext'
 import SubteamForm from '@/components/subteams/SubteamForm'
 import RoleForm from '@/components/roles/RoleForm'
 import CsvImportDialog from '@/components/departments/CsvImportDialog'
+import AvailabilityPromptDialog from '@/components/departments/AvailabilityPromptDialog'
 import {
     getSubteamWithWorkers,
     assignWorkerToSubteam,
@@ -46,6 +47,7 @@ import {
     ChevronRight,
     ChevronDown,
     Upload,
+    CalendarClock,
 } from 'lucide-react'
 
 // Radix Select disallows an empty-string value, so use a sentinel for "no role".
@@ -83,6 +85,7 @@ export default function DepartmentDetailPage() {
     // Member dialog state
     const [addMemberOpen, setAddMemberOpen] = useState(false)
     const [csvImportOpen, setCsvImportOpen] = useState(false)
+    const [availabilityPromptOpen, setAvailabilityPromptOpen] = useState(false)
     const [memberActionLoading, setMemberActionLoading] = useState(null)
 
     // Subteam dialog state
@@ -314,18 +317,26 @@ export default function DepartmentDetailPage() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <Button variant="outline" size="sm" onClick={() => navigate('/departments')}>
-                    <ArrowLeft size={16} className="mr-2" /> Back
-                </Button>
-                <div>
-                    <h2 className="text-2xl font-bold">{department.name}</h2>
-                    {department.description && (
-                        <p className="text-muted-foreground text-sm mt-1">
-                            {department.description}
-                        </p>
-                    )}
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <Button variant="outline" size="sm" onClick={() => navigate('/departments')}>
+                        <ArrowLeft size={16} className="mr-2" /> Back
+                    </Button>
+                    <div>
+                        <h2 className="text-2xl font-bold">{department.name}</h2>
+                        {department.description && (
+                            <p className="text-muted-foreground text-sm mt-1">
+                                {department.description}
+                            </p>
+                        )}
+                    </div>
                 </div>
+                {canManage && (
+                    <Button variant="outline" onClick={() => setAvailabilityPromptOpen(true)}>
+                        <CalendarClock size={16} className="mr-2" />
+                        Prompt for Availability
+                    </Button>
+                )}
             </div>
 
             {/* Tabs */}
@@ -952,6 +963,15 @@ export default function DepartmentDetailPage() {
                     onOpenChange={setCsvImportOpen}
                     departmentId={id}
                     onImported={refetch}
+                />
+            )}
+
+            {/* Availability prompt dialog — gated identically to the button that opens it */}
+            {canManage && (
+                <AvailabilityPromptDialog
+                    open={availabilityPromptOpen}
+                    onOpenChange={setAvailabilityPromptOpen}
+                    departmentId={id}
                 />
             )}
 

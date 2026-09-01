@@ -60,3 +60,27 @@ class AvailabilityUpdate(BaseModel):
             if self.availability_type == AvailabilityType.SPECIFIC_DATE and self.specific_date is None:
                 raise ValueError("specific_date is required when availability_type is 'specific_date'")
         return self
+
+
+class PublicAvailabilityUpdate(BaseModel):
+    """One date being set from the public, token-authenticated page."""
+
+    specific_date: date
+    is_available: bool
+
+
+class PublicAvailabilityDate(BaseModel):
+    id: UUID
+    specific_date: date
+    is_available: bool
+
+
+class PublicAvailabilityResponse(BaseModel):
+    """What the public availability page renders.
+
+    Deliberately narrow: the link is a bearer credential sent over SMS, so it exposes the
+    worker's own name and dates and nothing else about them or the organisation.
+    """
+
+    worker_name: str
+    dates: list[PublicAvailabilityDate] = []
