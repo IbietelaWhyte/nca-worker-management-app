@@ -17,6 +17,7 @@ const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
 const AccountPage = lazy(() => import('@/pages/AccountPage'))
 const ConfirmPage = lazy(() => import('@/pages/ConfirmPage'))
+const AvailabilityLinkPage = lazy(() => import('@/pages/AvailabilityLinkPage'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
 
 const PageFallback = () => (
@@ -111,6 +112,9 @@ function App() {
                     />
                     {/* Public route — no auth required, accessible by workers via SMS link */}
                     <Route path="/confirm/:token" element={<ConfirmPage />} />
+
+                    {/* Public route — reached from an SMS prompt, no session required */}
+                    <Route path="/availability/:token" element={<AvailabilityLinkPage />} />
                     {/* Public route — password recovery link target */}
                     <Route path="/reset-password" element={<ResetPasswordPage />} />
                 </Routes>

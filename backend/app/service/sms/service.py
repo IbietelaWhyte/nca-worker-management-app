@@ -89,6 +89,34 @@ class SMSService:
         )
         return self.send_sms(to, body)
 
+    def send_availability_prompt(
+        self,
+        to: str,
+        worker_name: str,
+        department_name: str,
+        availability_url: str,
+    ) -> bool:
+        """Ask a worker to enter the dates they are available.
+
+        The link is deliberately token-based rather than pointing at the app: most workers have
+        no login account, so a link to a sign-in page would reach almost nobody.
+
+        Args:
+            to: Recipient phone number in E.164 format.
+            worker_name: Name of the worker being asked.
+            department_name: The department asking.
+            availability_url: Public link to the page where they can set their dates.
+
+        Returns:
+            bool: True if the prompt was sent, False if sending failed.
+        """
+        body = (
+            f"Hi {worker_name}, please let {department_name} know which dates you are available "
+            f"to serve: {availability_url}"
+        )
+        self.logger.info("sending_availability_prompt", to=mask_phone(to))
+        return self.send_sms(to, body)
+
     def send_assignment_notice(
         self,
         to: str,

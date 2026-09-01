@@ -45,12 +45,37 @@ class ConfirmationTokenService:
         self.worker_repo = worker_repo
         self.logger = logger.bind(service="ConfirmationTokenService")
 
-    def create_token(self, worker_id: UUID) -> str:
-        """Return the worker's confirmation URL, minting a token only if they have no live one.
+    def get_or_create_token_id(self, worker_id: UUID) -> UUID:
+        """Return the worker's live token, minting one only if they have none.
 
         Reuse is deliberate rather than an optimisation: the initial notice and the pre-service
         reminder are sent weeks apart and must lead to the same page, so the link in the first
         message keeps working when the second arrives.
+
+        Args:
+            worker_id: The UUID of the worker the token identifies.
+
+        Returns:
+            UUID: The token that identifies this worker.
+        """
+        log = self.logger.bind(method="get_or_create_token_id", worker_id=str(worker_id))
+
+        now = datetime.now(timezone.utc)
+        existing = self.token_repo.get_live_for_worker(worker_id, now)
+        if existing:
+            log.info("confirmation_token_reused")
+            return existing.id
+
+        expires_at = now + timedelta(days=settings.confirmation_token_ttl_days)
+        token_data = ConfirmationTokenCreate(worker_id=worker_id, expires_at=expires_at)
+        # Log the worker linkage only — never the token id itself (it's the link credential).
+        log.info("creating_confirmation_token")
+        token = self.token_repo.create(token_data.model_dump(mode="json"))
+        log.info("confirmation_token_created", expires_at=expires_at.isoformat())
+        return token.id
+
+    def create_token(self, worker_id: UUID) -> str:
+        """Return the worker's confirmation URL.
 
         Args:
             worker_id: The UUID of the worker the link identifies.
@@ -59,21 +84,29 @@ class ConfirmationTokenService:
             str: The full public URL the worker can visit, e.g.
                  "https://app.example.com/confirm/{token_uuid}".
         """
-        log = self.logger.bind(method="create_token", worker_id=str(worker_id))
+        return f"{settings.frontend_url}/confirm/{self.get_or_create_token_id(worker_id)}"
 
-        now = datetime.now(timezone.utc)
-        existing = self.token_repo.get_live_for_worker(worker_id, now)
-        if existing:
-            log.info("confirmation_token_reused")
-            return f"{settings.frontend_url}/confirm/{existing.id}"
+    def resolve_worker_id(self, token_id: UUID) -> UUID:
+        """Identify the worker a public link belongs to.
 
-        expires_at = now + timedelta(days=settings.confirmation_token_ttl_days)
-        token_data = ConfirmationTokenCreate(worker_id=worker_id, expires_at=expires_at)
-        # Log the worker linkage only — never the token id itself (it's the link credential).
-        log.info("creating_confirmation_token")
-        token = self.token_repo.create(token_data.model_dump(mode="json"))
-        log.info("confirmation_token_created", expires_at=expires_at.isoformat())
-        return f"{settings.frontend_url}/confirm/{token.id}"
+        The token is the only credential these pages have, so this is what stands in for
+        authentication on them.
+
+        Args:
+            token_id: The UUID from the link.
+
+        Returns:
+            UUID: The worker the token identifies.
+
+        Raises:
+            NotFoundError: If no such token exists.
+            GoneError: If the link has expired.
+        """
+        token = self._require_token(token_id)
+        if self._is_expired(token.expires_at):
+            self.logger.warning("confirmation_token_expired", method="resolve_worker_id")
+            raise GoneError("This link has expired")
+        return token.worker_id
 
     def get_confirmation_details(self, token_id: UUID) -> ConfirmationDetailsResponse:
         """List the worker's upcoming duties for the public confirmation page.

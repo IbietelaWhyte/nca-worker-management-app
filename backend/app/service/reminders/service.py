@@ -10,6 +10,7 @@ from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import AssignmentResponse, Schedule
+from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.sms.service import SMSService
 
@@ -32,6 +33,7 @@ class ReminderService:
         sms_service: SMSService,
         worker_repo: WorkerRepository,
         token_service: ConfirmationTokenService | None = None,
+        prompt_service: AvailabilityPromptService | None = None,
     ) -> None:
         """Initialize the ReminderService with required dependencies.
 
@@ -41,11 +43,15 @@ class ReminderService:
             worker_repo: Repository for worker database operations.
             token_service: Optional service for creating confirmation tokens.
                            When provided, messages include a confirmation link.
+            prompt_service: Optional service for availability prompts. This service owns the only
+                           scheduler in the process, so the daily prompt sweep is registered here
+                           rather than starting a second one.
         """
         self.schedule_repo = schedule_repo
         self.sms_service = sms_service
         self.worker_repo = worker_repo
         self.token_service = token_service
+        self.prompt_service = prompt_service
         # Created lazily in start(): this service is also constructed per-request to back the
         # manual trigger endpoints, and those instances must not each spin up a scheduler.
         self.scheduler: BackgroundScheduler | None = None
@@ -79,6 +85,17 @@ class ReminderService:
             id="assignment_notices",
             replace_existing=True,
         )
+        if self.prompt_service:
+            # Same hour as the reminder sweep: both are "morning admin", and a worker who is
+            # both rostered and being asked for availability gets their texts together.
+            self.scheduler.add_job(
+                self.prompt_service.send_due_prompts,
+                trigger="cron",
+                hour=settings.reminder_hour,
+                minute=0,
+                id="availability_prompts",
+                replace_existing=True,
+            )
         self.scheduler.start()
         self.logger.info(
             "reminder_scheduler_started",

@@ -271,13 +271,42 @@ class AvailabilityRepository(BaseRepository[AvailabilityResponse]):
                     q.Columns.IS_AVAILABLE: is_available,
                     q.Columns.AVAILABILITY_TYPE: AvailabilityType.SPECIFIC_DATE.value,
                 },
-                on_conflict=q.UPSERT_CONFLICT_TARGET,
+                on_conflict=q.UPSERT_SPECIFIC_DATE_CONFLICT_TARGET,
             )
             .execute()
         )
         availability = self._to_model(response.data[0])
         log.info("specific_date_availability_upserted", availability_id=str(availability.id))
         return availability
+
+    def delete_specific_date(self, worker_id: UUID, specific_date: date) -> bool:
+        """
+        Remove a worker's override for one specific date.
+
+        Clearing the override is meaningful rather than the same as marking unavailable: it falls
+        the worker back to their recurring weekly pattern for that day.
+
+        Args:
+            worker_id (UUID): The unique identifier of the worker.
+            specific_date (date): The date whose override should be removed.
+
+        Returns:
+            bool: True if a record was deleted, False if there was none.
+        """
+        log = self.logger.bind(
+            method="delete_specific_date", worker_id=str(worker_id), specific_date=specific_date.isoformat()
+        )
+        response = (
+            self.client.table(q.TABLE)
+            .delete()
+            .eq(q.Columns.WORKER_ID, str(worker_id))
+            .eq(q.Columns.SPECIFIC_DATE, specific_date.isoformat())
+            .eq(q.Columns.AVAILABILITY_TYPE, AvailabilityType.SPECIFIC_DATE.value)
+            .execute()
+        )
+        deleted = len(response.data or []) > 0
+        log.info("specific_date_availability_deleted", deleted=deleted)
+        return deleted
 
     def delete_worker_availability(self, worker_id: UUID) -> bool:
         """
