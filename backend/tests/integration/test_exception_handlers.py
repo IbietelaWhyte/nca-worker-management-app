@@ -32,7 +32,7 @@ class TestAppErrorHandler:
         app.dependency_overrides[get_confirmation_token_service] = lambda: mock_service
         try:
             client = TestClient(app)
-            response = client.post(f"/api/v1/confirm/{uuid4()}?action=confirmed")
+            response = client.post(f"/api/v1/confirm/{uuid4()}?assignment_id={uuid4()}&action=confirmed")
         finally:
             app.dependency_overrides.clear()
         assert response.status_code == 410

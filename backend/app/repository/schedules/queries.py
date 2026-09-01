@@ -8,6 +8,7 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 # nulls the embedded object instead of dropping the assignment row.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
+FUNCTION_GET_ASSIGNMENTS_DUE_FOR_NOTICE = "get_assignments_due_for_notice"
 
 
 class Columns:
@@ -31,5 +32,6 @@ class AssignmentColumns:
     DEPARTMENT_ROLE_ID = "department_role_id"
     STATUS = "status"
     REMINDER_SENT_AT = "reminder_sent_at"
+    NOTICE_SENT_AT = "notice_sent_at"
     SUBTEAM_ID = "subteam_id"
     CREATED_AT = "created_at"

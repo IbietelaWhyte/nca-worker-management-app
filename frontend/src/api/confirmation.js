@@ -10,19 +10,21 @@ const publicClient = axios.create({
 })
 
 /**
- * Fetch the assignment details for a confirmation token.
- * Called on page load before the worker takes any action.
+ * Fetch every upcoming duty the token's worker holds.
+ * One link covers a whole month of dates, so this returns a list.
  *
  * @param {string} token - The UUID token from the URL path parameter.
  * @returns {Promise<{
  *   worker_name: string,
- *   schedule_title: string,
- *   scheduled_date: string,
- *   start_time: string,
- *   end_time: string,
- *   current_status: string,
- *   already_used: boolean,
  *   expired: boolean,
+ *   assignments: Array<{
+ *     assignment_id: string,
+ *     schedule_title: string,
+ *     scheduled_date: string,
+ *     start_time: string,
+ *     end_time: string,
+ *     status: string,
+ *   }>,
  * }>}
  */
 export async function getConfirmationDetails(token) {
@@ -31,15 +33,17 @@ export async function getConfirmationDetails(token) {
 }
 
 /**
- * Submit a confirmation or declination for an assignment.
+ * Confirm or decline one of the worker's duties.
+ * The link stays usable afterwards, so the worker can answer their other dates.
  *
  * @param {string} token - The UUID token from the URL path parameter.
+ * @param {string} assignmentId - Which duty is being answered.
  * @param {'confirmed' | 'declined'} action - The worker's response.
  * @returns {Promise<object>} Updated assignment response.
  */
-export async function submitConfirmation(token, action) {
+export async function submitConfirmation(token, assignmentId, action) {
     const response = await publicClient.post(`/confirm/${token}`, null, {
-        params: { action },
+        params: { assignment_id: assignmentId, action },
     })
     return response.data
 }

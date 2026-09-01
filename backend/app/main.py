@@ -47,16 +47,17 @@ def create_reminder_service() -> ReminderService:
     from app.service.confirmation_tokens.service import ConfirmationTokenService
 
     client = get_supabase()
-    token_repo = ConfirmationTokenRepository(client)
+    schedule_repo = ScheduleRepository(client)
+    worker_repo = WorkerRepository(client)
     token_service = ConfirmationTokenService(
-        token_repo=token_repo,
-        schedule_repo=ScheduleRepository(client),
-        worker_repo=WorkerRepository(client),
+        token_repo=ConfirmationTokenRepository(client),
+        schedule_repo=schedule_repo,
+        worker_repo=worker_repo,
     )
     return ReminderService(
-        schedule_repo=ScheduleRepository(client),
+        schedule_repo=schedule_repo,
         sms_service=SMSService(),
-        worker_repo=WorkerRepository(client),
+        worker_repo=worker_repo,
         token_service=token_service,
     )
 

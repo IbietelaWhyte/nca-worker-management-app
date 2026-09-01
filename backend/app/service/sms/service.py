@@ -74,21 +74,48 @@ class SMSService:
         Returns:
             bool: True if reminder sent successfully, False if sending failed.
         """
+        body = (
+            f"Hi {worker_name}, a reminder that you are scheduled for '{schedule_title}' "
+            f"on {scheduled_date} at {start_time}."
+        )
+        # Nothing consumes inbound SMS — there is no Twilio webhook — so without a link there is
+        # no action to offer. Saying "reply CONFIRM" would promise a reply nobody reads.
         if confirmation_url:
-            body = (
-                f"Hi {worker_name}, you are scheduled for '{schedule_title}' "
-                f"on {scheduled_date} at {start_time}. "
-                f"Confirm or decline here: {confirmation_url}"
-            )
-        else:
-            body = (
-                f"Hi {worker_name}, this is a reminder that you are scheduled for "
-                f"'{schedule_title}' on {scheduled_date} at {start_time}. "
-                f"Please reply CONFIRM or DECLINE."
-            )
+            body += f" Confirm or decline here: {confirmation_url}"
         self.logger.info(
             "sending_reminder",
             to=mask_phone(to),
             scheduled_date=scheduled_date,
         )
+        return self.send_sms(to, body)
+
+    def send_assignment_notice(
+        self,
+        to: str,
+        worker_name: str,
+        dates: list[str],
+        confirmation_url: str,
+    ) -> bool:
+        """Tell a worker they have been scheduled, covering every date in one message.
+
+        Sent shortly after a schedule is created, well before the pre-service reminder, so the
+        worker has time to arrange cover if they cannot make a date. Monthly generation rosters
+        somebody onto four or five Sundays at once, hence one message listing all of them rather
+        than one text per date.
+
+        Args:
+            to: Recipient phone number in E.164 format.
+            worker_name: Name of the worker being notified.
+            dates: Human-readable dates they have been scheduled for, soonest first.
+            confirmation_url: Link to the page where each date can be confirmed or declined.
+
+        Returns:
+            bool: True if the notice was sent, False if sending failed.
+        """
+        if len(dates) == 1:
+            summary = f"you have been scheduled for {dates[0]}"
+        else:
+            summary = f"you have been scheduled for {len(dates)} dates: {', '.join(dates)}"
+        body = f"Hi {worker_name}, {summary}. Please confirm or decline here: {confirmation_url}"
+        self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(dates))
         return self.send_sms(to, body)
