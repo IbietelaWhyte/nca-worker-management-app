@@ -82,8 +82,8 @@ export default function AvailabilityLinkPage() {
     }
 
     return (
-        <div className="min-h-screen bg-muted flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-card rounded-2xl shadow-md p-8">
+        <div className="min-h-dvh bg-muted flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-card rounded-2xl shadow-md p-5 sm:p-8">
                 <div className="flex flex-col items-center gap-3 mb-8">
                     <BrandMark className="w-36" />
                     <p className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-[0.18em]">

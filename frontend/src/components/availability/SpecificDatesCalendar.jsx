@@ -39,7 +39,9 @@ export default function SpecificDatesCalendar({ specificDates = [], onDateClick,
                 </div>
             </div>
 
-            <div className="border rounded-lg p-4 inline-block">
+            {/* react-day-picker fixes day cells at 44px, so the grid is a hard 308px. Scroll it
+                rather than let it burst the card on a narrow phone. */}
+            <div className="max-w-full overflow-x-auto rounded-lg border p-2 sm:inline-block sm:p-4">
                 <DayPicker
                     mode="multiple"
                     // Controlled: with no `selected`, react-day-picker keeps its own internal

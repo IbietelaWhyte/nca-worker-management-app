@@ -18,7 +18,40 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound, Trash2 } from 'lucide-react'
+import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound, Trash2, MoreVertical } from 'lucide-react'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+
+const ROLE_LABELS = { hod: 'HOD', assistant_hod: 'Assistant HOD' }
+
+const roleVariant = role =>
+    role === 'admin'
+        ? 'destructive'
+        : role === 'hod' || role === 'assistant_hod'
+          ? 'default'
+          : 'secondary'
+
+const roleLabel = role => ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1)
+
+/** Shared by the desktop table cell and the mobile card, so the two cannot drift. */
+function RoleBadges({ roles }) {
+    if (!roles || roles.length === 0) {
+        return <span className="text-xs text-muted-foreground">—</span>
+    }
+    return (
+        <div className="flex gap-1 flex-wrap">
+            {roles.map(role => (
+                <Badge key={role} variant={roleVariant(role)} className="text-xs">
+                    {roleLabel(role)}
+                </Badge>
+            ))}
+        </div>
+    )
+}
 
 export default function WorkersPage() {
     const navigate = useNavigate()
@@ -108,14 +141,14 @@ export default function WorkersPage() {
     return (
         <div className="space-y-6">
             {/* Page header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-2xl font-bold">Workers</h2>
                     <p className="text-muted-foreground text-sm mt-1">
                         {workers.length} total workers
                     </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     {isAdmin && (
                         <Button onClick={handleRegisterNewUser} variant="default">
                             <UserPlus size={16} className="mr-2" />
@@ -146,9 +179,9 @@ export default function WorkersPage() {
                 </div>
             )}
 
-            {/* Workers table */}
+            {/* Workers table — desktop */}
             {workers.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
+                <div className="hidden border rounded-lg overflow-hidden md:block">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -170,35 +203,7 @@ export default function WorkersPage() {
                                     <TableCell>{worker.phone}</TableCell>
                                     {isAdmin && (
                                         <TableCell>
-                                            {worker.roles && worker.roles.length > 0 ? (
-                                                <div className="flex gap-1 flex-wrap">
-                                                    {worker.roles.map(role => (
-                                                        <Badge
-                                                            key={role}
-                                                            variant={
-                                                                role === 'admin'
-                                                                    ? 'destructive'
-                                                                    : role === 'hod' ||
-                                                                        role === 'assistant_hod'
-                                                                      ? 'default'
-                                                                      : 'secondary'
-                                                            }
-                                                            className="text-xs"
-                                                        >
-                                                            {role === 'hod'
-                                                                ? 'HOD'
-                                                                : role === 'assistant_hod'
-                                                                  ? 'Assistant HOD'
-                                                                  : role.charAt(0).toUpperCase() +
-                                                                    role.slice(1)}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
-                                            ) : (
-                                                <span className="text-xs text-muted-foreground">
-                                                    —
-                                                </span>
-                                            )}
+                                            <RoleBadges roles={worker.roles} />
                                         </TableCell>
                                     )}
                                     <TableCell>
@@ -267,6 +272,93 @@ export default function WorkersPage() {
                         </TableBody>
                     </Table>
                 </div>
+            )}
+
+            {/* Below md the six-column table becomes a card per worker. The five row actions —
+                which alone run to ~500px — collapse into a menu. */}
+            {workers.length > 0 && (
+                <ul className="space-y-2 md:hidden">
+                    {workers.map(worker => (
+                        <li key={worker.id} className="rounded-lg border p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="truncate font-medium">
+                                        {worker.first_name} {worker.last_name}
+                                    </p>
+                                    <p className="truncate text-sm text-muted-foreground">
+                                        {worker.email}
+                                    </p>
+                                    {worker.phone && (
+                                        <a
+                                            href={`tel:${worker.phone}`}
+                                            className="text-sm text-primary underline underline-offset-2"
+                                        >
+                                            {worker.phone}
+                                        </a>
+                                    )}
+                                </div>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="-mr-2 shrink-0"
+                                            aria-label={`Actions for ${worker.first_name} ${worker.last_name}`}
+                                        >
+                                            <MoreVertical size={18} />
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                        <DropdownMenuItem onClick={() => handleOpenEdit(worker)}>
+                                            <Pencil size={14} className="mr-2" />
+                                            Edit
+                                        </DropdownMenuItem>
+                                        {isDepartmentHead && (
+                                            <DropdownMenuItem
+                                                onClick={() => handleOpenRoleEdit(worker)}
+                                            >
+                                                <Shield size={14} className="mr-2" />
+                                                Roles
+                                            </DropdownMenuItem>
+                                        )}
+                                        {isAdmin && !worker.has_account && (
+                                            <DropdownMenuItem
+                                                onClick={() => handleOpenCreateAccount(worker)}
+                                            >
+                                                <KeyRound size={14} className="mr-2" />
+                                                Create account
+                                            </DropdownMenuItem>
+                                        )}
+                                        {worker.is_active && (
+                                            <DropdownMenuItem
+                                                onClick={() => handleDeactivate(worker)}
+                                                className="text-destructive focus:text-destructive"
+                                            >
+                                                <UserX size={14} className="mr-2" />
+                                                Deactivate
+                                            </DropdownMenuItem>
+                                        )}
+                                        {isDepartmentHead && !worker.is_active && (
+                                            <DropdownMenuItem
+                                                onClick={() => handleOpenDelete(worker)}
+                                                className="text-destructive focus:text-destructive"
+                                            >
+                                                <Trash2 size={14} className="mr-2" />
+                                                Delete
+                                            </DropdownMenuItem>
+                                        )}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <Badge variant={worker.is_active ? 'default' : 'secondary'}>
+                                    {worker.is_active ? 'Active' : 'Inactive'}
+                                </Badge>
+                                {isAdmin && <RoleBadges roles={worker.roles} />}
+                            </div>
+                        </li>
+                    ))}
+                </ul>
             )}
 
             {/* Create / Edit dialog */}

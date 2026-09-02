@@ -317,7 +317,7 @@ export default function DepartmentDetailPage() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                 <div className="flex items-center gap-4">
                     <Button variant="outline" size="sm" onClick={() => navigate('/departments')}>
                         <ArrowLeft size={16} className="mr-2" /> Back
@@ -341,7 +341,7 @@ export default function DepartmentDetailPage() {
 
             {/* Tabs */}
             <Tabs defaultValue="members">
-                <TabsList>
+                <TabsList className="max-w-full overflow-x-auto">
                     <TabsTrigger value="members">
                         Members
                         <Badge variant="secondary" className="ml-2 text-xs">
@@ -369,11 +369,11 @@ export default function DepartmentDetailPage() {
                 {/* Members tab */}
                 <TabsContent value="members" className="mt-4">
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-sm text-muted-foreground">
                                 {department.workers?.length ?? 0} workers in this department
                             </p>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 {canManage && (
                                     <Button
                                         variant="outline"
@@ -403,7 +403,7 @@ export default function DepartmentDetailPage() {
                                 </Button>
                             </div>
                         ) : (
-                            <div className="border rounded-lg overflow-hidden">
+                            <div className="hidden border rounded-lg overflow-hidden md:block">
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
@@ -457,7 +457,7 @@ export default function DepartmentDetailPage() {
                                                             >
                                                                 <SelectTrigger
                                                                     size="sm"
-                                                                    className="w-40"
+                                                                    className="w-full sm:w-40"
                                                                 >
                                                                     <SelectValue
                                                                         placeholder={
@@ -545,13 +545,128 @@ export default function DepartmentDetailPage() {
                                 </Table>
                             </div>
                         )}
+
+                        {/* Below md the members table becomes a card list. Looking someone up and
+                            tapping their email or phone is the realistic phone task here. */}
+                        {department.workers && department.workers.length > 0 && (
+                            <ul className="space-y-2 md:hidden">
+                                {department.workers.map(worker => {
+                                    const isHod = worker.id === department.hod_id
+                                    return (
+                                        <li key={worker.id} className="rounded-lg border p-4">
+                                            <div className="flex items-center gap-2">
+                                                <p className="min-w-0 truncate font-medium">
+                                                    {worker.first_name} {worker.last_name}
+                                                </p>
+                                                {isHod && (
+                                                    <Badge
+                                                        variant="default"
+                                                        className="shrink-0 text-xs"
+                                                    >
+                                                        <Crown size={10} className="mr-1" /> HOD
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            <a
+                                                href={`mailto:${worker.email}`}
+                                                className="block truncate text-sm text-primary underline underline-offset-2"
+                                            >
+                                                {worker.email}
+                                            </a>
+
+                                            <div className="mt-3">
+                                                {canManage ? (
+                                                    <Select
+                                                        value={
+                                                            worker.department_role?.id ?? NO_ROLE
+                                                        }
+                                                        onValueChange={value =>
+                                                            handleMemberRoleChange(worker, value)
+                                                        }
+                                                        disabled={
+                                                            memberRoleLoading === worker.id ||
+                                                            roles.length === 0
+                                                        }
+                                                    >
+                                                        <SelectTrigger size="sm" className="w-full">
+                                                            <SelectValue
+                                                                placeholder={
+                                                                    roles.length === 0
+                                                                        ? 'No roles defined'
+                                                                        : 'No role'
+                                                                }
+                                                            />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value={NO_ROLE}>
+                                                                No role
+                                                            </SelectItem>
+                                                            {roles.map(r => (
+                                                                <SelectItem key={r.id} value={r.id}>
+                                                                    {r.name}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    worker.department_role && (
+                                                        <Badge
+                                                            variant="secondary"
+                                                            className="text-xs"
+                                                        >
+                                                            {worker.department_role.name}
+                                                        </Badge>
+                                                    )
+                                                )}
+                                            </div>
+
+                                            {(!isHod && (isAdmin || role === 'hod')) ||
+                                            isAdmin ||
+                                            isDepartmentHead ? (
+                                                <div className="mt-3 flex flex-wrap gap-2">
+                                                    {!isHod && (isAdmin || role === 'hod') && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            disabled={
+                                                                memberActionLoading === worker.id
+                                                            }
+                                                            onClick={() => handleAssignHod(worker)}
+                                                        >
+                                                            <Crown size={14} className="mr-1" /> Set
+                                                            HOD
+                                                        </Button>
+                                                    )}
+                                                    {(isAdmin || isDepartmentHead) && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            disabled={
+                                                                memberActionLoading === worker.id
+                                                            }
+                                                            onClick={() =>
+                                                                handleRemoveMember(worker)
+                                                            }
+                                                            className="text-destructive hover:text-destructive"
+                                                        >
+                                                            <UserMinus size={14} className="mr-1" />{' '}
+                                                            Remove
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            ) : null}
+                                        </li>
+                                    )
+                                })}
+                            </ul>
+                        )}
                     </div>
                 </TabsContent>
 
                 {/* Subteams tab */}
                 <TabsContent value="subteams" className="mt-4">
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-sm text-muted-foreground">
                                 Subteams allow finer-grained scheduling within this department
                             </p>
@@ -852,7 +967,7 @@ export default function DepartmentDetailPage() {
                 {/* Roles tab */}
                 <TabsContent value="roles" className="mt-4">
                     <div className="space-y-4">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-sm text-muted-foreground">
                                 Define functional roles (e.g. Teacher, Helper) and assign them to
                                 members on the Members tab

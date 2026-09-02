@@ -14,6 +14,10 @@ const buttonVariants = ({ variant = 'default', size = 'default', className = '' 
             'h-9 rounded-md px-3': size === 'sm',
             'h-11 rounded-md px-8': size === 'lg',
             'h-8 w-8': size === 'icon-sm',
+            // 'icon' had no branch at all, so `size="icon"` silently emitted no height, width or
+            // padding — calendar.jsx has been passing it, saved only by react-day-picker sizing
+            // the cell around it. 44px is the touch-target minimum.
+            'h-11 w-11': size === 'icon',
         },
         className
     )

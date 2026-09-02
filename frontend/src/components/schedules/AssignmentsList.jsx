@@ -84,29 +84,29 @@ export default function AssignmentsList({
                                     return (
                                         <div
                                             key={assignment.id}
-                                            className="flex items-center justify-between p-3 border rounded-md"
+                                            className="flex flex-col gap-3 p-3 border rounded-md sm:flex-row sm:items-center sm:justify-between"
                                         >
-                                            <div className="flex items-center gap-3">
-                                                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <div className="w-8 h-8 shrink-0 rounded-full bg-muted flex items-center justify-center text-xs font-medium">
                                                     {worker
                                                         ? `${worker.first_name[0]}${worker.last_name[0]}`
                                                         : '?'}
                                                 </div>
-                                                <div>
-                                                    <p className="text-sm font-medium">
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-sm font-medium">
                                                         {worker
                                                             ? `${worker.first_name} ${worker.last_name}`
                                                             : 'Unknown worker'}
                                                     </p>
                                                     {worker && (
-                                                        <p className="text-xs text-muted-foreground">
+                                                        <p className="truncate text-xs text-muted-foreground">
                                                             {worker.email}
                                                         </p>
                                                     )}
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
                                                 {canManage ? (
                                                     <Select
                                                         value={
@@ -121,7 +121,10 @@ export default function AssignmentsList({
                                                             roles.length === 0
                                                         }
                                                     >
-                                                        <SelectTrigger size="sm" className="w-36">
+                                                        <SelectTrigger
+                                                            size="sm"
+                                                            className="w-full sm:w-36"
+                                                        >
                                                             <SelectValue
                                                                 placeholder={
                                                                     roles.length === 0

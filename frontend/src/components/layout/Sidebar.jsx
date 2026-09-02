@@ -14,13 +14,19 @@ const navItems = [
     { to: '/schedules', icon: Calendar, label: 'Schedules', manageOnly: true },
 ]
 
-export default function Sidebar() {
+/**
+ * The rail's contents, rendered in two places: the fixed desktop rail below, and the mobile
+ * drawer in AppLayout. Extracted so the nav cannot drift between them.
+ *
+ * `onNavigate` lets the drawer close itself when a link is followed.
+ */
+export function SidebarNav({ onNavigate }) {
     const { isAdmin, isDepartmentHead } = useAuth()
     const canManage = isAdmin || isDepartmentHead
     const visibleItems = navItems.filter(item => !item.manageOnly || canManage)
 
     return (
-        <div className="flex flex-col w-64 min-h-screen bg-sidebar text-sidebar-foreground">
+        <>
             {/* Logo area — the white wordmark on purple mirrors the church site's header. */}
             <div className="p-6">
                 <img
@@ -44,11 +50,13 @@ export default function Sidebar() {
                         key={to}
                         to={to}
                         end={to === '/'}
+                        onClick={onNavigate}
                         className={({ isActive }) =>
                             cn(
-                                // The 3px left border is transparent when inactive so the label
-                                // does not shift sideways as the active item changes.
-                                'flex items-center gap-3 pl-[9px] pr-3 py-2 rounded-md text-sm transition-colors border-l-[3px] border-transparent',
+                                // min-h-11 keeps the tap target at 44px; the 3px left border is
+                                // transparent when inactive so the label does not shift sideways
+                                // as the active item changes.
+                                'flex items-center gap-3 min-h-11 pl-[9px] pr-3 py-2 rounded-md text-sm transition-colors border-l-[3px] border-transparent',
                                 isActive
                                     ? 'bg-sidebar-active text-sidebar-foreground font-semibold border-l-highlight'
                                     : 'text-sidebar-muted hover:bg-sidebar-active/60 hover:text-sidebar-foreground'
@@ -60,6 +68,15 @@ export default function Sidebar() {
                     </NavLink>
                 ))}
             </nav>
+        </>
+    )
+}
+
+/** The fixed rail. Hidden below `md`, where the drawer takes over. */
+export default function Sidebar() {
+    return (
+        <div className="hidden md:flex flex-col w-64 shrink-0 min-h-screen bg-sidebar text-sidebar-foreground">
+            <SidebarNav />
         </div>
     )
 }

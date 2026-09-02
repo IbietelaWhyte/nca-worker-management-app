@@ -60,7 +60,7 @@ export default function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-muted p-4">
+        <div className="min-h-dvh flex items-center justify-center bg-muted p-4">
             <div className="w-full max-w-sm space-y-6 rounded-2xl border bg-card p-8 shadow-md">
                 <div className="space-y-4">
                     <BrandMark />

@@ -197,6 +197,23 @@
         letter-spacing: -0.01em;
     }
 
+    /*
+     * react-day-picker defaults to blue for the selection ring and today's date. The available /
+     * unavailable fills below already carry the state, so the ring would just be a second,
+     * off-brand signal competing with them — it is kept only so a day cannot look answered until
+     * a row actually exists, and drawn in the brand colour rather than blue.
+     *
+     * !important because react-day-picker's own stylesheet is imported from the component and so
+     * arrives unlayered — and unlayered rules beat anything in @layer base. The two modifier rules
+     * below have always needed the same escape hatch.
+     */
+    .rdp-root {
+        --rdp-accent-color: hsl(var(--primary)) !important;
+        --rdp-accent-background-color: hsl(var(--accent)) !important;
+        --rdp-today-color: hsl(var(--primary)) !important;
+        --rdp-selected-border: none !important;
+    }
+
     /* react-day-picker specific date modifiers */
     .rdp-day-available {
         background-color: hsl(var(--success)) !important;
