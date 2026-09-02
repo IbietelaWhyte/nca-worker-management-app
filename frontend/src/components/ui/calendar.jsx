@@ -22,7 +22,11 @@ function Calendar({
         <DayPicker
             showOutsideDays={showOutsideDays}
             className={cn(
-                'group/calendar bg-background p-2 [--cell-radius:var(--radius-md)] [--cell-size:--spacing(7)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent',
+                // --cell-size is 11 (44px), not the 7 (28px) the shadcn registry ships with. Under
+                // Tailwind v3 this declaration never resolved, so cells fell back to
+                // react-day-picker's own 44px — that is what the app has always rendered. v4 makes
+                // it resolve, and 7 would silently shrink every calendar below the touch minimum.
+                'group/calendar bg-background p-2 [--cell-radius:var(--radius-md)] [--cell-size:--spacing(11)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent',
                 String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
                 String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
                 className
