@@ -9,11 +9,16 @@ import { useSubteams } from '@/hooks/useSubteams'
 import { buildRota } from '@/lib/rota'
 
 // The exported image is shared outside the app, so it is painted in fixed colours rather than
-// theme tokens — it must look the same whoever produced it, in light mode or dark.
-const INK = '#111827'
-const BORDER = '#d1d5db'
+// theme tokens — it must look the same whoever produced it, in light mode or dark. The values
+// are the church's own (newcovenantassembly.ca), so a rota forwarded to a WhatsApp group still
+// reads as NCA. BORDER is the site's #C5C5C5 rather than the app's lighter rule: a printed or
+// screenshotted grid needs the extra weight to hold its columns apart.
+const INK = '#0F0F0F'
+const BORDER = '#C5C5C5'
 const PAPER = '#ffffff'
-const HIGHLIGHT = '#fef08a'
+const HEADER_BG = '#662E91'
+const HEADER_INK = '#ffffff'
+const HIGHLIGHT = '#F8EDCB'
 
 const cell = {
     border: `1px solid ${BORDER}`,
@@ -109,7 +114,7 @@ export default function RotaExportDialog({
                                 borderCollapse: 'collapse',
                                 color: INK,
                                 fontSize: 12,
-                                fontFamily: 'Geist Variable, system-ui, sans-serif',
+                                fontFamily: 'Epilogue Variable, system-ui, sans-serif',
                             }}
                         >
                             <thead>
@@ -120,7 +125,12 @@ export default function RotaExportDialog({
                                             ...cell,
                                             textAlign: 'center',
                                             fontWeight: 700,
-                                            padding: '6px 8px',
+                                            padding: '8px',
+                                            background: HEADER_BG,
+                                            color: HEADER_INK,
+                                            borderColor: HEADER_BG,
+                                            letterSpacing: '0.04em',
+                                            textTransform: 'uppercase',
                                         }}
                                     >
                                         {title}
