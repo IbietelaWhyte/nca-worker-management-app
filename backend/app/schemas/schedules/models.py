@@ -26,7 +26,11 @@ class Schedule(BaseModel):
     end_time: time
     reminder_days_before: int
     notes: str | None = None
-    created_by: UUID
+    # Nullable because schedules_created_by_fkey is ON DELETE SET NULL: removing the worker who
+    # created a schedule leaves the schedule standing without a creator. Typed non-optional, this
+    # raised a ValidationError on every read of such a row — including inside the round-robin
+    # sort, which took down schedule generation entirely.
+    created_by: UUID | None = None
     created_at: datetime
 
 
