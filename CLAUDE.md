@@ -39,6 +39,8 @@ cd backend && uv run pytest tests/unit/services/test_schedule_service.py::test_n
 
 Backend config comes from env vars (`Settings` in `core/config.py`, `env_file=".env"`). There is no committed `backend/.env`; the repo uses **direnv** — `.envrc` (gitignored) exports everything. If the backend fails at import with a pydantic validation error, the environment isn't loaded.
 
+`FRONTEND_URL` is the one setting a deployment must not forget: it is the base of every link sent by SMS, and its default is `http://localhost:5173`, so leaving it unset ships dead links to real phones with no error anywhere. `Settings._check_frontend_url` refuses to start on a localhost URL when `APP_ENV=production` — which only helps if the deployment sets `APP_ENV` too.
+
 `just install-hooks` installs a pre-commit hook that runs ruff check/format + mypy (backend) and prettier (frontend) (`scripts/install-hooks.sh`, copied from `.git-hooks/`). CI (`.github/workflows/ci.yml`) additionally enforces `ruff format --check` and runs the frontend build — formatting must be committed. Backend style: ruff `line-length = 120`, lint rules `E, F, I`; mypy `strict = true`.
 
 `CLAUDE.md` is committed — keep it in step with the code when a change makes it stale.

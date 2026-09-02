@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     secret_key: str
     allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # Base URL for the links embedded in SMS. The default suits local development only —
+    # a worker receiving a localhost link cannot open it, so _check_frontend_url below
+    # refuses to start in production with this left unset.
     frontend_url: str = "http://localhost:5173"
     log_level: str = "INFO"  # Defaults to INFO; can be DEBUG, INFO, WARNING, ERROR
 
@@ -64,6 +67,27 @@ class Settings(BaseSettings):
             raise ValueError(
                 "request_thread_pool_size must be <= db_max_connections "
                 f"(got {self.request_thread_pool_size} > {self.db_max_connections})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _check_frontend_url(self) -> "Settings":
+        """Fail fast if production would send SMS links nobody outside the server can open.
+
+        This is the one setting whose misconfiguration is invisible from inside the app: the
+        request succeeds, Twilio accepts the message, and the failure surfaces only when a worker
+        taps a dead link. Note it can only fire when APP_ENV is actually set to "production".
+
+        Raises:
+            ValueError: If frontend_url is missing a scheme, or still points at localhost in
+                production.
+        """
+        if not self.frontend_url.startswith(("http://", "https://")):
+            raise ValueError(f"frontend_url must include a scheme, e.g. https://... (got {self.frontend_url!r})")
+        if self.is_production and ("localhost" in self.frontend_url or "127.0.0.1" in self.frontend_url):
+            raise ValueError(
+                "frontend_url still points at localhost in production — set FRONTEND_URL to the "
+                "public address of the app, or every SMS link will be unopenable"
             )
         return self
 
