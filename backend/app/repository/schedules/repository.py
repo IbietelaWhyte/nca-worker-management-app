@@ -398,12 +398,13 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             assignment_id (UUID): The unique identifier of the assignment.
 
         Returns:
-            AssignmentResponse | None: The assignment if found, None otherwise.
+            AssignmentResponse | None: The assignment if found, None otherwise, with the worker,
+                                       subteam and role embedded.
         """
         log = self.logger.bind(method="get_assignment_by_id", assignment_id=str(assignment_id))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
-            .select("*")
+            .select(q.SELECT_ASSIGNMENT_WITH_RELATIONS)
             .eq(q.AssignmentColumns.ID, str(assignment_id))
             .maybe_single()
             .execute()
@@ -436,11 +437,13 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             .eq(q.AssignmentColumns.ID, str(assignment_id))
             .execute()
         )
-        assignment = AssignmentResponse.model_validate(response.data[0]) if response.data else None
-        if assignment:
-            log.info("assignment_status_updated")
-        else:
+        if not response.data:
             log.warning("assignment_not_found")
+            return None
+        # Re-read rather than using the update's own response: PostgREST returns base-table
+        # columns only, and .select() is not chainable onto .update() in this client.
+        assignment = self.get_assignment_by_id(assignment_id)
+        log.info("assignment_status_updated")
         return assignment
 
     def update_assignment_role(self, assignment_id: UUID, department_role_id: UUID | None) -> AssignmentResponse | None:
@@ -466,11 +469,12 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             .eq(q.AssignmentColumns.ID, str(assignment_id))
             .execute()
         )
-        assignment = AssignmentResponse.model_validate(response.data[0]) if response.data else None
-        if assignment:
-            log.info("assignment_role_updated")
-        else:
+        if not response.data:
             log.warning("assignment_not_found")
+            return None
+        # Same re-read as update_assignment_status, for the same reason.
+        assignment = self.get_assignment_by_id(assignment_id)
+        log.info("assignment_role_updated")
         return assignment
 
     def delete_assignments_for_schedule(self, schedule_id: UUID) -> bool:

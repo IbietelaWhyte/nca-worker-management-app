@@ -864,11 +864,39 @@ class WorkerService:
         if worker_id != actor.id:
             raise PermissionDeniedError("You can only view your own worker record")
 
+    def authorize_act_for_worker(self, token: TokenPayload, worker_id: UUID, subject: str) -> None:
+        """Ensure the requesting user may act on the given worker's behalf.
+
+        Anyone may act on themselves; admins may act on anyone; HODs and assistant HODs may act on
+        workers in the departments they manage. Used for the things a worker owns about themselves —
+        their availability, and confirming or declining their own assignments.
+
+        The self-check comes first on purpose. Routed through the department branch, an HOD failed
+        ``can_manage_worker(actor.id, actor.id)`` unless they happened to also be a member of a
+        department they lead, so they were refused on their own record.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            worker_id: The worker being acted on.
+            subject: What is being acted on, for the error message, e.g. "availability".
+
+        Raises:
+            PermissionDeniedError: If the user is not allowed to act on this worker.
+            BadRequestError/NotFoundError: If the actor's worker profile cannot be resolved.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if worker_id == actor.id:
+            return
+        if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
+            if self.can_manage_worker(actor.id, worker_id):
+                return
+            raise PermissionDeniedError(f"You can only manage {subject} for workers in departments you manage")
+        raise PermissionDeniedError(f"You can only manage your own {subject}")
+
     def authorize_manage_availability(self, token: TokenPayload, worker_id: UUID) -> None:
         """Ensure the requesting user may read or change the given worker's availability.
-
-        Admins may act on anyone. HODs and assistant HODs may act on workers in departments they
-        manage. A regular worker may act only on their own availability.
 
         Args:
             token: The verified token payload of the requesting user.
@@ -878,15 +906,7 @@ class WorkerService:
             PermissionDeniedError: If the user is not allowed to act on this worker.
             BadRequestError/NotFoundError: If the actor's worker profile cannot be resolved.
         """
-        if token.role == UserRole.ADMIN:
-            return
-        actor = self.get_worker_for_token(token)
-        if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
-            if self.can_manage_worker(actor.id, worker_id):
-                return
-            raise PermissionDeniedError("You can only manage availability for workers in departments you manage")
-        if worker_id != actor.id:
-            raise PermissionDeniedError("You can only manage your own availability")
+        self.authorize_act_for_worker(token, worker_id, subject="availability")
 
     def authorize_create_assignment(self, token: TokenPayload, department_id: UUID) -> None:
         """Ensure the requesting user may assign a worker to the given department.

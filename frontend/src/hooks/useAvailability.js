@@ -37,40 +37,57 @@ export function useAvailability(workerId) {
         .filter(a => a.availability_type === 'specific_date')
         .sort((a, b) => a.specific_date?.localeCompare(b.specific_date))
 
+    // Both writers report failures through `error`. Without this the page was silent when a save
+    // failed — the day picked up its own selection ring and nothing else happened, which read as
+    // "the click did nothing" rather than "the save was rejected".
     const toggleSpecificDate = async (dateStr, existingRecord) => {
-        if (existingRecord) {
-            // Cycle through: available → unavailable → removed
-            if (existingRecord.is_available) {
-                // Flip to unavailable
+        setError(null)
+        try {
+            if (existingRecord) {
+                // Cycle through: available → unavailable → removed
+                if (existingRecord.is_available) {
+                    // Flip to unavailable
+                    const response = await setAvailability({
+                        worker_id: workerId,
+                        availability_type: 'specific_date',
+                        specific_date: dateStr,
+                        is_available: false,
+                    })
+                    setAvailabilityState(prev =>
+                        prev.map(a => (a.id === existingRecord.id ? response.data : a))
+                    )
+                } else {
+                    // Remove the override entirely
+                    await deleteAvailability(existingRecord.id)
+                    setAvailabilityState(prev => prev.filter(a => a.id !== existingRecord.id))
+                }
+            } else {
+                // No record — create as available override
                 const response = await setAvailability({
                     worker_id: workerId,
                     availability_type: 'specific_date',
                     specific_date: dateStr,
-                    is_available: false,
+                    is_available: true,
                 })
-                setAvailabilityState(prev =>
-                    prev.map(a => (a.id === existingRecord.id ? response.data : a))
-                )
-            } else {
-                // Remove the override entirely
-                await deleteAvailability(existingRecord.id)
-                setAvailabilityState(prev => prev.filter(a => a.id !== existingRecord.id))
+                setAvailabilityState(prev => [...prev, response.data])
             }
-        } else {
-            // No record — create as available override
-            const response = await setAvailability({
-                worker_id: workerId,
-                availability_type: 'specific_date',
-                specific_date: dateStr,
-                is_available: true,
-            })
-            setAvailabilityState(prev => [...prev, response.data])
+        } catch (err) {
+            // An unhandled backend error reaches the browser without CORS headers, so axios
+            // reports a bare network error with no response body — hence the fallback text.
+            setError(err.response?.data?.detail ?? 'Could not save that date. Please try again.')
         }
     }
 
     const clearAll = async () => {
-        await clearWorkerAvailability(workerId)
-        setAvailabilityState([])
+        setError(null)
+        try {
+            await clearWorkerAvailability(workerId)
+            setAvailabilityState([])
+        } catch (err) {
+            setError(
+                err.response?.data?.detail ?? 'Could not clear availability. Please try again.'
+            )
+        }
     }
 
     return {

@@ -42,10 +42,14 @@ export function useScheduleDetail(scheduleId) {
     }
 
     const changeAssignmentRole = async (assignmentId, departmentRoleId) => {
-        // The role endpoint returns a bare row (no nested worker/subteam), so refetch
-        // the full schedule to keep grouping and worker details intact.
-        await setAssignmentRole(assignmentId, departmentRoleId)
-        await fetchSchedule()
+        const response = await setAssignmentRole(assignmentId, departmentRoleId)
+        setSchedule(prev => ({
+            ...prev,
+            schedule_assignments: prev.schedule_assignments.map(a =>
+                a.id === assignmentId ? response.data : a
+            ),
+        }))
+        return response.data
     }
 
     const sendReminders = async () => {
