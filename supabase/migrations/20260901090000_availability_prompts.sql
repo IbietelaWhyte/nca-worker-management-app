@@ -33,9 +33,11 @@ where a.availability_type = 'specific_date'
   and a.specific_date = b.specific_date
   and (a.created_at, a.id) < (b.created_at, b.id);
 
--- Partial, because unique (worker_id, specific_date) would not constrain recurring
--- rows (specific_date IS NULL) and NULLs compare as distinct anyway. Same technique
--- as uq_schedules_dept_date_no_subteam.
+-- WRONG, and superseded by 20260902120000_availability_specific_date_index.sql: this
+-- predicate made the index unusable as an ON CONFLICT arbiter (PostgREST cannot send
+-- one), so the upsert failed with 42P10 on every call instead of duplicating. It was
+-- also unnecessary — recurring rows leave specific_date NULL, so a plain unique index
+-- already leaves them unconstrained. Left as-is because this migration has run.
 create unique index if not exists uq_availability_worker_specific_date
     on public.availability (worker_id, specific_date)
     where availability_type = 'specific_date';

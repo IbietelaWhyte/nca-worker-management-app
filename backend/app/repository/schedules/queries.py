@@ -3,6 +3,11 @@ ASSIGNMENTS_TABLE = "schedule_assignments"
 
 SELECT_ALL = "*"
 SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*), subteams(*), department_roles(*))"
+# Rooted at schedule_assignments, where SELECT_WITH_ASSIGNMENTS above is rooted at schedules.
+# Write paths must re-read through this: PostgREST returns base-table columns only from an UPDATE,
+# and the schedule detail page renders a row entirely from these embeds — without them a confirmed
+# worker turns into "Unknown worker" with no role, in an "Unassigned" group.
+SELECT_ASSIGNMENT_WITH_RELATIONS = "*, workers(*), subteams(*), department_roles(*)"
 SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 # Inner join variant: required when filtering on a schedules column, otherwise PostgREST
 # nulls the embedded object instead of dropping the assignment row.

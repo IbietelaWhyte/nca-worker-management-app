@@ -298,6 +298,27 @@ class ScheduleService:
 
         return self.schedule_repo.get_with_assignments(schedule.id)
 
+    def get_assignment(self, assignment_id: UUID) -> AssignmentResponse:
+        """Fetch one assignment, with its worker, subteam and role embedded.
+
+        Exists so the router can authorize against the assignment's owner without reaching past
+        the service for it.
+
+        Args:
+            assignment_id: The assignment to fetch.
+
+        Returns:
+            AssignmentResponse: The assignment.
+
+        Raises:
+            NotFoundError: If no assignment has that id.
+        """
+        assignment = self.schedule_repo.get_assignment_by_id(assignment_id)
+        if not assignment:
+            self.logger.bind(method="get_assignment", assignment_id=str(assignment_id)).warning("assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+        return assignment
+
     def update_assignment_status(self, assignment_id: UUID, status: AssignmentStatus) -> AssignmentResponse:
         log = self.logger.bind(method="update_assignment_status", assignment_id=str(assignment_id), status=status.value)
         updated = self.schedule_repo.update_assignment_status(assignment_id, status)

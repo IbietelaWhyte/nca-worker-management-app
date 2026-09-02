@@ -9,14 +9,30 @@ import { Badge } from '@/components/ui/badge'
 import { Trash2 } from 'lucide-react'
 
 export default function AvailabilityPage() {
-    const { user, isAdmin } = useAuth()
+    const { user, isAdmin, isDepartmentHead } = useAuth()
     const { workers, loading: workersLoading } = useWorkers()
     const [selectedWorkerId, setSelectedWorkerId] = useState('')
 
     // Workers are linked to auth users by email (auth_user_id is not serialized
     // to the client). Compare case-insensitively to avoid spurious mismatches.
     const currentWorker = workers.find(w => w.email?.toLowerCase() === user?.email?.toLowerCase())
-    const resolvedWorkerId = isAdmin ? selectedWorkerId : (currentWorker?.id ?? '')
+
+    // HODs and assistant HODs get the picker too — the backend already permits them to manage
+    // workers in departments they lead, and GET /workers is scoped to exactly those workers, so
+    // the list needs no filtering here. isDepartmentHead is true for admins as well.
+    const canPickWorker = isDepartmentHead
+
+    // An HOD who is not themselves a member of a department they lead will not appear in that
+    // scoped list, so union them in and start the picker on their own record.
+    const pickableWorkers = [
+        ...(currentWorker && !workers.some(w => w.id === currentWorker.id) ? [currentWorker] : []),
+        ...workers,
+    ].filter(w => w.is_active)
+
+    const defaultWorkerId = isAdmin ? '' : (currentWorker?.id ?? '')
+    const resolvedWorkerId = canPickWorker
+        ? selectedWorkerId || defaultWorkerId
+        : (currentWorker?.id ?? '')
     const noProfileLinked = !isAdmin && !workersLoading && !currentWorker
 
     const {
@@ -39,14 +55,14 @@ export default function AvailabilityPage() {
             <div>
                 <h2 className="text-2xl font-bold">Availability</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                    {isAdmin
-                        ? 'Manage specific date availability for any worker'
+                    {canPickWorker
+                        ? 'Manage specific date availability for the workers you oversee'
                         : 'Manage your specific date availability'}
                 </p>
             </div>
 
-            {/* Worker selector — admins only */}
-            {isAdmin && (
+            {/* Worker selector — admins, HODs and assistant HODs */}
+            {canPickWorker && (
                 <div className="flex items-center gap-3">
                     <label className="text-sm font-medium whitespace-nowrap">Select worker</label>
                     <select
@@ -56,13 +72,12 @@ export default function AvailabilityPage() {
                         className="w-full max-w-sm px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                         <option value="">— Choose a worker —</option>
-                        {workers
-                            .filter(w => w.is_active)
-                            .map(w => (
-                                <option key={w.id} value={w.id}>
-                                    {w.first_name} {w.last_name}
-                                </option>
-                            ))}
+                        {pickableWorkers.map(w => (
+                            <option key={w.id} value={w.id}>
+                                {w.first_name} {w.last_name}
+                                {w.id === currentWorker?.id ? ' (you)' : ''}
+                            </option>
+                        ))}
                     </select>
                 </div>
             )}
@@ -71,7 +86,7 @@ export default function AvailabilityPage() {
             {!resolvedWorkerId && (
                 <div className="flex items-center justify-center h-48 border rounded-lg border-dashed">
                     <p className="text-muted-foreground text-sm">
-                        {isAdmin
+                        {canPickWorker
                             ? 'Select a worker above to manage their availability'
                             : noProfileLinked
                               ? 'No worker profile is linked to your account. Please contact an administrator.'

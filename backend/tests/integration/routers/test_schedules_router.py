@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import uuid4
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import AssignmentStatus, UserRole
 from app.schemas.schedules.models import (
     DatePlan,
@@ -133,20 +133,36 @@ class TestGenerateSchedule:
 
 
 class TestUpdateAssignmentStatus:
-    def test_returns_200_on_confirm(self, mock_schedule_service):
+    # The endpoint now resolves the assignment first so it can authorize against its owner,
+    # so get_assignment has to be stubbed alongside update_assignment_status.
+    def test_returns_200_on_confirm(self, mock_schedule_service, mock_worker_service):
         assignment = make_assignment(status=AssignmentStatus.CONFIRMED)
+        mock_schedule_service.get_assignment.return_value = assignment
         mock_schedule_service.update_assignment_status.return_value = assignment
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(schedule_service=mock_schedule_service, worker_service=mock_worker_service)
 
         response = client.patch(
             f"/api/v1/schedules/assignments/{assignment.id}/status?status_update={AssignmentStatus.CONFIRMED.value}",
         )
         assert response.status_code == 200
         assert response.json()["status"] == "confirmed"
+        mock_worker_service.authorize_act_for_worker.assert_called_once()
 
-    def test_returns_404_when_assignment_not_found(self, mock_schedule_service):
-        mock_schedule_service.update_assignment_status.side_effect = NotFoundError("not found")
-        client = make_client(schedule_service=mock_schedule_service)
+    def test_returns_403_for_another_workers_assignment(self, mock_schedule_service, mock_worker_service):
+        assignment = make_assignment()
+        mock_schedule_service.get_assignment.return_value = assignment
+        mock_worker_service.authorize_act_for_worker.side_effect = PermissionDeniedError("not yours")
+        client = make_client(schedule_service=mock_schedule_service, worker_service=mock_worker_service)
+
+        response = client.patch(
+            f"/api/v1/schedules/assignments/{assignment.id}/status?status_update={AssignmentStatus.CONFIRMED.value}",
+        )
+        assert response.status_code == 403
+        mock_schedule_service.update_assignment_status.assert_not_called()
+
+    def test_returns_404_when_assignment_not_found(self, mock_schedule_service, mock_worker_service):
+        mock_schedule_service.get_assignment.side_effect = NotFoundError("not found")
+        client = make_client(schedule_service=mock_schedule_service, worker_service=mock_worker_service)
 
         response = client.patch(
             f"/api/v1/schedules/assignments/{uuid4()}/status?status_update={AssignmentStatus.CONFIRMED.value}",

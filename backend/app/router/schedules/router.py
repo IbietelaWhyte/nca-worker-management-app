@@ -8,6 +8,7 @@ from app.core.dependencies import (
     HODUser,
     get_reminder_service,
     get_schedule_service,
+    get_worker_service,
 )
 from app.core.exceptions import AppError, BadRequestError
 from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
@@ -22,6 +23,7 @@ from app.schemas.schedules.models import (
 )
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
+from app.service.workers.service import WorkerService
 
 router = APIRouter(prefix="/schedules", tags=["schedules"])
 
@@ -133,8 +135,15 @@ def update_assignment_status(
     status_update: AssignmentStatus,
     token: TokenPayload = CurrentUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> AssignmentResponse:
-    """Workers can confirm or decline their own assignments."""
+    """Workers can confirm or decline their own assignments.
+
+    Scoped to the assignment's own worker: this used to accept any logged-in user, so anybody
+    could answer on anybody's behalf.
+    """
+    assignment = service.get_assignment(assignment_id)
+    worker_service.authorize_act_for_worker(token, assignment.worker_id, subject="assignments")
     return service.update_assignment_status(assignment_id, status_update)
 
 
