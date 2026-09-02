@@ -1,54 +1,113 @@
 @import 'tw-animate-css';
-@import '@fontsource-variable/geist';
+@import '@fontsource-variable/epilogue';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Palette and typeface follow newcovenantassembly.ca, so the app reads as the same
+ * organisation as the church website. The source values are the Elementor global kit's
+ * --e-global-color-* / --e-global-typography-*: purple #662E91, red #C1272D, gold #ECCE68,
+ * body grey #666B68, heading ink #0F0F0F, all set in Epilogue.
+ *
+ * Purple is --primary and red is --destructive, deliberately: red is the colour of the
+ * delete/decline path throughout, and a purple "Save" next to a red "Delete" stays readable
+ * at a glance in a way two reds would not.
+ */
 @layer base {
     :root {
         --background: 0 0% 100%;
-        --foreground: 240 10% 3.9%;
+        --foreground: 0 0% 6%; /* #0F0F0F — the site's heading ink */
         --card: 0 0% 100%;
-        --card-foreground: 240 10% 3.9%;
+        --card-foreground: 0 0% 6%;
         --popover: 0 0% 100%;
-        --popover-foreground: 240 10% 3.9%;
-        --primary: 240 5.9% 10%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 240 4.8% 95.9%;
-        --secondary-foreground: 240 5.9% 10%;
-        --muted: 240 4.8% 95.9%;
-        --muted-foreground: 240 3.8% 46.1%;
-        --accent: 240 4.8% 95.9%;
-        --accent-foreground: 240 5.9% 10%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 240 5.9% 90%;
-        --input: 240 5.9% 90%;
-        --ring: 240 5.9% 10%;
+        --popover-foreground: 0 0% 6%;
+        --primary: 274 52% 37%; /* #662E91 — the logo wordmark */
+        --primary-foreground: 0 0% 100%;
+        --secondary: 274 33% 96%; /* #F5F1F8 */
+        --secondary-foreground: 274 53% 29%; /* #4E2270 */
+        --muted: 0 0% 96%;
+        --muted-foreground: 144 2% 41%; /* #666B68 — the site's body grey */
+        /*
+         * --accent is shadcn's *hover surface* (ghost buttons, dropdown rows, nav hover), not a
+         * brand accent. The brand gold lives in --highlight below; putting it here would turn
+         * every hover in the app yellow.
+         */
+        --accent: 274 33% 96%;
+        --accent-foreground: 274 53% 29%;
+        --destructive: 358 66% 46%; /* #C1272D — the logo's cross */
+        --destructive-foreground: 0 0% 100%;
+
+        /*
+         * Semantic colours the app previously faked with raw palette classes on the public
+         * pages. Gold carries dark ink only — white on #ECCE68 is 1.54:1.
+         */
+        --success: 145 46% 34%; /* #2E7D4F */
+        --success-foreground: 0 0% 100%;
+        --warning: 46 78% 67%; /* #ECCE68 */
+        --warning-foreground: 0 0% 6%;
+        --highlight: 46 78% 67%;
+
+        /*
+         * The site's border is #C5C5C5, but `* { @apply border-border }` below paints every
+         * table rule and card edge with this, and at that weight a roster table becomes a grid
+         * of grey lines. The heavier value is kept for the exported rota, which needs it.
+         */
+        --border: 0 0% 89%;
+        --input: 0 0% 84%;
+        --ring: 274 52% 37%;
+
+        /* The nav rail mirrors the site's header and footer: a solid purple band. */
+        --sidebar: 274 53% 29%; /* #4E2270 */
+        --sidebar-foreground: 0 0% 100%;
+        --sidebar-muted: 274 25% 80%;
+        --sidebar-active: 274 45% 38%;
+        --sidebar-border: 274 40% 36%;
+
         --radius: 0.625rem;
+        /* Referenced by calendar.jsx and select.jsx, which shipped without it defined. */
+        --radius-md: calc(var(--radius) - 2px);
     }
 
+    /*
+     * Nothing sets this class today — the app has no dark mode toggle. It is kept in the brand
+     * hue family rather than left on the old zinc values so that wiring a toggle up later is a
+     * one-file change instead of a re-theme.
+     */
     .dark {
-        --background: 240 10% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 240 10% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 240 10% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 240 5.9% 10%;
-        --secondary: 240 3.7% 15.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 240 3.7% 15.9%;
-        --muted-foreground: 240 5% 64.9%;
-        --accent: 240 3.7% 15.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 240 3.7% 15.9%;
-        --input: 240 3.7% 15.9%;
-        --ring: 240 4.9% 83.9%;
+        --background: 274 18% 8%;
+        --foreground: 0 0% 96%;
+        --card: 274 16% 11%;
+        --card-foreground: 0 0% 96%;
+        --popover: 274 16% 11%;
+        --popover-foreground: 0 0% 96%;
+        --primary: 274 45% 68%;
+        --primary-foreground: 274 40% 12%;
+        --secondary: 274 16% 18%;
+        --secondary-foreground: 0 0% 96%;
+        --muted: 274 12% 17%;
+        --muted-foreground: 274 8% 65%;
+        --accent: 274 16% 20%;
+        --accent-foreground: 0 0% 96%;
+        --destructive: 358 62% 58%;
+        --destructive-foreground: 0 0% 100%;
+
+        --success: 145 40% 52%;
+        --success-foreground: 274 40% 12%;
+        --warning: 46 70% 62%;
+        --warning-foreground: 0 0% 6%;
+        --highlight: 46 70% 62%;
+
+        --border: 274 14% 22%;
+        --input: 274 14% 26%;
+        --ring: 274 45% 68%;
+
+        --sidebar: 274 24% 14%;
+        --sidebar-foreground: 0 0% 96%;
+        --sidebar-muted: 274 12% 62%;
+        --sidebar-active: 274 22% 22%;
+        --sidebar-border: 274 16% 24%;
     }
 
     * {
@@ -57,13 +116,29 @@
 
     body {
         @apply bg-background text-foreground;
-        font-family: 'Geist Variable', sans-serif;
+        font-family: 'Epilogue Variable', sans-serif;
+    }
+
+    /*
+     * The site sets headings in Epilogue 700 with negative tracking (-2px at h1/h2, -1px at
+     * h3/h4). Expressed in em so it holds at the smaller sizes this app uses.
+     */
+    h1,
+    h2,
+    h3 {
+        font-weight: 700;
+        letter-spacing: -0.02em;
+    }
+
+    h4,
+    h5 {
+        letter-spacing: -0.01em;
     }
 
     /* react-day-picker specific date modifiers */
     .rdp-day-available {
-        background-color: hsl(var(--primary)) !important;
-        color: hsl(var(--primary-foreground)) !important;
+        background-color: hsl(var(--success)) !important;
+        color: hsl(var(--success-foreground)) !important;
         border-radius: 4px;
     }
 

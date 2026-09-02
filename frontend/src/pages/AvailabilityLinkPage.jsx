@@ -7,6 +7,7 @@ import {
     getAvailabilityByLink,
     setAvailabilityByLink,
 } from '@/api/availabilityLink'
+import BrandMark from '@/components/layout/BrandMark'
 
 // The public twin of AvailabilityPage. Same calendar, but the worker is identified by the token
 // in the URL instead of a session — most workers have no login account, so a prompt pointing at
@@ -81,15 +82,18 @@ export default function AvailabilityLinkPage() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-white rounded-2xl shadow-md p-8">
-                <p className="text-center text-sm font-semibold text-gray-400 uppercase tracking-widest mb-8">
-                    Worker Schedule
-                </p>
+        <div className="min-h-screen bg-muted flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-card rounded-2xl shadow-md p-8">
+                <div className="flex flex-col items-center gap-3 mb-8">
+                    <BrandMark className="w-36" />
+                    <p className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-[0.18em]">
+                        Your Availability
+                    </p>
+                </div>
 
                 {pageState === 'loading' && (
-                    <div className="flex flex-col items-center gap-4 py-8 text-gray-500">
-                        <div className="h-8 w-8 rounded-full border-4 border-gray-200 border-t-primary animate-spin" />
+                    <div className="flex flex-col items-center gap-4 py-8 text-muted-foreground">
+                        <div className="h-8 w-8 rounded-full border-4 border-border border-t-primary animate-spin" />
                         <p className="text-sm">Loading your availability…</p>
                     </div>
                 )}
@@ -97,15 +101,17 @@ export default function AvailabilityLinkPage() {
                 {pageState === 'ready' && (
                     <div className="space-y-6">
                         <div className="text-center">
-                            <h1 className="text-xl font-semibold text-gray-900">Hi {workerName}</h1>
-                            <p className="text-sm text-gray-500 mt-1">
+                            <h1 className="text-xl font-semibold text-foreground">
+                                Hi {workerName}
+                            </h1>
+                            <p className="text-sm text-muted-foreground mt-1">
                                 Tap the dates you can serve. Tap again to mark yourself unavailable,
                                 and once more to clear it.
                             </p>
                         </div>
 
                         {errorMessage && (
-                            <p className="text-sm text-red-600 text-center">{errorMessage}</p>
+                            <p className="text-sm text-destructive text-center">{errorMessage}</p>
                         )}
 
                         <SpecificDatesCalendar
@@ -114,7 +120,7 @@ export default function AvailabilityLinkPage() {
                             loading={saving}
                         />
 
-                        <p className="text-xs text-center text-gray-400">
+                        <p className="text-xs text-center text-muted-foreground">
                             Your answers save as you tap. You can return to this link any time.
                         </p>
                     </div>
@@ -122,14 +128,14 @@ export default function AvailabilityLinkPage() {
 
                 {(pageState === 'invalid' || pageState === 'error') && (
                     <div className="flex flex-col items-center gap-4 py-6 text-center">
-                        <AlertCircle className="h-14 w-14 text-amber-400" />
+                        <AlertCircle className="h-14 w-14 text-warning" />
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-900">
+                            <h2 className="text-lg font-semibold text-foreground">
                                 Link unavailable
                             </h2>
-                            <p className="text-sm text-gray-500 mt-1">{errorMessage}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{errorMessage}</p>
                         </div>
-                        <p className="text-xs text-gray-400 mt-2">
+                        <p className="text-xs text-muted-foreground mt-2">
                             Contact your supervisor if you need assistance.
                         </p>
                     </div>

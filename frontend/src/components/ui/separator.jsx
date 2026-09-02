@@ -10,7 +10,10 @@ function Separator({ className, orientation = 'horizontal', decorative = true, .
             decorative={decorative}
             orientation={orientation}
             className={cn(
-                'shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch',
+                // v3 variant syntax on purpose: Tailwind is pinned at 3.4.19, and the v4 form
+                // (data-horizontal:) this component shipped with compiles to nothing, leaving
+                // every separator in the app at zero height.
+                'shrink-0 bg-border data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:w-px data-[orientation=vertical]:self-stretch',
                 className
             )}
             {...props}

@@ -99,8 +99,8 @@ export default function RegisterUser() {
 
             {/* Success message */}
             {success && (
-                <Alert className="bg-green-50 border-green-200">
-                    <p className="text-sm text-green-800">
+                <Alert className="bg-success/10 border-success/30">
+                    <p className="text-sm text-success">
                         User registered successfully! Redirecting...
                     </p>
                 </Alert>

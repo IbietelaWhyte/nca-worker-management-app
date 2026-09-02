@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { CheckCircle, XCircle, AlertCircle, CalendarDays } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { getConfirmationDetails, submitConfirmation } from '@/api/confirmation'
+import BrandMark from '@/components/layout/BrandMark'
 
 // Page states:
 // loading  -> fetching the worker's duties on mount
@@ -73,19 +74,24 @@ export default function ConfirmPage() {
     const answered = assignments.filter(a => a.status !== 'pending').length
 
     return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-            <div className="w-full max-w-lg bg-white rounded-2xl shadow-md p-8">
-                <p className="text-center text-sm font-semibold text-gray-400 uppercase tracking-widest mb-8">
-                    Worker Schedule
-                </p>
+        <div className="min-h-screen bg-muted flex items-center justify-center p-4">
+            <div className="w-full max-w-lg bg-card rounded-2xl shadow-md p-8">
+                <div className="flex flex-col items-center gap-3 mb-8">
+                    <BrandMark className="w-36" />
+                    <p className="text-center text-xs font-semibold text-muted-foreground uppercase tracking-[0.18em]">
+                        Worker Schedule
+                    </p>
+                </div>
 
                 {pageState === 'loading' && <LoadingState />}
 
                 {pageState === 'ready' && (
                     <div className="space-y-6">
                         <div className="text-center">
-                            <h1 className="text-xl font-semibold text-gray-900">Hi {workerName}</h1>
-                            <p className="text-sm text-gray-500 mt-1">
+                            <h1 className="text-xl font-semibold text-foreground">
+                                Hi {workerName}
+                            </h1>
+                            <p className="text-sm text-muted-foreground mt-1">
                                 {assignments.length === 0
                                     ? 'You have no upcoming duties right now.'
                                     : 'Please confirm or decline each date below.'}
@@ -93,7 +99,7 @@ export default function ConfirmPage() {
                         </div>
 
                         {errorMessage && (
-                            <p className="text-sm text-red-600 text-center">{errorMessage}</p>
+                            <p className="text-sm text-destructive text-center">{errorMessage}</p>
                         )}
 
                         <div className="space-y-3">
@@ -109,7 +115,7 @@ export default function ConfirmPage() {
                         </div>
 
                         {assignments.length > 0 && (
-                            <p className="text-xs text-center text-gray-400">
+                            <p className="text-xs text-center text-muted-foreground">
                                 {answered} of {assignments.length} answered. You can come back to
                                 this link any time to change your response.
                             </p>
@@ -129,8 +135,8 @@ export default function ConfirmPage() {
 
 function LoadingState() {
     return (
-        <div className="flex flex-col items-center gap-4 py-8 text-gray-500">
-            <div className="h-8 w-8 rounded-full border-4 border-gray-200 border-t-primary animate-spin" />
+        <div className="flex flex-col items-center gap-4 py-8 text-muted-foreground">
+            <div className="h-8 w-8 rounded-full border-4 border-border border-t-primary animate-spin" />
             <p className="text-sm">Loading your schedule…</p>
         </div>
     )
@@ -141,12 +147,14 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
     const declined = assignment.status === 'declined'
 
     return (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 space-y-3">
+        <div className="rounded-xl border bg-muted p-4 space-y-3">
             <div className="flex items-start gap-3">
-                <CalendarDays className="h-4 w-4 text-gray-400 mt-0.5 shrink-0" />
+                <CalendarDays className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
                 <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{assignment.schedule_title}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-sm font-medium text-foreground">
+                        {assignment.schedule_title}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
                         {assignment.scheduled_date} · {assignment.start_time} –{' '}
                         {assignment.end_time}
                     </p>
@@ -156,7 +164,7 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
             {confirmed || declined ? (
                 <div
                     className={`flex items-center gap-2 text-sm font-medium ${
-                        confirmed ? 'text-green-700' : 'text-red-600'
+                        confirmed ? 'text-success' : 'text-destructive'
                     }`}
                 >
                     {confirmed ? (
@@ -171,7 +179,7 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
                             onAction(assignment.assignment_id, confirmed ? 'declined' : 'confirmed')
                         }
                         disabled={disabled}
-                        className="ml-auto text-xs font-normal text-gray-500 underline hover:text-gray-700 disabled:opacity-50"
+                        className="ml-auto text-xs font-normal text-muted-foreground underline hover:text-foreground disabled:opacity-50"
                     >
                         Change
                     </button>
@@ -181,10 +189,10 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
                     <Button
                         onClick={() => onAction(assignment.assignment_id, 'confirmed')}
                         disabled={disabled}
-                        className="gap-2 bg-green-600 hover:bg-green-700 text-white"
+                        className="gap-2 bg-success text-success-foreground hover:bg-success/90"
                     >
                         {submitting ? (
-                            <span className="h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                            <span className="h-4 w-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
                         ) : (
                             <CheckCircle className="h-4 w-4" />
                         )}
@@ -194,7 +202,7 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
                         variant="outline"
                         onClick={() => onAction(assignment.assignment_id, 'declined')}
                         disabled={disabled}
-                        className="gap-2 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        className="gap-2 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
                     >
                         <XCircle className="h-4 w-4" />
                         Decline
@@ -208,12 +216,12 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
 function InvalidState({ message }) {
     return (
         <div className="flex flex-col items-center gap-4 py-6 text-center">
-            <AlertCircle className="h-14 w-14 text-amber-400" />
+            <AlertCircle className="h-14 w-14 text-warning" />
             <div>
-                <h2 className="text-lg font-semibold text-gray-900">Link unavailable</h2>
-                <p className="text-sm text-gray-500 mt-1">{message}</p>
+                <h2 className="text-lg font-semibold text-foreground">Link unavailable</h2>
+                <p className="text-sm text-muted-foreground mt-1">{message}</p>
             </div>
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-muted-foreground mt-2">
                 Contact your supervisor if you need assistance.
             </p>
         </div>

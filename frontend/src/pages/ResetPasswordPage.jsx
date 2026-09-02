@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import BrandMark from '@/components/layout/BrandMark'
 
 const MIN_PASSWORD_LENGTH = 8
 
@@ -62,11 +63,14 @@ export default function ResetPasswordPage() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-background">
-            <div className="w-full max-w-sm space-y-6 p-8 border rounded-lg shadow-sm">
-                <div className="space-y-2">
-                    <h1 className="text-2xl font-bold">Reset password</h1>
-                    <p className="text-muted-foreground text-sm">Choose a new password.</p>
+        <div className="min-h-screen flex items-center justify-center bg-muted p-4">
+            <div className="w-full max-w-sm space-y-6 rounded-2xl border bg-card p-8 shadow-md">
+                <div className="space-y-4">
+                    <BrandMark />
+                    <div className="space-y-1">
+                        <h1 className="text-2xl font-bold">Reset password</h1>
+                        <p className="text-muted-foreground text-sm">Choose a new password.</p>
+                    </div>
                 </div>
 
                 {status === 'checking' && (
