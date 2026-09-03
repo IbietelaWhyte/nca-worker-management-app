@@ -155,8 +155,8 @@ export default function ScheduleDetailPage() {
     return (
         <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
                     <Button variant="outline" size="sm" onClick={() => navigate('/schedules')}>
                         <ArrowLeft size={16} className="mr-2" /> Back
                     </Button>
@@ -223,7 +223,7 @@ export default function ScheduleDetailPage() {
 
             {/* Assignments */}
             <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="font-semibold">Assigned Workers</h3>
                     <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
                         <input

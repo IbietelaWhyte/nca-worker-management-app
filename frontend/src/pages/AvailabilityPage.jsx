@@ -63,13 +63,13 @@ export default function AvailabilityPage() {
 
             {/* Worker selector — admins, HODs and assistant HODs */}
             {canPickWorker && (
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                     <label className="text-sm font-medium whitespace-nowrap">Select worker</label>
                     <select
                         value={selectedWorkerId}
                         onChange={e => setSelectedWorkerId(e.target.value)}
                         disabled={workersLoading}
-                        className="w-full max-w-sm px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full max-w-sm px-3 py-2 border rounded-md text-base sm:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                         <option value="">— Choose a worker —</option>
                         {pickableWorkers.map(w => (
@@ -98,8 +98,8 @@ export default function AvailabilityPage() {
             {/* Availability editor */}
             {resolvedWorkerId && (
                 <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-3">
                             <span className="font-medium">
                                 {selectedWorker?.first_name} {selectedWorker?.last_name}
                             </span>

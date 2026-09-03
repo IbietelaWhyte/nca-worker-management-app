@@ -115,7 +115,7 @@ export default function RegisterUser() {
 
             {/* Registration form */}
             <form onSubmit={handleSubmit} className="border rounded-lg p-6 space-y-4">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                         <Label htmlFor="first_name">
                             First name <span className="text-destructive">*</span>

@@ -89,7 +89,7 @@ export default function SchedulesPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-2xl font-bold">Schedules</h2>
                     <p className="text-muted-foreground text-sm mt-1">
@@ -97,7 +97,7 @@ export default function SchedulesPage() {
                     </p>
                 </div>
                 {(isAdmin || isDepartmentHead) && selectedDepartmentId && (
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                         <Button variant="outline" onClick={() => setExportOpen(true)}>
                             <ImageDown size={16} className="mr-2" />
                             Export as Image
@@ -116,12 +116,14 @@ export default function SchedulesPage() {
 
             {/* Department selector - dropdown for admins/HODs, tabs for assistant_hod */}
             {!isAssistantHod ? (
-                <div className="flex items-center gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
                     <label className="text-sm font-medium whitespace-nowrap">Department</label>
+                    {/* text-base below sm: iOS Safari zooms the viewport on focus for any control
+                        under 16px, which ui/input.jsx already avoids the same way. */}
                     <select
                         value={selectedDepartmentId}
                         onChange={e => setSelectedDepartmentId(e.target.value)}
-                        className="w-full max-w-sm px-3 py-2 border rounded-md text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+                        className="w-full max-w-sm px-3 py-2 border rounded-md text-base sm:text-sm bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                     >
                         <option value="">— Select a department —</option>
                         {departments.map(d => (
@@ -241,7 +243,7 @@ export default function SchedulesPage() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="border rounded-lg overflow-hidden">
+                                    <div className="hidden border rounded-lg overflow-hidden md:block">
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
@@ -352,6 +354,72 @@ export default function SchedulesPage() {
                                             </TableBody>
                                         </Table>
                                     </div>
+                                )}
+
+                                {/* Below md the same schedules as a card list — five columns,
+                                    one of which is a long formatted date, will not fit. */}
+                                {schedules.length > 0 && (
+                                    <ul className="space-y-2 md:hidden">
+                                        {[...schedules]
+                                            .sort((a, b) =>
+                                                b.scheduled_date.localeCompare(a.scheduled_date)
+                                            )
+                                            .map(schedule => {
+                                                const { confirmed, total } = STATUS_SUMMARY(
+                                                    schedule.schedule_assignments
+                                                )
+                                                return (
+                                                    <li key={schedule.id}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                navigate(
+                                                                    `/schedules/${schedule.id}`
+                                                                )
+                                                            }
+                                                            className="flex w-full items-center justify-between gap-3 rounded-lg border p-4 text-left transition-colors hover:bg-accent"
+                                                        >
+                                                            <div className="min-w-0">
+                                                                <p className="truncate font-medium">
+                                                                    {schedule.title}
+                                                                </p>
+                                                                <p className="text-sm text-muted-foreground">
+                                                                    {format(
+                                                                        new Date(
+                                                                            schedule.scheduled_date +
+                                                                                'T00:00:00'
+                                                                        ),
+                                                                        'EEE d MMM'
+                                                                    )}
+                                                                    {' · '}
+                                                                    {schedule.start_time?.slice(
+                                                                        0,
+                                                                        5
+                                                                    )}
+                                                                    {' – '}
+                                                                    {schedule.end_time?.slice(0, 5)}
+                                                                </p>
+                                                                <Badge
+                                                                    className="mt-2"
+                                                                    variant={
+                                                                        confirmed === total &&
+                                                                        total > 0
+                                                                            ? 'default'
+                                                                            : 'secondary'
+                                                                    }
+                                                                >
+                                                                    {confirmed}/{total} confirmed
+                                                                </Badge>
+                                                            </div>
+                                                            <ChevronRight
+                                                                size={18}
+                                                                className="shrink-0 text-muted-foreground"
+                                                            />
+                                                        </button>
+                                                    </li>
+                                                )
+                                            })}
+                                    </ul>
                                 )}
                             </TabsContent>
                         </Tabs>

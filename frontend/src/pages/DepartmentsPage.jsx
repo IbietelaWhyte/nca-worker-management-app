@@ -62,7 +62,7 @@ export default function DepartmentsPage() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h2 className="text-2xl font-bold">Departments</h2>
                     <p className="text-muted-foreground text-sm mt-1">
@@ -91,7 +91,7 @@ export default function DepartmentsPage() {
             )}
 
             {departments.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
+                <div className="hidden border rounded-lg overflow-hidden md:block">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -149,6 +149,55 @@ export default function DepartmentsPage() {
                         </TableBody>
                     </Table>
                 </div>
+            )}
+
+            {/* Below md the table becomes a card per department — four columns of which one is
+                three buttons will not read on a phone, and scrolling sideways hides the actions. */}
+            {departments.length > 0 && (
+                <ul className="space-y-2 md:hidden">
+                    {departments.map(dept => (
+                        <li key={dept.id} className="rounded-lg border p-4">
+                            <button
+                                type="button"
+                                onClick={() => navigate(`/departments/${dept.id}`)}
+                                className="flex w-full items-start justify-between gap-3 text-left"
+                            >
+                                <div className="min-w-0">
+                                    <p className="font-medium">{dept.name}</p>
+                                    <p className="truncate text-sm text-muted-foreground">
+                                        {dept.description ?? '—'}
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        {dept.workers_per_slot} per slot
+                                    </p>
+                                </div>
+                                <ChevronRight
+                                    size={18}
+                                    className="mt-1 shrink-0 text-muted-foreground"
+                                />
+                            </button>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleOpenEdit(dept)}
+                                >
+                                    <Pencil size={14} className="mr-1" />
+                                    Edit
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDelete(dept)}
+                                    className="text-destructive hover:text-destructive"
+                                >
+                                    <Trash2 size={14} className="mr-1" />
+                                    Delete
+                                </Button>
+                            </div>
+                        </li>
+                    ))}
+                </ul>
             )}
 
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

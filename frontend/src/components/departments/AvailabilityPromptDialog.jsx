@@ -144,9 +144,9 @@ export default function AvailabilityPromptDialog({ open, onOpenChange, departmen
 
                     <div className="border-t pt-5 space-y-3">
                         <Label>Or schedule it</Label>
-                        <div className="flex gap-2">
+                        <div className="flex flex-col gap-2 sm:flex-row">
                             <Select value={mode} onValueChange={setMode}>
-                                <SelectTrigger className="w-40">
+                                <SelectTrigger className="w-full sm:w-40">
                                     <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -199,14 +199,15 @@ export default function AvailabilityPromptDialog({ open, onOpenChange, departmen
                                             </span>
                                         )}
                                     </span>
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
                                         onClick={() => handleDelete(prompt.id)}
-                                        className="text-muted-foreground hover:text-destructive"
+                                        className="-mr-2 shrink-0 text-muted-foreground hover:text-destructive"
                                         aria-label="Remove prompt"
                                     >
                                         <Trash2 size={16} />
-                                    </button>
+                                    </Button>
                                 </div>
                             ))}
                         </div>
