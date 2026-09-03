@@ -538,6 +538,16 @@ class TestAuthorizeViewWorker:
         with pytest.raises(PermissionDeniedError, match="your own worker record"):
             service.authorize_view_worker(_token(role=UserRole.WORKER), uuid4())
 
+    def test_manager_allowed_for_own_record(self, service, mock_worker_repo, mock_department_repo):
+        # Routed through the department branch an HOD fails can_manage_worker(self, self) unless
+        # they also happen to be a member of a department they lead — refused on their own record.
+        # overlap=False means can_manage_worker would say no; the self-check must short-circuit
+        # before it is ever consulted.
+        actor, _ = _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=False)
+
+        service.authorize_view_worker(_token(role=UserRole.HOD), actor.id)  # no raise
+        mock_department_repo.get_departments_for_worker.assert_not_called()
+
 
 class TestAuthorizeManageAvailability:
     """Until now the availability router had no authorization at all: any logged-in worker could

@@ -30,12 +30,7 @@ import {
     ImageDown,
 } from 'lucide-react'
 import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
-
-const STATUS_SUMMARY = schedule_assignments => {
-    const confirmed = (schedule_assignments ?? []).filter(a => a.status === 'confirmed').length
-    const total = (schedule_assignments ?? []).length
-    return { confirmed, total }
-}
+import { summarizeAssignments } from '@/lib/dashboard'
 
 export default function SchedulesPage() {
     const navigate = useNavigate()
@@ -264,9 +259,10 @@ export default function SchedulesPage() {
                                                         )
                                                     )
                                                     .map(schedule => {
-                                                        const { confirmed, total } = STATUS_SUMMARY(
-                                                            schedule.schedule_assignments
-                                                        )
+                                                        const { confirmed, total } =
+                                                            summarizeAssignments(
+                                                                schedule.schedule_assignments
+                                                            )
 
                                                         return (
                                                             <TableRow
@@ -365,7 +361,7 @@ export default function SchedulesPage() {
                                                 b.scheduled_date.localeCompare(a.scheduled_date)
                                             )
                                             .map(schedule => {
-                                                const { confirmed, total } = STATUS_SUMMARY(
+                                                const { confirmed, total } = summarizeAssignments(
                                                     schedule.schedule_assignments
                                                 )
                                                 return (

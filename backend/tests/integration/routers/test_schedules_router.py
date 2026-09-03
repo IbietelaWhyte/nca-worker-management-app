@@ -132,6 +132,28 @@ class TestGenerateSchedule:
         assert "already exists" in response.json()["detail"]
 
 
+class TestGetWorkerAssignments:
+    def test_returns_200_for_a_worker_the_caller_may_view(self, mock_schedule_service, mock_worker_service):
+        worker_id = uuid4()
+        mock_schedule_service.get_worker_assignments.return_value = [make_assignment(worker_id=worker_id)]
+        client = make_client(schedule_service=mock_schedule_service, worker_service=mock_worker_service)
+
+        response = client.get(f"/api/v1/schedules/workers/{worker_id}/assignments")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+        mock_worker_service.authorize_view_worker.assert_called_once()
+
+    def test_returns_403_for_someone_elses_assignments(self, mock_schedule_service, mock_worker_service):
+        # This endpoint took any logged-in user, so swapping the uuid in the path returned
+        # anybody's whole assignment history.
+        mock_worker_service.authorize_view_worker.side_effect = PermissionDeniedError("not yours")
+        client = make_client(schedule_service=mock_schedule_service, worker_service=mock_worker_service)
+
+        response = client.get(f"/api/v1/schedules/workers/{uuid4()}/assignments")
+        assert response.status_code == 403
+        mock_schedule_service.get_worker_assignments.assert_not_called()
+
+
 class TestUpdateAssignmentStatus:
     # The endpoint now resolves the assignment first so it can authorize against its owner,
     # so get_assignment has to be stubbed alongside update_assignment_status.

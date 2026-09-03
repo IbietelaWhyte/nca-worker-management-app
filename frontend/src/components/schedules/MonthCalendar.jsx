@@ -10,13 +10,9 @@ import {
 } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { summarizeAssignments } from '@/lib/dashboard'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-
-const statusSummary = assignments => {
-    const list = assignments ?? []
-    return { confirmed: list.filter(a => a.status === 'confirmed').length, total: list.length }
-}
 
 /**
  * A month grid of a department's schedules.
@@ -83,7 +79,7 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
 
                                 <div className="space-y-1">
                                     {daySchedules.map(schedule => {
-                                        const { confirmed, total } = statusSummary(
+                                        const { confirmed, total } = summarizeAssignments(
                                             schedule.schedule_assignments
                                         )
                                         return (

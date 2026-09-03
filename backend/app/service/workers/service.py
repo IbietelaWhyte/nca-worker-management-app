@@ -845,6 +845,11 @@ class WorkerService:
         Admins may read any worker. HODs and assistant HODs may read workers in departments they
         manage. A regular worker may read only their own record.
 
+        The self-check comes first for the same reason as ``authorize_act_for_worker``: routed
+        through the department branch, an HOD fails ``can_manage_worker(actor.id, actor.id)``
+        unless they happen to also be a member of a department they lead, and is refused on their
+        own record.
+
         Args:
             token: The verified token payload of the requesting user.
             worker_id: The worker being read.
@@ -856,6 +861,8 @@ class WorkerService:
         if token.role == UserRole.ADMIN:
             return
         actor = self.get_worker_for_token(token)
+        if worker_id == actor.id:
+            return
         if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
             if self.can_manage_worker(actor.id, worker_id):
                 return
