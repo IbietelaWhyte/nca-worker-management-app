@@ -8,7 +8,10 @@ SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*), subteams(*), d
 # and the schedule detail page renders a row entirely from these embeds — without them a confirmed
 # worker turns into "Unknown worker" with no role, in an "Unassigned" group.
 SELECT_ASSIGNMENT_WITH_RELATIONS = "*, workers(*), subteams(*), department_roles(*)"
-SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
+# A worker's own duty list names the department and the job they are doing in it, the same two
+# facts the SMS and the confirmation page carry — a worker serving in several departments cannot
+# tell their Sundays apart from the schedule title alone.
+SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*, departments(*)), department_roles(*)"
 # Inner join variant: required when filtering on a schedules column, otherwise PostgREST
 # nulls the embedded object instead of dropping the assignment row.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"

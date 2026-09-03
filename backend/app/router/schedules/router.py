@@ -120,9 +120,16 @@ def delete_schedule(
 @router.get("/workers/{worker_id}/assignments", response_model=list[AssignmentResponse])
 def get_worker_assignments(
     worker_id: UUID,
-    _: TokenPayload = CurrentUser,
+    token: TokenPayload = CurrentUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[AssignmentResponse]:
+    """A worker's own duties, or those of somebody the caller manages.
+
+    Scoped like every other read of another person's record: this used to accept any logged-in
+    user, so swapping the uuid in the path returned anybody's whole assignment history.
+    """
+    worker_service.authorize_view_worker(token, worker_id)
     return service.get_worker_assignments(worker_id)
 
 
