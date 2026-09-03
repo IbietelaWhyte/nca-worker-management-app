@@ -52,6 +52,7 @@ def create_reminder_service() -> ReminderService:
     client = get_supabase()
     schedule_repo = ScheduleRepository(client)
     worker_repo = WorkerRepository(client)
+    department_repo = DepartmentRepository(client)
     sms_service = SMSService()
     token_service = ConfirmationTokenService(
         token_repo=ConfirmationTokenRepository(client),
@@ -69,6 +70,7 @@ def create_reminder_service() -> ReminderService:
         schedule_repo=schedule_repo,
         sms_service=sms_service,
         worker_repo=worker_repo,
+        department_repo=department_repo,
         token_service=token_service,
         prompt_service=prompt_service,
     )

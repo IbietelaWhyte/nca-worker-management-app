@@ -95,6 +95,31 @@ class TestGetConfirmationDetails:
         assert details.expired is False
         assert len(details.assignments) == 2
 
+    def test_names_the_department_that_scheduled_each_duty(
+        self, service, mock_token_repo, mock_schedule_repo, mock_worker_repo
+    ):
+        # The page is reached from an SMS with no session, so it cannot resolve a department id
+        # itself — the name has to arrive embedded on the assignment.
+        worker_id = uuid4()
+        mock_token_repo.get_by_token.return_value = make_token(worker_id=worker_id)
+        mock_worker_repo.get_by_id.return_value = make_worker(id=worker_id)
+        mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [
+            make_due_assignment(worker_id=worker_id, department_name="Ushering")
+        ]
+
+        assert service.get_confirmation_details(uuid4()).assignments[0].department_name == "Ushering"
+
+    def test_department_name_is_blank_when_not_embedded(
+        self, service, mock_token_repo, mock_schedule_repo, mock_worker_repo
+    ):
+        # Blank rather than absent: the page drops the label instead of rendering a stray separator.
+        worker_id = uuid4()
+        mock_token_repo.get_by_token.return_value = make_token(worker_id=worker_id)
+        mock_worker_repo.get_by_id.return_value = make_worker(id=worker_id)
+        mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [make_due_assignment(worker_id=worker_id)]
+
+        assert service.get_confirmation_details(uuid4()).assignments[0].department_name == ""
+
     def test_omits_duties_already_declined(self, service, mock_token_repo, mock_schedule_repo, mock_worker_repo):
         worker_id = uuid4()
         mock_token_repo.get_by_token.return_value = make_token(worker_id=worker_id)

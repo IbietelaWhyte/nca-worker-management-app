@@ -121,7 +121,7 @@ class SMSService:
         self,
         to: str,
         worker_name: str,
-        dates: list[str],
+        duties: list[tuple[str, str]],
         confirmation_url: str,
     ) -> bool:
         """Tell a worker they have been scheduled, covering every date in one message.
@@ -131,19 +131,54 @@ class SMSService:
         somebody onto four or five Sundays at once, hence one message listing all of them rather
         than one text per date.
 
+        Dates are grouped under their department rather than repeating the department per date: a
+        worker can serve in more than one, and somebody on every Sunday of a month in a single
+        department should not have to read its name five times.
+
         Args:
             to: Recipient phone number in E.164 format.
             worker_name: Name of the worker being notified.
-            dates: Human-readable dates they have been scheduled for, soonest first.
+            duties: (department name, human-readable date) pairs, soonest first. A pair rather than
+                two parallel lists so a date cannot drift onto the wrong department.
             confirmation_url: Link to the page where each date can be confirmed or declined.
 
         Returns:
             bool: True if the notice was sent, False if sending failed.
         """
-        if len(dates) == 1:
-            summary = f"you have been scheduled for {dates[0]}"
-        else:
-            summary = f"you have been scheduled for {len(dates)} dates: {', '.join(dates)}"
+        summary = self._describe_duties(duties)
         body = f"Hi {worker_name}, {summary}. Please confirm or decline here: {confirmation_url}"
-        self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(dates))
+        self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
+
+    @staticmethod
+    def _describe_duties(duties: list[tuple[str, str]]) -> str:
+        """Render the "you have been scheduled for ..." clause of an assignment notice.
+
+        Every character here stays inside GSM-7. An em dash (or any other character outside it)
+        forces the whole message to UCS-2, which halves a segment from 160 characters to 70 and so
+        silently doubles the cost of a long roster.
+
+        Args:
+            duties: (department name, human-readable date) pairs, soonest first.
+
+        Returns:
+            str: The clause, without a trailing full stop.
+        """
+        dates = [when for _, when in duties]
+
+        # A department we could not name would render as a dangling ": ", so drop the department
+        # framing entirely rather than half-applying it. The notice itself still has to go out.
+        if any(not department for department, _ in duties):
+            if len(dates) == 1:
+                return f"you have been scheduled for {dates[0]}"
+            return f"you have been scheduled for {len(dates)} dates: {', '.join(dates)}"
+
+        if len(duties) == 1:
+            department, when = duties[0]
+            return f"you have been scheduled for {when} in {department}"
+
+        by_department: dict[str, list[str]] = {}
+        for department, when in duties:
+            by_department.setdefault(department, []).append(when)
+        groups = "; ".join(f"{department}: {', '.join(whens)}" for department, whens in by_department.items())
+        return f"you have been scheduled for {len(duties)} dates - {groups}"

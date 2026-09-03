@@ -12,6 +12,11 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*)"
 # Inner join variant: required when filtering on a schedules column, otherwise PostgREST
 # nulls the embedded object instead of dropping the assignment row.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
+# The public confirmation page names the department that scheduled each duty, and that page has no
+# session to look one up with — so the name has to ride along with the assignment. Kept separate
+# from the plain inner variant above, which the monthly planner's bulk history preload uses and
+# where the extra join buys nothing.
+SELECT_ASSIGNMENTS_WITH_SCHEDULE_AND_DEPARTMENT_INNER = "*, schedules!inner(*, departments(*))"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_NOTICE = "get_assignments_due_for_notice"
 

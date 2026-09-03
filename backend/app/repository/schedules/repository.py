@@ -170,7 +170,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         """
         Retrieve a worker's assignments scheduled on or after a given date.
 
-        Used to check whether a worker still has commitments before their profile is deleted.
+        Used to check whether a worker still has commitments before their profile is deleted, and to
+        list those commitments on the public confirmation page — which is why the department comes
+        back embedded: that page has no session to resolve a department id with.
         Filtering happens on the joined schedules table, so the select must use the inner-join
         variant for the filter to drop rows rather than null the embedded schedule.
 
@@ -189,7 +191,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         )
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
-            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER)
+            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE_AND_DEPARTMENT_INNER)
             .eq(q.AssignmentColumns.WORKER_ID, str(worker_id))
             .gte(f"{q.TABLE}.{q.Columns.SCHEDULED_DATE}", from_date.isoformat())
             .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})")

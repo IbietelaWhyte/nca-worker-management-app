@@ -249,6 +249,9 @@ class ConfirmationTokenService:
         return ConfirmableAssignment(
             assignment_id=assignment.id,
             schedule_title=schedule.title if schedule else "Service",
+            # Embedded by get_upcoming_assignments_for_worker; "" leaves the page to omit the label
+            # rather than render a stray separator.
+            department_name=schedule.departments.name if schedule and schedule.departments else "",
             scheduled_date=schedule.scheduled_date.strftime("%A, %d %B %Y") if schedule else "",
             start_time=schedule.start_time.strftime("%H:%M") if schedule else "",
             end_time=schedule.end_time.strftime("%H:%M") if schedule else "",

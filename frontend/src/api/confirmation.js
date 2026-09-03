@@ -20,6 +20,7 @@ const publicClient = axios.create({
  *   assignments: Array<{
  *     assignment_id: string,
  *     schedule_title: string,
+ *     department_name: string,
  *     scheduled_date: string,
  *     start_time: string,
  *     end_time: string,
