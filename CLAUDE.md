@@ -130,6 +130,10 @@ The planner is tested directly in `tests/unit/services/test_schedule_planner.py`
 
 The reminder job runs on its own thread outside the request thread pool — that gap between `request_thread_pool_size` and `db_max_connections` is what reserves connections for it.
 
+**Keep every message body inside GSM-7.** One character outside that alphabet — an em dash, a curly quote, an emoji — switches the whole SMS to UCS-2, which cuts a segment from 160 characters to 70 and so silently doubles or triples the cost of a long roster. Nothing errors; the message just arrives billed as three segments instead of one. `SMSService._describe_duties` uses a plain `-` between groups for exactly this reason, and `test_sms_service.py` asserts the rendered bodies character-by-character against the GSM-7 set. Assert the whole body in a test when you add a message — the multi-date notice once shipped with no separator at all (`dates:Sun 02 Aug...`) because nothing checked the string.
+
+The notice and the confirmation page get their department name by **different routes, and have to**: the notice path goes through the `get_assignments_due_for_notice` RPC, which returns `row_to_json(s)` and so cannot carry an embed, hence `ReminderService._department_name` and its per-run cache; the confirmation page path is a plain PostgREST select and gets `departments(*)` embedded for free. Don't "unify" one into the other without changing the RPC's return signature.
+
 ## Frontend architecture
 
 - Routing in `src/App.jsx`; every page is `lazy()`-loaded so each ships as its own chunk. Authenticated routes are wrapped in `ProtectedLayout` (= `ProtectedRoute` + `AppLayout`). Public routes: `/login`, `/reset-password`, and `/confirm/:token` (reached from an SMS link, no session).

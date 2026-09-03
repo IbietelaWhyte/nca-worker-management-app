@@ -5,6 +5,7 @@ import pytest
 
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
+from app.schemas.departments.models import DepartmentResponse
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.workers.models import WorkerResponse
 from app.service.confirmation_tokens.service import ConfirmationTokenService
@@ -12,10 +13,26 @@ from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
 
 
+def make_department(department_id, name: str) -> DepartmentResponse:
+    """A department as the repository returns it."""
+    return DepartmentResponse(
+        id=department_id,
+        name=name,
+        workers_per_slot=1,
+        created_at="2026-01-01T08:00:00Z",
+    )
+
+
 def make_due_assignment(**kwargs) -> AssignmentResponse:
-    """Builds an assignment with worker and schedule embedded, as the RPCs return it."""
+    """Builds an assignment with worker and schedule embedded, as the RPCs return it.
+
+    Pass `department_name` to also embed the department, as the confirmation page's select does;
+    the notice RPC returns no department embed, so it is left off by default.
+    """
     worker_id = kwargs.get("worker_id", uuid4())
     schedule_id = kwargs.get("schedule_id", uuid4())
+    department_id = kwargs.get("department_id", uuid4())
+    department_name = kwargs.get("department_name")
     return AssignmentResponse(
         id=kwargs.get("id", uuid4()),
         schedule_id=schedule_id,
@@ -36,7 +53,8 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
         ),
         schedules=ScheduleResponse(
             id=schedule_id,
-            department_id=kwargs.get("department_id", uuid4()),
+            department_id=department_id,
+            departments=make_department(department_id, department_name) if department_name else None,
             subteam_id=kwargs.get("subteam_id"),
             title=kwargs.get("title", "Sunday Service"),
             scheduled_date=kwargs.get("scheduled_date", "2026-03-15"),
@@ -73,11 +91,12 @@ def mock_token_service():
 
 
 @pytest.fixture
-def service(mock_schedule_repo, mock_sms_service, mock_worker_repo, mock_token_service):
+def service(mock_schedule_repo, mock_sms_service, mock_worker_repo, mock_department_repo, mock_token_service):
     return ReminderService(
         schedule_repo=mock_schedule_repo,
         sms_service=mock_sms_service,
         worker_repo=mock_worker_repo,
+        department_repo=mock_department_repo,
         token_service=mock_token_service,
     )
 
@@ -98,9 +117,54 @@ class TestSendPendingNotices:
 
         assert service.trigger_notices() == 1
         mock_sms_service.send_assignment_notice.assert_called_once()
-        assert len(mock_sms_service.send_assignment_notice.call_args.kwargs["dates"]) == 4
+        assert len(mock_sms_service.send_assignment_notice.call_args.kwargs["duties"]) == 4
         # One token for the worker, not one per date.
         mock_token_service.create_token.assert_called_once_with(worker_id=worker_id)
+
+    def test_names_the_department_beside_each_date(
+        self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
+    ):
+        ushering, choir = uuid4(), uuid4()
+        worker_id = uuid4()
+        mock_schedule_repo.get_assignments_due_for_notice.return_value = [
+            make_due_assignment(worker_id=worker_id, department_id=ushering, scheduled_date="2026-08-02"),
+            make_due_assignment(worker_id=worker_id, department_id=choir, scheduled_date="2026-08-09"),
+        ]
+        mock_department_repo.get_by_id.side_effect = lambda did: make_department(
+            did, "Ushering" if did == ushering else "Choir"
+        )
+        mock_sms_service.send_assignment_notice.return_value = True
+
+        service.trigger_notices()
+        duties = mock_sms_service.send_assignment_notice.call_args.kwargs["duties"]
+        assert duties == [("Ushering", "Sun 02 Aug at 09:00"), ("Choir", "Sun 09 Aug at 09:00")]
+
+    def test_looks_a_department_up_once_per_run_not_once_per_date(
+        self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
+    ):
+        # A month of Sundays for several people is otherwise the same row fetched over and over.
+        department_id = uuid4()
+        mock_schedule_repo.get_assignments_due_for_notice.return_value = [
+            make_due_assignment(worker_id=worker_id, department_id=department_id)
+            for worker_id in (uuid4(), uuid4())
+            for _ in range(3)
+        ]
+        mock_sms_service.send_assignment_notice.return_value = True
+
+        service.trigger_notices()
+        assert mock_department_repo.get_by_id.call_count == 1
+
+    def test_still_sends_when_a_department_cannot_be_named(
+        self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
+    ):
+        # The department is context on the message, not the message. Withholding the notice over it
+        # would leave the worker never told they are scheduled.
+        mock_schedule_repo.get_assignments_due_for_notice.return_value = [make_due_assignment()]
+        mock_department_repo.get_by_id.return_value = None
+        mock_sms_service.send_assignment_notice.return_value = True
+
+        assert service.trigger_notices() == 1
+        assert mock_sms_service.send_assignment_notice.call_args.kwargs["duties"] == [("", "Sun 15 Mar at 09:00")]
 
     def test_marks_every_date_the_notice_covered(self, service, mock_schedule_repo, mock_sms_service):
         worker_id = uuid4()

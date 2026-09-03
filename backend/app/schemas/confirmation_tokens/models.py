@@ -24,6 +24,10 @@ class ConfirmableAssignment(BaseModel):
 
     assignment_id: UUID
     schedule_title: str
+    # Which department expects them. A worker can serve in several, so the title alone ("Sunday
+    # Service") does not say who is counting on them. Defaults to "" rather than being required:
+    # the page drops the label instead of failing when a name cannot be resolved.
+    department_name: str = ""
     scheduled_date: str
     start_time: str
     end_time: str

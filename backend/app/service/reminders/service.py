@@ -2,10 +2,12 @@ from collections import defaultdict
 from datetime import date
 from uuid import UUID
 
+import structlog
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.models import AssignmentStatus
@@ -32,6 +34,7 @@ class ReminderService:
         schedule_repo: ScheduleRepository,
         sms_service: SMSService,
         worker_repo: WorkerRepository,
+        department_repo: DepartmentRepository,
         token_service: ConfirmationTokenService | None = None,
         prompt_service: AvailabilityPromptService | None = None,
     ) -> None:
@@ -50,6 +53,7 @@ class ReminderService:
         self.schedule_repo = schedule_repo
         self.sms_service = sms_service
         self.worker_repo = worker_repo
+        self.department_repo = department_repo
         self.token_service = token_service
         self.prompt_service = prompt_service
         # Created lazily in start(): this service is also constructed per-request to back the
@@ -136,19 +140,31 @@ class ReminderService:
             by_worker[assignment.worker_id].append(assignment)
         log.info("notices_due", workers=len(by_worker), assignments=len(due))
 
+        # Shared across the whole run so a department is fetched once rather than once per
+        # assignment — a month of Sundays for forty people is otherwise the same row over and over.
+        # Deliberately not held on self: this service is long-lived under the BackgroundScheduler,
+        # and a cache outliving the run would keep serving a department's old name after a rename.
+        department_names: dict[UUID, str] = {}
+
         notified = 0
         for worker_id, assignments in by_worker.items():
-            if self._send_notice(worker_id, assignments):
+            if self._send_notice(worker_id, assignments, department_names):
                 notified += 1
         log.info("notice_job_finished", notified=notified, workers=len(by_worker))
         return notified
 
-    def _send_notice(self, worker_id: UUID, assignments: list[AssignmentResponse]) -> bool:
+    def _send_notice(
+        self,
+        worker_id: UUID,
+        assignments: list[AssignmentResponse],
+        department_names: dict[UUID, str],
+    ) -> bool:
         """Send one worker their notice and mark every date it covered.
 
         Args:
             worker_id: The worker to notify.
             assignments: That worker's un-notified assignments, soonest first.
+            department_names: Run-scoped cache of department id to name, shared across workers.
 
         Returns:
             bool: True if the SMS was sent and the assignments marked.
@@ -171,12 +187,14 @@ class ReminderService:
         if not schedules:
             log.warning("notice_skipped_missing_schedule")
             return False
-        dates = [self._describe(s) for s in schedules]
+        # Naming the department matters most when a worker serves in more than one: "you have been
+        # scheduled for 3 dates" alone leaves them guessing which team expects them.
+        duties = [(self._department_name(s.department_id, department_names, log), self._describe(s)) for s in schedules]
 
         sent = self.sms_service.send_assignment_notice(
             to=worker.phone,
             worker_name=f"{worker.first_name} {worker.last_name}".strip(),
-            dates=dates,
+            duties=duties,
             confirmation_url=confirmation_url,
         )
         if not sent:
@@ -326,6 +344,29 @@ class ReminderService:
         except Exception as exc:  # noqa: BLE001 — a token failure must not abort the whole run
             self.logger.warning("confirmation_token_creation_failed", worker_id=str(worker_id), error=str(exc))
             return None
+
+    def _department_name(self, department_id: UUID, cache: dict[UUID, str], log: structlog.stdlib.BoundLogger) -> str:
+        """Look up a department's name, remembering it for the rest of the run.
+
+        Returns "" rather than raising or aborting when the name cannot be found: the department is
+        context on the message, not the message itself, and withholding a whole notice over it would
+        leave the worker never told they are scheduled. `SMSService` drops the department framing
+        when it sees a blank.
+
+        Args:
+            department_id: The department that owns the schedule.
+            cache: Run-scoped id-to-name map, mutated in place.
+            log: The caller's bound logger, so a miss is attributed to the right worker.
+
+        Returns:
+            str: The department's name, or "" if it could not be resolved.
+        """
+        if department_id not in cache:
+            department = self.department_repo.get_by_id(department_id)
+            if not department:
+                log.warning("notice_department_not_found", department_id=str(department_id))
+            cache[department_id] = department.name if department else ""
+        return cache[department_id]
 
     @staticmethod
     def _describe(schedule: Schedule) -> str:

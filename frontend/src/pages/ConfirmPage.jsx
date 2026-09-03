@@ -155,6 +155,7 @@ function AssignmentRow({ assignment, submitting, disabled, onAction }) {
                         {assignment.schedule_title}
                     </p>
                     <p className="text-xs text-muted-foreground">
+                        {assignment.department_name && `${assignment.department_name} · `}
                         {assignment.scheduled_date} · {assignment.start_time} –{' '}
                         {assignment.end_time}
                     </p>

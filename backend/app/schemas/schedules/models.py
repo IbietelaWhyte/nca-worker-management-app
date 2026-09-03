@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.department_roles.models import DepartmentRoleResponse
+from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import DayOfWeek
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerResponse
@@ -32,6 +33,10 @@ class Schedule(BaseModel):
     # sort, which took down schedule generation entirely.
     created_by: UUID | None = None
     created_at: datetime
+    # Nested department object, present only on the queries that embed it — the public confirmation
+    # page needs the name and cannot look one up, having no session. Optional like every other
+    # embed, so the selects that don't ask for it still validate.
+    departments: DepartmentResponse | None = None
 
 
 class ScheduleCreate(BaseModel):
