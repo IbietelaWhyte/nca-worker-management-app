@@ -16,6 +16,7 @@ const SchedulesPage = lazy(() => import('@/pages/SchedulesPage'))
 const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
 const AccountPage = lazy(() => import('@/pages/AccountPage'))
+const HelpPage = lazy(() => import('@/pages/HelpPage'))
 const ConfirmPage = lazy(() => import('@/pages/ConfirmPage'))
 const AvailabilityLinkPage = lazy(() => import('@/pages/AvailabilityLinkPage'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
@@ -107,6 +108,14 @@ function App() {
                         element={
                             <ProtectedLayout>
                                 <AccountPage />
+                            </ProtectedLayout>
+                        }
+                    />
+                    <Route
+                        path="/help"
+                        element={
+                            <ProtectedLayout>
+                                <HelpPage />
                             </ProtectedLayout>
                         }
                     />

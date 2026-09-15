@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, Building2, Calendar, Clock } from 'lucide-react'
+import { LayoutDashboard, Users, Building2, Calendar, Clock, CircleHelp } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
@@ -13,6 +13,17 @@ const navItems = [
     { to: '/availability', icon: Clock, label: 'Availability' },
     { to: '/schedules', icon: Calendar, label: 'Schedules', manageOnly: true },
 ]
+
+// Shared by both the nav list and the Help link at the foot, so the two cannot drift apart.
+// min-h-11 keeps the tap target at 44px; the 3px left border is transparent when inactive so the
+// label does not shift sideways as the active item changes.
+const linkClasses = ({ isActive }) =>
+    cn(
+        'flex items-center gap-3 min-h-11 pl-[9px] pr-3 py-2 rounded-md text-sm transition-colors border-l-[3px] border-transparent',
+        isActive
+            ? 'bg-sidebar-active text-sidebar-foreground font-semibold border-l-highlight'
+            : 'text-sidebar-muted hover:bg-sidebar-active/60 hover:text-sidebar-foreground'
+    )
 
 /**
  * The rail's contents, rendered in two places: the fixed desktop rail below, and the mobile
@@ -51,23 +62,23 @@ export function SidebarNav({ onNavigate }) {
                         to={to}
                         end={to === '/'}
                         onClick={onNavigate}
-                        className={({ isActive }) =>
-                            cn(
-                                // min-h-11 keeps the tap target at 44px; the 3px left border is
-                                // transparent when inactive so the label does not shift sideways
-                                // as the active item changes.
-                                'flex items-center gap-3 min-h-11 pl-[9px] pr-3 py-2 rounded-md text-sm transition-colors border-l-[3px] border-transparent',
-                                isActive
-                                    ? 'bg-sidebar-active text-sidebar-foreground font-semibold border-l-highlight'
-                                    : 'text-sidebar-muted hover:bg-sidebar-active/60 hover:text-sidebar-foreground'
-                            )
-                        }
+                        className={linkClasses}
                     >
                         <Icon size={18} />
                         {label}
                     </NavLink>
                 ))}
             </nav>
+
+            {/* Help sits below the nav rather than in it, for every role: it is somewhere people
+                look when stuck, not a section of the app they work in. */}
+            <div className="p-4 pt-0">
+                <Separator className="bg-sidebar-border mb-4" />
+                <NavLink to="/help" onClick={onNavigate} className={linkClasses}>
+                    <CircleHelp size={18} />
+                    Help
+                </NavLink>
+            </div>
         </>
     )
 }
