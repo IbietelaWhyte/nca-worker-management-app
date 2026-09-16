@@ -55,6 +55,13 @@ class PermissionDeniedError(AppError):
     default_detail = "Permission denied"
 
 
+class TooManyRequestsError(AppError):
+    """The caller has exceeded a rate limit and should retry later (HTTP 429)."""
+
+    status_code = 429
+    default_detail = "Too many requests"
+
+
 class GoneError(AppError):
     """The target resource is no longer available, e.g. a used or expired link (HTTP 410)."""
 

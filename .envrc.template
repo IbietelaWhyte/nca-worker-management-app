@@ -1,0 +1,45 @@
+# Environment variables for the NCA Worker Management App
+# Logging 
+export LOG_LEVEL="INFO"
+
+# General settings
+export APP_ENV="production"
+export ALLOWED_ORIGINS='["http://localhost:5173","http://localhost:3000"]'
+export SECRET_KEY="your_secret_key_here"
+
+# Database connection settings
+export SUPABASE_URL=""
+export SUPABASE_ANON_KEY=""
+export SUPABASE_SERVICE_ROLE_KEY=""
+export DATABASE_URL=""
+export SUPABASE_JWT_SECRET=''
+
+# Test user credentials
+export TEST_USER_EMAIL=""
+export TEST_USER_PASSWORD=""
+export TEST_USER_EMAIL_2=""
+export TEST_USER_PASSWORD_2=""
+
+# Twilio Settings
+export TWILIO_ACCOUNT_SID=""
+export TWILIO_AUTH_TOKEN=""
+export TWILIO_FROM_NUMBER=""
+
+# Resend Settings
+export RESEND_API_KEY=""
+
+# Request concurrency / DB connection pooling settings
+export DB_MAX_CONNECTIONS=24
+export DB_MAX_KEEPALIVE_CONNECTIONS=12
+export DB_POOL_TIMEOUT=10.0
+export REQUEST_THREAD_POOL_SIZE=20
+
+# Gmail App Password
+export GMAIL_APP_PASSWORD=""
+
+# Frontend URL
+export FRONTEND_URL="https://nca-worker-management-app.vercel.app/"
+
+# fine-grained, this repo, Issues: read and write
+export FEEDBACK_GITHUB_TOKEN=""
+export FEEDBACK_GITHUB_REPO="IbietelaWhyte/nca-worker-management-app"

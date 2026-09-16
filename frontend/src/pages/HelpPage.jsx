@@ -1,7 +1,11 @@
-import { ChevronDown } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, MessageSquarePlus } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { faqSectionsFor } from '@/lib/faq'
-import { Card } from '@/components/ui/card'
+import { getFeedbackConfig } from '@/api/feedback'
+import FeedbackDialog from '@/components/help/FeedbackDialog'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 
 /**
  * One question. A native <details> rather than a hand-rolled disclosure: it opens without
@@ -34,6 +38,16 @@ function FaqItem({ question, answer }) {
 export default function HelpPage() {
     const { isDepartmentHead } = useAuth()
     const sections = faqSectionsFor(isDepartmentHead)
+    const [reportingEnabled, setReportingEnabled] = useState(false)
+    const [dialogOpen, setDialogOpen] = useState(false)
+
+    // Hidden rather than broken when the backend has no GitHub credentials: a Send button that
+    // always fails is worse than no button. A failed check leaves it hidden for the same reason.
+    useEffect(() => {
+        getFeedbackConfig()
+            .then(response => setReportingEnabled(response.data.enabled))
+            .catch(() => setReportingEnabled(false))
+    }, [])
 
     return (
         <div className="max-w-3xl space-y-6">
@@ -57,10 +71,29 @@ export default function HelpPage() {
                 </section>
             ))}
 
+            {reportingEnabled && (
+                <Card>
+                    <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                            <h3 className="text-base font-semibold">Not answered here?</h3>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                                Tell us what went wrong, or what would make this app easier to use.
+                            </p>
+                        </div>
+                        <Button onClick={() => setDialogOpen(true)} className="shrink-0">
+                            <MessageSquarePlus size={16} />
+                            Report a problem
+                        </Button>
+                    </CardContent>
+                </Card>
+            )}
+
             <p className="text-sm text-muted-foreground">
                 Still stuck? Speak to your head of department, or an administrator if it is about
                 your account.
             </p>
+
+            <FeedbackDialog open={dialogOpen} onOpenChange={setDialogOpen} />
         </div>
     )
 }

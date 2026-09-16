@@ -11,6 +11,7 @@ from app.core.dependencies import (
     get_availability_service,
     get_department_role_service,
     get_department_service,
+    get_feedback_service,
     get_reminder_service,
     get_schedule_service,
     get_subteam_service,
@@ -23,6 +24,7 @@ from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
+from app.service.feedback.service import FeedbackService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.subteams.service import SubteamService
@@ -78,6 +80,11 @@ def mock_account_service():
     return MagicMock(spec=AccountService)
 
 
+@pytest.fixture
+def mock_feedback_service():
+    return MagicMock(spec=FeedbackService)
+
+
 def make_client(
     role: UserRole = UserRole.WORKER,
     worker_service=None,
@@ -89,6 +96,7 @@ def make_client(
     reminder_service=None,
     authentication_service=None,
     account_service=None,
+    feedback_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
@@ -110,6 +118,8 @@ def make_client(
         app.dependency_overrides[get_authentication_service] = lambda: authentication_service
     if account_service:
         app.dependency_overrides[get_account_service] = lambda: account_service
+    if feedback_service:
+        app.dependency_overrides[get_feedback_service] = lambda: feedback_service
 
     return TestClient(app)
 
