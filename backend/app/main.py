@@ -22,6 +22,7 @@ from app.router import (
     confirmation_tokens,
     department_roles,
     departments,
+    feedback,
     schedules,
     subteams,
     workers,
@@ -126,6 +127,7 @@ app.include_router(department_roles.router, prefix="/api/v1")
 app.include_router(account.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(confirmation_tokens.router, prefix="/api/v1")
+app.include_router(feedback.router, prefix="/api/v1")
 
 
 @app.exception_handler(AppError)

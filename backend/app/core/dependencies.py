@@ -22,6 +22,7 @@ from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
+from app.service.feedback.service import FeedbackService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.sms.service import SMSService
@@ -360,6 +361,20 @@ def get_department_role_service(
         department_role_repo=department_role_repo,
         department_repo=department_repo,
     )
+
+
+def get_feedback_service(
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> FeedbackService:
+    """FastAPI dependency that provides a FeedbackService instance.
+
+    Args:
+        worker_service: Resolves the reporting user's own worker record.
+
+    Returns:
+        FeedbackService: Configured feedback service.
+    """
+    return FeedbackService(worker_service)
 
 
 def get_account_service(

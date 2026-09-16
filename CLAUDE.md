@@ -124,6 +124,15 @@ The planner is tested directly in `tests/unit/services/test_schedule_planner.py`
 - Phone numbers go through `core/phone.py` `normalize_phone` into E.164 — Twilio silently fails on anything else, so every phone entering the system should pass through it.
 - The downloadable template is `frontend/public/worker-import-sample.csv`. `tests/unit/test_import_template.py` parses that actual file as a drift guard, so edit template and parser together.
 
+## In-app feedback
+
+`FeedbackService` (`service/feedback/`) turns a report from the help page into a **GitHub issue** (`POST /api/v1/feedback`, `GET /feedback/config`). `settings.feedback_github_token` + `feedback_github_repo` drive it and both default to `None` (prefixed deliberately: a bare `GITHUB_TOKEN` in `.envrc` would override the `gh` CLI's own credentials in every shell opened here): with either unset `is_enabled` is false, the endpoint says so and the frontend hides the form, so a checkout with no token still runs.
+
+- **The tracker is public.** The issue body identifies the reporter by `worker.id` and role — never a name, email or phone. `test_feedback_service.py` asserts the absence of all three; keep it that way if you extend the payload.
+- **What the reporter typed goes in a code fence**, sized by `_fence_for` to be longer than any backtick run inside it. Unfenced, `@name` pings a real GitHub account and `#48` cross-links a real PR, so a volunteer could notify strangers by accident.
+- Rate limiting is a module-level dict guarded by a lock (`feedback_max_per_hour`), module-level because the service is constructed per request. It is per-process and resets on restart — enough for a stuck Send button, not an audit trail. A table is the upgrade if that ever matters.
+- The report's "where did it happen" is a **select the reporter picks from**, not a captured route: people open Help after hitting the problem, so the previous route is a guess. Browser, viewport and build hash are captured (`browserContext()` in `api/feedback.js`); the build hash comes from `vite.config.js` stamping `import.meta.env.VITE_APP_VERSION` from `git rev-parse`, guarded so a tarball build still succeeds.
+
 ## Reminders & SMS
 
 `ReminderService` (`service/reminders/`) runs an APScheduler `BackgroundScheduler` cron job daily at **08:00** to SMS workers about upcoming assignments (`schedules.reminder_days_before` controls the lead time; `trigger_manually` / `trigger_for_schedule` force a run). SMS goes through `SMSService` (`service/sms/`, Twilio). Each reminder embeds a one-time confirmation link backed by `confirmation_tokens`; workers confirm/decline via the unauthenticated `/api/v1/confirm/{token}` endpoints, surfaced by the frontend `/confirm/:token` page.

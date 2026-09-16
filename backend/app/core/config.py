@@ -51,6 +51,25 @@ class Settings(BaseSettings):
     reminder_hour: int = Field(default=8, ge=0, le=23)
     notice_interval_minutes: int = Field(default=10, ge=1, le=1440)
 
+    # In-app feedback (see service/feedback/service.py). Both credentials default to None, and
+    # with either unset the endpoint reports itself disabled and the frontend hides the form —
+    # better than offering volunteers a button that 500s. The repo is "owner/name".
+    #
+    # Prefixed rather than named GITHUB_TOKEN because direnv exports these into every shell
+    # opened in the repo, and the gh CLI silently prefers a GITHUB_TOKEN in the environment
+    # over its own stored credentials.
+    #
+    # The issue tracker this posts to is public, so the body carries a worker id and never a name,
+    # an email or a phone number. Keep it that way if you extend the payload.
+    feedback_github_token: str | None = None
+    feedback_github_repo: str | None = None
+    # Per-worker cap, counted in memory over a rolling hour. One frustrated volunteer holding down
+    # Send should not be able to fill a public tracker.
+    feedback_max_per_hour: int = Field(default=5, ge=1)
+    # GitHub is a third party on a request thread, so the call is bounded rather than left to hang
+    # onto a worker thread until the client gives up.
+    feedback_timeout_seconds: float = Field(default=10.0, gt=0)
+
     # How long a worker's confirmation link stays valid. This has to outlast the gap between the
     # two messages — a month's rota is generated weeks before its reminders fire, and the same
     # token backs both — so it is measured in days, not hours.
