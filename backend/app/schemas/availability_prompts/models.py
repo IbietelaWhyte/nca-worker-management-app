@@ -67,4 +67,7 @@ class PromptSendResult(BaseModel):
 
     sent: int = 0
     skipped_no_phone: int = 0
+    # Counted, not silently dropped: a head who prompts ten people and hears about eight should
+    # be told why, or the suppression looks like a bug in the send.
+    skipped_on_leave: int = 0
     failed: int = 0

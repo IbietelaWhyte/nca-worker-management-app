@@ -47,7 +47,7 @@ Backend config comes from env vars (`Settings` in `core/config.py`, `env_file=".
 
 ## Backend architecture
 
-Strict three-layer pattern, one package per domain. Domains: `workers`, `departments`, `department_roles`, `schedules`, `availabilities`, `subteams`, `account`, `authentication`, `confirmation_tokens`, plus the `reminders`/`sms` services.
+Strict three-layer pattern, one package per domain. Domains: `workers`, `worker_leave`, `departments`, `department_roles`, `schedules`, `availabilities`, `subteams`, `account`, `authentication`, `confirmation_tokens`, plus the `reminders`/`sms` services.
 
 - **router/** — FastAPI endpoints. Validate input, delegate authorization to the service, delegate work to a service. All routers mounted under `/api/v1`.
 - **service/** — Business logic **and authorization**. Services depend only on repositories and other services (constructor-injected).
@@ -88,6 +88,36 @@ Four roles (`UserRole` in `schemas/models.py`, declared in descending privilege)
 **Where authorization lives:** simple gates use the `AdminUser` / `HODUser` dependencies. Anything scope-dependent goes through `WorkerService.authorize_*` (`authorize_view_worker`, `authorize_update_worker`, `authorize_manage_worker`, `authorize_create_assignment`) — routers call these, they raise `PermissionDeniedError`. Postgres **RLS policies** in the migrations encode the same rules for direct DB access; keep both in sync when changing access rules.
 
 HOD/assistant-HOD scoping is non-trivial: a worker's managed departments come from two sources — `departments.hod_id` (for HODs) and the `department_assistant_hods` table (for assistant HODs). `WorkerService.can_manage_worker` / `get_managed_department_ids` union both. See `docs/assistant-hod-department-association.md` for the design rationale (why a separate table rather than a nullable column).
+
+## Availability
+
+**Availability is recorded negatively: a worker marks only the dates they CANNOT serve.** Everything absent is available. This is not a UI preference — it is what the rota already assumed (`_is_worker_available` returns True for a worker with no record), so a row saying "I can serve" is an opinion nothing acts on, and someone who ignores the text is scheduled either way. Asking for exceptions makes silence and "I am free" the same answer, which is what volunteers expect.
+
+Consequences to preserve:
+
+- The public page writes one thing. `PublicAvailabilityUpdate` carries **no `is_available` flag** and `AvailabilityService.mark_unavailable` hardcodes `is_available=False`. Don't reintroduce a "mark available" path on the token page.
+- **A day has two states, not three** (unmarked ↔ cannot serve). The old cycle was unset → available → unavailable → unset; both editors and `SpecificDatesCalendar` are now toggles.
+- **`is_available=True` specific-date rows still exist** from before the change and are filtered out of both reads (`get_public_availability`, `useAvailability`) rather than migrated away. They are harmless — `True` is the default anyway — but rendering one would read as a contradiction. The signed-in toggle replaces such a row by id when a date is re-marked, so it cannot appear twice.
+- The column is still `is_available`, and the scheduler still reads it. Only the question the UI asks changed, not the storage.
+
+**The cut-off.** `settings.availability_notice_days` closes a date `N` days before it falls; `AvailabilityService.editable_from()` is that boundary and `_ensure_editable` guards **every write naming a date** — `mark_unavailable`, `clear_specific_date`, `set_availability`, `update_availability` (both the old and the new date) and `delete_availability`. At the default of `0` only past dates are closed, which is the "you cannot enter September's availability in October" case. `clear_worker_availability` is deliberately exempt: it is a manager resetting a roster, and refusing it part-way would make a worker whose history straddles the cut-off permanently un-resettable.
+
+The frontend greys closed days out rather than letting the tap fail, and needs the boundary from the server: the signed-in page reads `GET /availability/config`, and the public page gets the same `editable_from` inside its own response because it has no session to call a config endpoint with. Both are advisory — the service enforces it regardless.
+
+**The SMS has to carry the inversion too.** Most people read the text and never tap through, so `SMSService.send_availability_prompt` says both which dates to mark and that no reply means they are free. Keep it inside GSM-7 (see the Reminders section) and keep it short: the wording has a character budget asserted in `test_sms_service.py`, because a 36-character token plus a real host already eats half a segment and a department is prompted every month.
+
+### Leave
+
+`worker_leave` records a stretch a worker is away (both ends **inclusive** — "away 10-20 Oct" includes the 20th). It does exactly two things: takes them out of schedule generation for the dates it covers, and stops the availability prompt texting them.
+
+- **Not the same as `is_active`.** Deactivating strips someone from their departments and every roster; leave is temporary and leaves membership, roles and history intact, so they return without being re-added.
+- **Not the same as availability, and deliberately its own table.** Availability is the worker's own answer about specific dates; leave is an absence a head records, and it is what suppresses the prompt — fold the two together and the prompt suppresses itself. A range also survives being extended, where expanding it into `availability` rows would bake today's service dates into storage and miss a schedule added later inside the window.
+- **Set by heads and admins only** (`HODUser` + `authorize_manage_worker`). A worker marking individual dates off themselves is what `/availability` is for.
+- **It never edits the rota.** `GET /leave/workers/{id}/clashes` reports duties already booked inside a proposed window so the head can reassign them; the dialog shows this *before* confirming. Duties stay put and the worker keeps their reminder, which is what prompts a decline if nobody gets to it.
+- **Two different "on leave" questions, deliberately answered against different dates.** Generation asks "away on the date being scheduled" (`get_active_on(scheduled_date)`); the prompt asks "away on the day the text goes out" (`get_active_on(today)`). A worker away for part of October still has other October dates worth asking about.
+- Monthly generation folds leave into `_build_unavailability_map`, so **the planner stays pure and unchanged** — to it, someone away is just someone who cannot be picked. The cost: a plan's "3 unavailable" message does not separate leave from availability.
+- Overlapping ranges are refused in the service, not by a constraint: excluding them in Postgres needs `btree_gist`, which would be the schema's first extension, and overlap is untidy rather than harmful since every read unions the rows.
+- `PromptSendResult.skipped_on_leave` exists so a head who texts ten people and hears about eight is told why.
 
 ## Scheduling (core domain logic)
 
@@ -145,11 +175,11 @@ The notice and the confirmation page get their department name by **different ro
 
 ## Frontend architecture
 
-- Routing in `src/App.jsx`; every page is `lazy()`-loaded so each ships as its own chunk. Authenticated routes are wrapped in `ProtectedLayout` (= `ProtectedRoute` + `AppLayout`). Public routes: `/login`, `/reset-password`, and the two token links reached from an SMS with no session — `/confirm/:token` (confirm or decline duties) and `/availability/:token` (enter the dates you can serve). Both are deliberately token-based because most workers have no login account.
+- Routing in `src/App.jsx`; every page is `lazy()`-loaded so each ships as its own chunk. Authenticated routes are wrapped in `ProtectedLayout` (= `ProtectedRoute` + `AppLayout`). Public routes: `/login`, `/reset-password`, and the two token links reached from an SMS with no session — `/confirm/:token` (confirm or decline duties) and `/availability/:token` (mark the dates you cannot serve). Both are deliberately token-based because most workers have no login account.
 - Auth state via `src/context/AuthContext.jsx` (`useAuth()` hook) — exposes `role`, `isAdmin`, `isDepartmentHead` (true for `hod`, `assistant_hod`, **and** `admin`), `signIn`, `signOut`, sourced from the Supabase session's `app_metadata.role`. It carries **no worker id and no department ids** — `auth_user_id` is `exclude=True` on the worker schema, so anything keyed to the signed-in person goes through `GET /account/me` first (`getMyProfile()`), as `useMyDuties` does.
 - **`GET /departments` is scoped for heads of department but NOT for plain workers.** The handler branches on `hod`/`assistant_hod` and returns their departments; every other role, `worker` included, falls through to `get_all_departments`. So "the departments I can see" is only a safe basis for a view when gated on `isDepartmentHead` — `DashboardPage` does exactly this, and a worker gets their own duties instead. Don't build a second view on that endpoint without the same gate.
 - The dashboard (`src/pages/DashboardPage.jsx` + `src/components/dashboard/`) has **three modes from one layout**: admin and HOD share the department board, differing only in how many departments the API returns, and a worker gets `MyDuties`. Its aggregation lives in `src/lib/dashboard.js`, kept pure and React-free like `lib/rota.js` — `summarizeAssignments` there is the single copy of the confirmed/total helper that the schedules table and month grid also use. There is no whole-church schedule endpoint, so `useDashboard` fans out one `getSchedulesByDepartment` per department; fine at a handful, worth a real endpoint past ~15.
-- The help page (`src/pages/HelpPage.jsx`) is one FAQ for everybody: its copy lives in `src/lib/faq.js` (React-free, like `lib/rota.js` and `lib/dashboard.js`), where each section is tagged `audience: 'everyone' | 'heads'` and `faqSectionsFor(isDepartmentHead)` appends the management sections. Heads see the worker questions too — they serve on rotas themselves. Edit the answers there, not in the JSX, and keep them true of the code: they describe availability's tap cycle, when texts go out, and what declining does.
+- The help page (`src/pages/HelpPage.jsx`) is one FAQ for everybody: its copy lives in `src/lib/faq.js` (React-free, like `lib/rota.js` and `lib/dashboard.js`), where each section is tagged `audience: 'everyone' | 'heads'` and `faqSectionsFor(isDepartmentHead)` appends the management sections. Heads see the worker questions too — they serve on rotas themselves. Edit the answers there, not in the JSX, and keep them true of the code: they describe how availability is marked, when the cut-off bites, when texts go out, and what declining does.
 - `src/api/` — one module per domain, all using the shared `apiClient` (`src/api/client.js`), which attaches the bearer token and logs requests/responses **only under `import.meta.env.DEV`**, with sensitive fields stripped by `redact()`. Keep new logging behind that guard.
 - `src/hooks/` — one `use<Domain>` hook per domain wrapping the api modules; they own `{ data, loading, error, refetch, ...mutations }` and patch local state after a mutation resolves rather than refetching. Prefer a hook for list/CRUD state; a few pages (`AccountPage`, `ConfirmPage`, `ScheduleDetailPage`, `DepartmentDetailPage`) still call `src/api/` directly for one-off calls.
 - UI built with shadcn-style components in `src/components/ui/` + Tailwind, with per-domain component folders. Path alias `@/` → `src/` (see `jsconfig.json` / `vite.config.js`).
@@ -173,7 +203,7 @@ supabase db reset               # reset + reapply + seed
 supabase migration repair --status reverted $MIGRATION_ID   # after a failed push
 ```
 
-Core tables: `workers`, `worker_app_roles`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `availability`, `schedules`, `schedule_assignments`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
+Core tables: `workers`, `worker_app_roles`, `worker_leave`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `availability`, `schedules`, `schedule_assignments`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
 
 See `docs/database-migrations.md`. When adding tables/columns, also add RLS policies and update the corresponding repository (`queries.py` constants included) + Pydantic schema.
 

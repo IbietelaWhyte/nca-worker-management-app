@@ -96,7 +96,17 @@ class SMSService:
         department_name: str,
         availability_url: str,
     ) -> bool:
-        """Ask a worker to enter the dates they are available.
+        """Ask a worker for the dates they CANNOT serve.
+
+        The question is asked negatively because the rota already answers it that way: a worker
+        with no record at all is treated as available, so asking who is free collects an opinion
+        nothing acts on, and someone who ignores the text is scheduled either way. Asking for the
+        exceptions means silence and "I am free" say the same thing, which is what the volunteers
+        who saw this expected.
+
+        "No reply means you are free" is in the message rather than only on the page: most people
+        read the SMS and never tap through, so the one who does nothing has to understand what
+        doing nothing means.
 
         The link is deliberately token-based rather than pointing at the app: most workers have
         no login account, so a link to a sign-in page would reach almost nobody.
@@ -105,14 +115,18 @@ class SMSService:
             to: Recipient phone number in E.164 format.
             worker_name: Name of the worker being asked.
             department_name: The department asking.
-            availability_url: Public link to the page where they can set their dates.
+            availability_url: Public link to the page where they mark themselves off.
 
         Returns:
             bool: True if the prompt was sent, False if sending failed.
         """
+        # Every character stays inside GSM-7, and the wording is kept short, so a name, a
+        # department and a link still fit one 160-character segment. CANNOT is capitalised
+        # because it is the single word that inverts the question this used to ask, and SMS
+        # has no other way to stress it.
         body = (
-            f"Hi {worker_name}, please let {department_name} know which dates you are available "
-            f"to serve: {availability_url}"
+            f"Hi {worker_name}, tell {department_name} any dates you CANNOT serve. "
+            f"No reply means you are free: {availability_url}"
         )
         self.logger.info("sending_availability_prompt", to=mask_phone(to))
         return self.send_sms(to, body)

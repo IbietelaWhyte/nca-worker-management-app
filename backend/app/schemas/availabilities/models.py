@@ -63,16 +63,21 @@ class AvailabilityUpdate(BaseModel):
 
 
 class PublicAvailabilityUpdate(BaseModel):
-    """One date being set from the public, token-authenticated page."""
+    """One date being marked off from the public, token-authenticated page.
+
+    Carries no is_available flag: the page asks only which dates a worker CANNOT serve, because
+    an unmarked date already counts as available everywhere the rota is built. Sending the flag
+    would let the page write "available" rows that mean nothing and read as a second opinion.
+    """
 
     specific_date: date
-    is_available: bool
 
 
 class PublicAvailabilityDate(BaseModel):
+    """One date the worker has marked themselves off for."""
+
     id: UUID
     specific_date: date
-    is_available: bool
 
 
 class PublicAvailabilityResponse(BaseModel):
@@ -83,4 +88,20 @@ class PublicAvailabilityResponse(BaseModel):
     """
 
     worker_name: str
+    # Dates they cannot serve. Everything absent from this list is a date they can.
     dates: list[PublicAvailabilityDate] = []
+    # Carried in the page's first response so the calendar can grey out closed dates without a
+    # second, unauthenticated config call.
+    editable_from: date
+
+
+class AvailabilityConfig(BaseModel):
+    """The cut-off, for the signed-in editor.
+
+    The public page gets the same `editable_from` inside its own response; this is the
+    authenticated equivalent, so the calendar can close dates before a worker taps one rather
+    than after.
+    """
+
+    editable_from: date
+    notice_days: int

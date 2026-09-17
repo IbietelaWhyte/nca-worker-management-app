@@ -9,6 +9,7 @@ from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
+from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.authentication.models import RegisterRequest
 from app.schemas.availabilities.models import AvailabilityResponse
@@ -43,6 +44,17 @@ def mock_schedule_repo():
 @pytest.fixture
 def mock_availability_repo():
     return MagicMock(spec=AvailabilityRepository)
+
+
+@pytest.fixture
+def mock_leave_repo():
+    """No leave by default, so an existing test never has a worker quietly removed."""
+    repo = MagicMock(spec=WorkerLeaveRepository)
+    repo.get_active_on.return_value = []
+    repo.get_for_workers.return_value = []
+    repo.get_by_worker.return_value = []
+    repo.get_overlapping.return_value = []
+    return repo
 
 
 @pytest.fixture

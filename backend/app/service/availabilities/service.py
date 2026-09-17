@@ -1,11 +1,13 @@
-from datetime import date
+from datetime import date, timedelta
 from uuid import UUID
 
+from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.availabilities.repository import AvailabilityRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.availabilities.models import (
+    AvailabilityConfig,
     AvailabilityCreate,
     AvailabilityResponse,
     AvailabilityUpdate,
@@ -31,6 +33,57 @@ class AvailabilityService:
         # bind logger to service name for easier log filtering
         self.logger = logger.bind(service="AvailabilityService")
 
+    # ------------------------------------------------------------------
+    # The cut-off
+    #
+    # Availability is only worth collecting while there is still time to act on it. Every write
+    # that names a date goes through _ensure_editable, so a worker cannot answer for a date that
+    # has already been rostered — or, at the default notice period of zero, for one already past.
+    # ------------------------------------------------------------------
+
+    def editable_from(self, today: date | None = None) -> date:
+        """Return the earliest date still open for changes.
+
+        Args:
+            today: Override for the current date; defaults to the current date.
+
+        Returns:
+            date: The first date a worker may still mark off or clear.
+        """
+        return (today or date.today()) + timedelta(days=settings.availability_notice_days)
+
+    def get_config(self) -> AvailabilityConfig:
+        """Return the cut-off for the signed-in availability editor.
+
+        Returns:
+            AvailabilityConfig: The first editable date and the notice period behind it.
+        """
+        return AvailabilityConfig(
+            editable_from=self.editable_from(),
+            notice_days=settings.availability_notice_days,
+        )
+
+    def _ensure_editable(self, specific_date: date) -> None:
+        """Reject a change to a date whose cut-off has passed.
+
+        Args:
+            specific_date: The date being marked off or cleared.
+
+        Raises:
+            BadRequestError: If that date has closed.
+        """
+        cutoff = self.editable_from()
+        if specific_date >= cutoff:
+            return
+        self.logger.info(
+            "availability_date_closed",
+            specific_date=specific_date.isoformat(),
+            editable_from=cutoff.isoformat(),
+        )
+        raise BadRequestError(
+            f"Availability for {specific_date:%d %b %Y} has closed. You can still change {cutoff:%d %b %Y} onwards."
+        )
+
     def get_public_availability(self, worker_id: UUID) -> PublicAvailabilityResponse:
         """Build the view shown on the public, token-authenticated availability page.
 
@@ -49,41 +102,58 @@ class AvailabilityService:
             raise NotFoundError(f"Worker {worker_id} not found")
 
         records = self.availability_repo.get_by_worker(worker_id)
+        # is_available rows are dropped rather than rendered. The page used to ask the opposite
+        # question, so old rows saying "I can serve" still exist; under the question it asks now
+        # an unmarked date already means that, and showing them would read as a contradiction.
         dates = [
-            PublicAvailabilityDate(id=r.id, specific_date=r.specific_date, is_available=r.is_available)
+            PublicAvailabilityDate(id=r.id, specific_date=r.specific_date)
             for r in records
-            if r.availability_type == AvailabilityType.SPECIFIC_DATE and r.specific_date is not None
+            if r.availability_type == AvailabilityType.SPECIFIC_DATE
+            and r.specific_date is not None
+            and not r.is_available
         ]
         dates.sort(key=lambda d: d.specific_date)
         return PublicAvailabilityResponse(
             worker_name=f"{worker.first_name} {worker.last_name}".strip(),
             dates=dates,
+            editable_from=self.editable_from(),
         )
 
-    def set_specific_date(self, worker_id: UUID, specific_date: date, is_available: bool) -> AvailabilityResponse:
-        """Mark one date available or unavailable for a worker.
+    def mark_unavailable(self, worker_id: UUID, specific_date: date) -> AvailabilityResponse:
+        """Record that a worker cannot serve on one date.
+
+        The only write the public page makes. There is no matching "mark available" because the
+        rota treats an unrecorded date as available already, so the answer worth collecting is
+        the exception.
 
         Args:
-            worker_id: The worker whose availability is being set.
-            specific_date: The date being set.
-            is_available: Whether they can serve that day.
+            worker_id: The worker marking themselves off.
+            specific_date: The date they cannot serve.
 
         Returns:
             AvailabilityResponse: The stored record.
+
+        Raises:
+            BadRequestError: If that date has passed its cut-off.
         """
-        log = self.logger.bind(method="set_specific_date", worker_id=str(worker_id))
-        record = self.availability_repo.upsert_specific_date_availability(worker_id, specific_date, is_available)
-        log.info("specific_date_set", is_available=is_available)
+        log = self.logger.bind(method="mark_unavailable", worker_id=str(worker_id))
+        self._ensure_editable(specific_date)
+        record = self.availability_repo.upsert_specific_date_availability(worker_id, specific_date, is_available=False)
+        log.info("marked_unavailable", specific_date=specific_date.isoformat())
         return record
 
     def clear_specific_date(self, worker_id: UUID, specific_date: date) -> None:
-        """Remove a worker's override for one date, falling back to their recurring pattern.
+        """Remove a worker's mark on one date, putting them back to available.
 
         Args:
-            worker_id: The worker whose override is being removed.
+            worker_id: The worker whose mark is being removed.
             specific_date: The date to clear.
+
+        Raises:
+            BadRequestError: If that date has passed its cut-off.
         """
         log = self.logger.bind(method="clear_specific_date", worker_id=str(worker_id))
+        self._ensure_editable(specific_date)
         deleted = self.availability_repo.delete_specific_date(worker_id, specific_date)
         log.info("specific_date_cleared", deleted=deleted)
 
@@ -153,7 +223,8 @@ class AvailabilityService:
             AvailabilityResponse: The created or updated availability record.
 
         Raises:
-            ValueError: If specific_date is required but not provided.
+            BadRequestError: If specific_date is required but not provided, or names a date
+                whose cut-off has passed.
         """
         log = self.logger.bind(worker_id=str(data.worker_id), data=data.model_dump(exclude={"worker_id"}))
         log.info("setting_worker_availability")  # Log the intent to set availability
@@ -170,6 +241,7 @@ class AvailabilityService:
         else:
             if data.specific_date is None:
                 raise BadRequestError("specific_date is required for specific date availability")
+            self._ensure_editable(data.specific_date)
             record = self.availability_repo.upsert_specific_date_availability(
                 worker_id=data.worker_id,
                 specific_date=data.specific_date,
@@ -191,13 +263,22 @@ class AvailabilityService:
             AvailabilityResponse: The updated availability record.
 
         Raises:
-            ValueError: If availability record not found or update fails.
+            NotFoundError: If the availability record does not exist.
+            BadRequestError: If the date it names, before or after the change, has closed.
+            AppError: If the update fails.
         """
         log = self.logger.bind(availability_id=str(availability_id), data=data.model_dump(exclude_none=True))
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
             log.warning("availability_not_found")
             raise NotFoundError(f"Availability record {availability_id} not found")
+
+        # Both ends of the change are checked: moving a mark off a closed date reopens that date
+        # just as surely as editing it in place, and landing on one answers for it after the fact.
+        if existing.specific_date is not None:
+            self._ensure_editable(existing.specific_date)
+        if data.specific_date is not None:
+            self._ensure_editable(data.specific_date)
 
         updated = self.availability_repo.update(availability_id, data.model_dump(exclude_none=True))
         if not updated:
@@ -208,11 +289,23 @@ class AvailabilityService:
         return updated
 
     def delete_availability(self, availability_id: UUID) -> None:
+        """Remove one availability record.
+
+        Args:
+            availability_id: The record to remove.
+
+        Raises:
+            NotFoundError: If the record does not exist.
+            BadRequestError: If it names a date whose cut-off has passed.
+        """
         log = self.logger.bind(availability_id=str(availability_id))
         existing = self.availability_repo.get_by_id(availability_id)
         if not existing:
             log.warning("availability_not_found")
             raise NotFoundError(f"Availability record {availability_id} not found")
+
+        if existing.specific_date is not None:
+            self._ensure_editable(existing.specific_date)
 
         self.availability_repo.delete(availability_id)
         log.info("availability_deleted")
@@ -239,7 +332,15 @@ class AvailabilityService:
         return existing.worker_id
 
     def clear_worker_availability(self, worker_id: UUID) -> None:
-        """Removes all availability records for a worker."""
+        """Remove every availability record for a worker.
+
+        Deliberately not held to the cut-off. This is a manager resetting a roster, not a worker
+        answering for a date, and refusing it part-way would leave a worker whose history spans
+        the cut-off permanently un-resettable.
+
+        Args:
+            worker_id: The worker whose records are removed.
+        """
         self.availability_repo.delete_worker_availability(worker_id)
         log = self.logger.bind(worker_id=str(worker_id))
         log.info("worker_availability_cleared")

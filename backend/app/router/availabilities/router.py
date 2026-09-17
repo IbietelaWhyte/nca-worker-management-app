@@ -10,6 +10,7 @@ from app.core.dependencies import (
     get_worker_service,
 )
 from app.schemas.availabilities.models import (
+    AvailabilityConfig,
     AvailabilityCreate,
     AvailabilityResponse,
     AvailabilityUpdate,
@@ -46,15 +47,15 @@ def get_availability_by_link(
 
 
 @router.put("/link/{token}", response_model=AvailabilityResponse)
-def set_availability_by_link(
+def mark_unavailable_by_link(
     token: UUID,
     data: PublicAvailabilityUpdate,
     service: AvailabilityService = Depends(get_availability_service),
     token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> AvailabilityResponse:
-    """Public endpoint — no authentication required. Marks one date available or unavailable."""
+    """Public endpoint — no authentication required. Marks one date as one the worker cannot serve."""
     worker_id = token_service.resolve_worker_id(token)
-    return service.set_specific_date(worker_id, data.specific_date, data.is_available)
+    return service.mark_unavailable(worker_id, data.specific_date)
 
 
 @router.delete("/link/{token}", status_code=status.HTTP_204_NO_CONTENT)
@@ -64,7 +65,7 @@ def clear_availability_by_link(
     service: AvailabilityService = Depends(get_availability_service),
     token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> None:
-    """Public endpoint — no authentication required. Removes a worker's override for one date."""
+    """Public endpoint — no authentication required. Takes a worker's mark back off one date."""
     worker_id = token_service.resolve_worker_id(token)
     service.clear_specific_date(worker_id, specific_date)
 
@@ -72,6 +73,15 @@ def clear_availability_by_link(
 # ----------------------------------------------------------------------
 # Authenticated endpoints
 # ----------------------------------------------------------------------
+
+
+@router.get("/config", response_model=AvailabilityConfig)
+def get_availability_config(
+    _: TokenPayload = CurrentUser,
+    service: AvailabilityService = Depends(get_availability_service),
+) -> AvailabilityConfig:
+    """Return the cut-off, so the calendar can close dates before someone taps one."""
+    return service.get_config()
 
 
 @router.get("/workers/{worker_id}", response_model=list[AvailabilityResponse])

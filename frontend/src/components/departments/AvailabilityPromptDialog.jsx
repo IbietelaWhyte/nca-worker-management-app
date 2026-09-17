@@ -111,8 +111,10 @@ export default function AvailabilityPromptDialog({ open, onOpenChange, departmen
                 <DialogHeader>
                     <DialogTitle>Prompt for availability</DialogTitle>
                     <DialogDescription>
-                        Text this department&apos;s active workers a link where they can enter the
-                        dates they can serve. No login is needed to use the link.
+                        Text this department&apos;s active workers a link where they can mark the
+                        dates they <strong className="font-semibold">cannot</strong> serve. The
+                        message says that no reply means they are free, so anyone available all
+                        month need do nothing. No login is needed to use the link.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -129,6 +131,8 @@ export default function AvailabilityPromptDialog({ open, onOpenChange, departmen
                                 Texted {plural(result.sent, 'worker')}.
                                 {result.skipped_no_phone > 0 &&
                                     ` ${plural(result.skipped_no_phone, 'worker')} skipped — no phone number on file.`}
+                                {result.skipped_on_leave > 0 &&
+                                    ` ${plural(result.skipped_on_leave, 'worker')} skipped — on leave.`}
                                 {result.failed > 0 &&
                                     ` ${plural(result.failed, 'message')} failed to send.`}
                             </AlertDescription>

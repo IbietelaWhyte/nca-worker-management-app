@@ -2,6 +2,9 @@
  * Public API client for the token-authenticated availability page.
  * No auth token is attached — most workers have no Supabase account, so an SMS asking them to
  * set their availability has to reach them without one. The link itself is the credential.
+ *
+ * The page asks one question: which dates can you NOT serve. There is no "mark available" call
+ * because an unmarked date already counts as available wherever the rota is built.
  */
 import axios from 'axios'
 
@@ -10,12 +13,13 @@ const publicClient = axios.create({
 })
 
 /**
- * Fetch the worker's name and the dates they have already set.
+ * Fetch the worker's name, the dates they have marked themselves off for, and the cut-off.
  *
  * @param {string} token - The UUID token from the URL path parameter.
  * @returns {Promise<{
  *   worker_name: string,
- *   dates: Array<{ id: string, specific_date: string, is_available: boolean }>,
+ *   dates: Array<{ id: string, specific_date: string }>,
+ *   editable_from: string,
  * }>}
  */
 export async function getAvailabilityByLink(token) {
@@ -24,23 +28,21 @@ export async function getAvailabilityByLink(token) {
 }
 
 /**
- * Mark one date available or unavailable.
+ * Mark one date as one the worker cannot serve.
  *
  * @param {string} token - The UUID token from the URL path parameter.
  * @param {string} specificDate - The date, as yyyy-MM-dd.
- * @param {boolean} isAvailable - Whether the worker can serve that day.
  * @returns {Promise<object>} The stored availability record.
  */
-export async function setAvailabilityByLink(token, specificDate, isAvailable) {
+export async function markUnavailableByLink(token, specificDate) {
     const response = await publicClient.put(`/availability/link/${token}`, {
         specific_date: specificDate,
-        is_available: isAvailable,
     })
     return response.data
 }
 
 /**
- * Remove the worker's override for one date, falling back to their recurring pattern.
+ * Take the mark back off one date, putting the worker back to available for it.
  *
  * @param {string} token - The UUID token from the URL path parameter.
  * @param {string} specificDate - The date, as yyyy-MM-dd.

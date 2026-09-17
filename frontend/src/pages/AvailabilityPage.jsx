@@ -36,7 +36,8 @@ export default function AvailabilityPage() {
     const noProfileLinked = !isAdmin && !workersLoading && !currentWorker
 
     const {
-        specificDates,
+        unavailableDates,
+        editableFrom,
         loading: availabilityLoading,
         error,
         toggleSpecificDate,
@@ -46,7 +47,7 @@ export default function AvailabilityPage() {
     const selectedWorker = workers.find(w => w.id === resolvedWorkerId)
 
     const handleClearAll = async () => {
-        if (!confirm(`Clear all availability for ${selectedWorker?.first_name}?`)) return
+        if (!confirm(`Clear all marked dates for ${selectedWorker?.first_name}?`)) return
         await clearAll()
     }
 
@@ -56,8 +57,8 @@ export default function AvailabilityPage() {
                 <h2 className="text-2xl font-bold">Availability</h2>
                 <p className="text-muted-foreground text-sm mt-1">
                     {canPickWorker
-                        ? 'Manage specific date availability for the workers you oversee'
-                        : 'Manage your specific date availability'}
+                        ? 'Mark the dates the workers you oversee cannot serve'
+                        : 'Mark the dates you cannot serve'}
                 </p>
             </div>
 
@@ -103,10 +104,10 @@ export default function AvailabilityPage() {
                             <span className="font-medium">
                                 {selectedWorker?.first_name} {selectedWorker?.last_name}
                             </span>
-                            {specificDates.length > 0 && (
+                            {unavailableDates.length > 0 && (
                                 <Badge variant="outline">
-                                    {specificDates.length} date override
-                                    {specificDates.length !== 1 ? 's' : ''}
+                                    {unavailableDates.length} date
+                                    {unavailableDates.length !== 1 ? 's' : ''} marked
                                 </Badge>
                             )}
                         </div>
@@ -114,7 +115,7 @@ export default function AvailabilityPage() {
                             variant="outline"
                             size="sm"
                             onClick={handleClearAll}
-                            disabled={availabilityLoading || specificDates.length === 0}
+                            disabled={availabilityLoading || unavailableDates.length === 0}
                             className="text-destructive hover:text-destructive"
                         >
                             <Trash2 size={14} className="mr-2" />
@@ -129,14 +130,16 @@ export default function AvailabilityPage() {
                     )}
 
                     <p className="text-sm text-muted-foreground">
-                        Click a date once to mark available, again to mark unavailable, once more to
-                        clear.
+                        Click a date to mark it as one that cannot be served, and click it again to
+                        undo. Anything left unmarked already counts as available, so only the
+                        exceptions need recording.
                     </p>
 
                     <SpecificDatesCalendar
-                        specificDates={specificDates}
+                        unavailableDates={unavailableDates}
                         onDateClick={toggleSpecificDate}
                         loading={availabilityLoading}
+                        editableFrom={editableFrom}
                     />
                 </div>
             )}

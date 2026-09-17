@@ -13,6 +13,7 @@ from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules import queries as q
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
+from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
@@ -115,12 +116,14 @@ class ScheduleService:
         subteam_repo: SubteamRepository,
         availability_repo: AvailabilityRepository,
         department_role_repo: DepartmentRoleRepository,
+        leave_repo: WorkerLeaveRepository,
     ) -> None:
         self.schedule_repo = schedule_repo
         self.worker_repo = worker_repo
         self.department_repo = department_repo
         self.subteam_repo = subteam_repo
         self.availability_repo = availability_repo
+        self.leave_repo = leave_repo
         self.department_role_repo = department_role_repo
 
         # bind the logger to the service name for structured logging
@@ -205,9 +208,13 @@ class ScheduleService:
         # 3. Workers already scheduled on this date are out (prevent double-scheduling)
         already_scheduled_worker_ids = set(self.schedule_repo.get_workers_scheduled_on_date(data.scheduled_date))
 
+        # 3b. So is anyone away. One query for the whole date rather than a lookup per worker,
+        #     and folded into `booked` because the effect is identical: not pickable today.
+        on_leave = {leave.worker_id for leave in self.leave_repo.get_active_on(data.scheduled_date)}
+
         # 4. Fill each group from its own roster, least-recently-assigned first. `booked`
         #    is shared so a worker cannot be taken twice on this date.
-        booked = set(already_scheduled_worker_ids)
+        booked = set(already_scheduled_worker_ids) | on_leave
         selected: list[Worker] = []
         selected_subteams: dict[UUID, UUID | None] = {}
 
@@ -757,12 +764,17 @@ class ScheduleService:
     def _build_unavailability_map(
         self, worker_ids: list[UUID], dates: list[date], range_start: date, range_end: date
     ) -> dict[date, set[UUID]]:
-        """Resolve who is unavailable on each date, from one batched availability fetch.
+        """Resolve who cannot be picked on each date, from two batched fetches.
 
         Mirrors `_is_worker_available`: a specific-date override beats the recurring
         weekly setting, and a worker with no record at all is available.
+
+        Leave is unioned in here rather than given its own channel so the planner stays
+        unchanged and pure — to it, a worker away on a date is simply one who cannot be
+        picked. The cost is that a plan's "3 unavailable" message does not separate the two.
         """
         records = self.availability_repo.get_for_workers(worker_ids, range_start, range_end)
+        leave_records = self.leave_repo.get_for_workers(worker_ids, range_start, range_end)
 
         recurring: dict[tuple[UUID, int], bool] = {}
         specific: dict[tuple[UUID, date], bool] = {}
@@ -784,6 +796,7 @@ class ScheduleService:
                     recurring.get((worker_id, db_day_of_week), True),
                 )
             }
+            blocked |= {leave.worker_id for leave in leave_records if leave.covers(scheduled_date)}
             if blocked:
                 unavailable[scheduled_date] = blocked
         return unavailable
