@@ -11,7 +11,7 @@ from app.core.dependencies import (
     get_worker_service,
 )
 from app.core.exceptions import AppError, BadRequestError
-from app.schemas.models import AssignmentStatus, MessageResponse, TokenPayload
+from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
     MonthlyScheduleCommitRequest,
@@ -131,27 +131,6 @@ def get_worker_assignments(
     """
     worker_service.authorize_view_worker(token, worker_id)
     return service.get_worker_assignments(worker_id)
-
-
-@router.patch(
-    "/assignments/{assignment_id}/status",
-    response_model=AssignmentResponse,
-)
-def update_assignment_status(
-    assignment_id: UUID,
-    status_update: AssignmentStatus,
-    token: TokenPayload = CurrentUser,
-    service: ScheduleService = Depends(get_schedule_service),
-    worker_service: WorkerService = Depends(get_worker_service),
-) -> AssignmentResponse:
-    """Workers can confirm or decline their own assignments.
-
-    Scoped to the assignment's own worker: this used to accept any logged-in user, so anybody
-    could answer on anybody's behalf.
-    """
-    assignment = service.get_assignment(assignment_id)
-    worker_service.authorize_act_for_worker(token, assignment.worker_id, subject="assignments")
-    return service.update_assignment_status(assignment_id, status_update)
 
 
 @router.patch(

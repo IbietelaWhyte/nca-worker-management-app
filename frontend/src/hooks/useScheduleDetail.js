@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
     getSchedule,
-    updateAssignmentStatus,
     setAssignmentRole,
     triggerReminders,
     triggerRemindersForSchedule,
@@ -30,17 +29,6 @@ export function useScheduleDetail(scheduleId) {
         fetchSchedule()
     }, [fetchSchedule])
 
-    const changeAssignmentStatus = async (assignmentId, status) => {
-        const response = await updateAssignmentStatus(assignmentId, status)
-        setSchedule(prev => ({
-            ...prev,
-            schedule_assignments: prev.schedule_assignments.map(a =>
-                a.id === assignmentId ? response.data : a
-            ),
-        }))
-        return response.data
-    }
-
     const changeAssignmentRole = async (assignmentId, departmentRoleId) => {
         const response = await setAssignmentRole(assignmentId, departmentRoleId)
         setSchedule(prev => ({
@@ -67,7 +55,6 @@ export function useScheduleDetail(scheduleId) {
         loading,
         error,
         refetch: fetchSchedule,
-        changeAssignmentStatus,
         changeAssignmentRole,
         sendReminders,
         sendRemindersForSchedule,

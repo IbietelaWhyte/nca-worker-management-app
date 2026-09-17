@@ -3,7 +3,6 @@ import { useScheduleDetail } from '@/hooks/useScheduleDetail'
 import { useAuth } from '@/context/AuthContext'
 import AssignmentsList from '@/components/schedules/AssignmentsList'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell } from 'lucide-react'
@@ -16,14 +15,8 @@ export default function ScheduleDetailPage() {
     const { id } = useParams()
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead } = useAuth()
-    const {
-        schedule,
-        loading,
-        error,
-        changeAssignmentStatus,
-        changeAssignmentRole,
-        sendRemindersForSchedule,
-    } = useScheduleDetail(id)
+    const { schedule, loading, error, changeAssignmentRole, sendRemindersForSchedule } =
+        useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
     const [showEmptySubteams, setShowEmptySubteams] = useState(true)
@@ -148,9 +141,7 @@ export default function ScheduleDetailPage() {
     }
 
     const assignments = schedule?.schedule_assignments ?? []
-    const confirmedCount = assignments.filter(a => a.status === 'confirmed').length
     const totalCount = assignments.length
-    const allConfirmed = confirmedCount === totalCount && totalCount > 0
 
     return (
         <div className="space-y-6">
@@ -186,24 +177,9 @@ export default function ScheduleDetailPage() {
             <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/30">
                 <div className="text-center">
                     <p className="text-2xl font-bold">{totalCount}</p>
-                    <p className="text-xs text-muted-foreground">Assigned</p>
-                </div>
-                <div className="text-center">
-                    <p className="text-2xl font-bold text-primary">{confirmedCount}</p>
-                    <p className="text-xs text-muted-foreground">Confirmed</p>
-                </div>
-                <div className="text-center">
-                    <p className="text-2xl font-bold text-destructive">
-                        {assignments.filter(a => a.status === 'declined').length}
+                    <p className="text-xs text-muted-foreground">
+                        {totalCount === 1 ? 'Worker assigned' : 'Workers assigned'}
                     </p>
-                    <p className="text-xs text-muted-foreground">Declined</p>
-                </div>
-                <div className="ml-auto">
-                    <Badge variant={allConfirmed ? 'default' : 'secondary'}>
-                        {allConfirmed
-                            ? 'Fully confirmed'
-                            : `${confirmedCount}/${totalCount} confirmed`}
-                    </Badge>
                 </div>
             </div>
 
@@ -244,7 +220,6 @@ export default function ScheduleDetailPage() {
                 ) : (
                     <AssignmentsList
                         groupedAssignments={groupedAssignments}
-                        onStatusChange={changeAssignmentStatus}
                         onRoleChange={changeAssignmentRole}
                         roles={departmentRoles}
                         canManage={isAdmin || isDepartmentHead}

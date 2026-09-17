@@ -205,24 +205,16 @@ def get_sms_service() -> SMSService:
 
 def get_confirmation_token_service(
     token_repo: ConfirmationTokenRepository = Depends(get_confirmation_token_repository),
-    schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
-    worker_repo: WorkerRepository = Depends(get_worker_repository),
 ) -> ConfirmationTokenService:
     """FastAPI dependency that provides a ConfirmationTokenService instance.
 
     Args:
         token_repo: ConfirmationTokenRepository dependency.
-        schedule_repo: ScheduleRepository dependency.
-        worker_repo: WorkerRepository dependency.
 
     Returns:
-        ConfirmationTokenService: Service for one-time confirmation token operations.
+        ConfirmationTokenService: Service for the public per-worker link tokens.
     """
-    return ConfirmationTokenService(
-        token_repo=token_repo,
-        schedule_repo=schedule_repo,
-        worker_repo=worker_repo,
-    )
+    return ConfirmationTokenService(token_repo=token_repo)
 
 
 def get_reminder_service(
@@ -230,7 +222,6 @@ def get_reminder_service(
     sms_service: SMSService = Depends(get_sms_service),
     worker_repo: WorkerRepository = Depends(get_worker_repository),
     department_repo: DepartmentRepository = Depends(get_department_repository),
-    token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
 ) -> ReminderService:
     """FastAPI dependency that provides a ReminderService instance.
 
@@ -239,7 +230,6 @@ def get_reminder_service(
         sms_service: SMSService dependency.
         worker_repo: WorkerRepository dependency.
         department_repo: DepartmentRepository dependency.
-        token_service: ConfirmationTokenService dependency for embedding links in SMS.
 
     Returns:
         ReminderService: Service for sending scheduled reminders to workers.
@@ -249,7 +239,6 @@ def get_reminder_service(
         sms_service=sms_service,
         worker_repo=worker_repo,
         department_repo=department_repo,
-        token_service=token_service,
     )
 
 

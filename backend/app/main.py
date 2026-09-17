@@ -19,7 +19,6 @@ from app.router import (
     account,
     authentication,
     availabilities,
-    confirmation_tokens,
     department_roles,
     departments,
     feedback,
@@ -57,11 +56,7 @@ def create_reminder_service() -> ReminderService:
     worker_repo = WorkerRepository(client)
     department_repo = DepartmentRepository(client)
     sms_service = SMSService()
-    token_service = ConfirmationTokenService(
-        token_repo=ConfirmationTokenRepository(client),
-        schedule_repo=schedule_repo,
-        worker_repo=worker_repo,
-    )
+    token_service = ConfirmationTokenService(token_repo=ConfirmationTokenRepository(client))
     prompt_service = AvailabilityPromptService(
         prompt_repo=AvailabilityPromptRepository(client),
         department_repo=DepartmentRepository(client),
@@ -75,7 +70,6 @@ def create_reminder_service() -> ReminderService:
         sms_service=sms_service,
         worker_repo=worker_repo,
         department_repo=department_repo,
-        token_service=token_service,
         prompt_service=prompt_service,
     )
 
@@ -129,7 +123,6 @@ app.include_router(subteams.router, prefix="/api/v1")
 app.include_router(department_roles.router, prefix="/api/v1")
 app.include_router(account.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
-app.include_router(confirmation_tokens.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(worker_leave.router, prefix="/api/v1")
 

@@ -16,7 +16,7 @@ from app.repository.subteams.repository import SubteamRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.department_roles.models import DepartmentRoleResponse
-from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
+from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import (
     AssignmentResponse,
     DatePlan,
@@ -291,7 +291,6 @@ class ScheduleService:
                 # The group already told us which subteam each worker fills.
                 "subteam_id": _subteam_for_assignment(selected_subteams, worker.id, schedule_subteam_id),
                 "department_role_id": str(role.id) if (role := worker_roles.get(worker.id)) else None,
-                "status": AssignmentStatus.PENDING,
             }
             for worker in selected
         ]
@@ -325,19 +324,6 @@ class ScheduleService:
             self.logger.bind(method="get_assignment", assignment_id=str(assignment_id)).warning("assignment_not_found")
             raise NotFoundError(f"Assignment {assignment_id} not found")
         return assignment
-
-    def update_assignment_status(self, assignment_id: UUID, status: AssignmentStatus) -> AssignmentResponse:
-        log = self.logger.bind(method="update_assignment_status", assignment_id=str(assignment_id), status=status.value)
-        updated = self.schedule_repo.update_assignment_status(assignment_id, status)
-        if not updated:
-            log.warning("assignment_not_found", assignment_id=str(assignment_id))
-            raise NotFoundError(f"Assignment {assignment_id} not found")
-        log.info(
-            "assignment_status_updated",
-            assignment_id=str(assignment_id),
-            status=status,
-        )
-        return updated
 
     def update_assignment_role(self, assignment_id: UUID, department_role_id: UUID | None) -> AssignmentResponse:
         """Override the department role on a schedule assignment.
@@ -594,7 +580,6 @@ class ScheduleService:
                 "worker_id": str(worker_id),
                 "subteam_id": _subteam_for_assignment(subteam_by_worker, worker_id, schedule_subteam_id),
                 "department_role_id": str(roles[worker_id].id) if roles.get(worker_id) else None,
-                "status": AssignmentStatus.PENDING,
             }
             for selection in to_create
             if selection.scheduled_date in schedule_by_date

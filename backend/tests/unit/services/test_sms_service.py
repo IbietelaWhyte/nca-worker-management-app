@@ -4,7 +4,6 @@ import pytest
 
 from app.service.sms.service import SMSService
 
-URL = "https://app.example.com/confirm/abc"
 PROMPT_URL = "https://app.example.com/availability/abc"
 
 # A character outside this alphabet silently switches the whole message to UCS-2, which cuts a
@@ -30,7 +29,6 @@ def notice_body(service, duties) -> str:
             to="+14165550101",
             worker_name="Ada",
             duties=duties,
-            confirmation_url=URL,
         )
     return str(send.call_args.args[1])
 
@@ -40,10 +38,7 @@ class TestAssignmentNoticeBody:
 
     def test_a_single_date_names_its_department(self, service):
         body = notice_body(service, [("Ushering", "Sun 02 Aug at 09:00")])
-        assert body == (
-            "Hi Ada, you have been scheduled for Sun 02 Aug at 09:00 in Ushering. "
-            f"Please confirm or decline here: {URL}"
-        )
+        assert body == "Hi Ada, you have been scheduled for Sun 02 Aug at 09:00 in Ushering."
 
     def test_several_dates_in_one_department_name_it_once(self, service):
         body = notice_body(
@@ -75,9 +70,7 @@ class TestAssignmentNoticeBody:
 
     def test_a_lone_unnameable_department_still_reads_as_a_sentence(self, service):
         body = notice_body(service, [("", "Sun 02 Aug at 09:00")])
-        assert body == (
-            f"Hi Ada, you have been scheduled for Sun 02 Aug at 09:00. Please confirm or decline here: {URL}"
-        )
+        assert body == "Hi Ada, you have been scheduled for Sun 02 Aug at 09:00."
 
     @pytest.mark.parametrize(
         "duties",
@@ -92,6 +85,34 @@ class TestAssignmentNoticeBody:
         # to UCS-2, which cuts a segment from 160 characters to 70 and doubles the cost of a long
         # roster. The separator between groups is a plain hyphen for exactly this reason.
         body = notice_body(service, duties)
+        assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
+
+
+def reminder_body(service, title="Sunday Service") -> str:
+    """Send a pre-service reminder and return the body that reached send_sms."""
+    with patch.object(SMSService, "send_sms", return_value=True) as send:
+        service.send_reminder(
+            to="+14165550101",
+            worker_name="Ada",
+            schedule_title=title,
+            scheduled_date="2026-08-02",
+            start_time="09:00",
+        )
+    return str(send.call_args.args[1])
+
+
+class TestReminderBody:
+    """Untested until the confirmation link came out of it, which is how the tail survived so long."""
+
+    def test_it_is_a_statement_with_nothing_to_answer(self, service):
+        # No link and no "reply CONFIRM": there is no Twilio inbound webhook, so anything that
+        # invited a reply would invite one nobody reads.
+        assert reminder_body(service) == (
+            "Hi Ada, a reminder that you are scheduled for 'Sunday Service' on 2026-08-02 at 09:00."
+        )
+
+    def test_the_body_stays_inside_gsm_7(self, service):
+        body = reminder_body(service)
         assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
 
 

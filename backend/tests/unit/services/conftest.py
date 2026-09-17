@@ -15,7 +15,7 @@ from app.schemas.authentication.models import RegisterRequest
 from app.schemas.availabilities.models import AvailabilityResponse
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
+from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerResponse
@@ -169,7 +169,6 @@ def make_assignment(**kwargs) -> AssignmentResponse:
         worker_id=kwargs.get("worker_id", uuid4()),
         department_role_id=kwargs.get("department_role_id", None),
         subteam_id=kwargs.get("subteam_id", None),
-        status=kwargs.get("status", AssignmentStatus.PENDING),
         reminder_sent_at=kwargs.get("reminder_sent_at", None),
         workers=kwargs.get("workers", None),
         schedules=kwargs.get("schedules", None),

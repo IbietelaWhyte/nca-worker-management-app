@@ -55,13 +55,12 @@ class SMSService:
         schedule_title: str,
         scheduled_date: str,
         start_time: str,
-        confirmation_url: str | None = None,
     ) -> bool:
         """Send a schedule reminder SMS to a worker.
 
-        Formats and sends a reminder message with schedule details. When a
-        confirmation_url is provided the message includes a link for the worker
-        to confirm or decline; otherwise it falls back to a plain-text prompt.
+        The message is a statement, not a question. Nothing consumes inbound SMS — there is no
+        Twilio webhook — so anything that invited a reply would invite one nobody reads. A worker
+        who cannot make a date speaks to their head of department, who edits the rota.
 
         Args:
             to: Recipient phone number in E.164 format.
@@ -69,7 +68,6 @@ class SMSService:
             schedule_title: Title/name of the scheduled event.
             scheduled_date: Date of the scheduled event.
             start_time: Start time of the scheduled event.
-            confirmation_url: Optional one-time confirmation link to embed in the SMS.
 
         Returns:
             bool: True if reminder sent successfully, False if sending failed.
@@ -78,10 +76,6 @@ class SMSService:
             f"Hi {worker_name}, a reminder that you are scheduled for '{schedule_title}' "
             f"on {scheduled_date} at {start_time}."
         )
-        # Nothing consumes inbound SMS — there is no Twilio webhook — so without a link there is
-        # no action to offer. Saying "reply CONFIRM" would promise a reply nobody reads.
-        if confirmation_url:
-            body += f" Confirm or decline here: {confirmation_url}"
         self.logger.info(
             "sending_reminder",
             to=mask_phone(to),
@@ -136,7 +130,6 @@ class SMSService:
         to: str,
         worker_name: str,
         duties: list[tuple[str, str]],
-        confirmation_url: str,
     ) -> bool:
         """Tell a worker they have been scheduled, covering every date in one message.
 
@@ -154,13 +147,12 @@ class SMSService:
             worker_name: Name of the worker being notified.
             duties: (department name, human-readable date) pairs, soonest first. A pair rather than
                 two parallel lists so a date cannot drift onto the wrong department.
-            confirmation_url: Link to the page where each date can be confirmed or declined.
 
         Returns:
             bool: True if the notice was sent, False if sending failed.
         """
         summary = self._describe_duties(duties)
-        body = f"Hi {worker_name}, {summary}. Please confirm or decline here: {confirmation_url}"
+        body = f"Hi {worker_name}, {summary}."
         self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
 

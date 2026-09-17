@@ -65,7 +65,6 @@ class AssignmentResponse(BaseModel):
     worker_id: UUID
     department_role_id: UUID | None = None
     subteam_id: UUID | None = None
-    status: str
     # Two separate notifications: notice_sent_at is the "you have been scheduled" message sent
     # shortly after creation, reminder_sent_at the one sent reminder_days_before the service.
     notice_sent_at: datetime | None = None

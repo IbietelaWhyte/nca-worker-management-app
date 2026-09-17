@@ -8,7 +8,6 @@ from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.workers.models import WorkerResponse
-from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
 
@@ -26,8 +25,8 @@ def make_department(department_id, name: str) -> DepartmentResponse:
 def make_due_assignment(**kwargs) -> AssignmentResponse:
     """Builds an assignment with worker and schedule embedded, as the RPCs return it.
 
-    Pass `department_name` to also embed the department, as the confirmation page's select does;
-    the notice RPC returns no department embed, so it is left off by default.
+    Pass `department_name` to also embed the department, as a plain PostgREST select does; the
+    notice RPC returns row_to_json(s) and so cannot carry an embed, hence it is off by default.
     """
     worker_id = kwargs.get("worker_id", uuid4())
     schedule_id = kwargs.get("schedule_id", uuid4())
@@ -39,7 +38,6 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
         worker_id=worker_id,
         department_role_id=kwargs.get("department_role_id"),
         subteam_id=kwargs.get("subteam_id"),
-        status=kwargs.get("status", "pending"),
         reminder_sent_at=None,
         notice_sent_at=kwargs.get("notice_sent_at"),
         workers=WorkerResponse(
@@ -84,27 +82,17 @@ def mock_worker_repo():
 
 
 @pytest.fixture
-def mock_token_service():
-    token_service = MagicMock(spec=ConfirmationTokenService)
-    token_service.create_token.return_value = "https://app.example.com/confirm/tok"
-    return token_service
-
-
-@pytest.fixture
-def service(mock_schedule_repo, mock_sms_service, mock_worker_repo, mock_department_repo, mock_token_service):
+def service(mock_schedule_repo, mock_sms_service, mock_worker_repo, mock_department_repo):
     return ReminderService(
         schedule_repo=mock_schedule_repo,
         sms_service=mock_sms_service,
         worker_repo=mock_worker_repo,
         department_repo=mock_department_repo,
-        token_service=mock_token_service,
     )
 
 
 class TestSendPendingNotices:
-    def test_groups_a_workers_dates_into_one_message(
-        self, service, mock_schedule_repo, mock_sms_service, mock_token_service
-    ):
+    def test_groups_a_workers_dates_into_one_message(self, service, mock_schedule_repo, mock_sms_service):
         # The whole point of the notice job: monthly generation rosters one person onto four
         # Sundays, and they should get one text, not four.
         worker_id = uuid4()
@@ -118,8 +106,6 @@ class TestSendPendingNotices:
         assert service.trigger_notices() == 1
         mock_sms_service.send_assignment_notice.assert_called_once()
         assert len(mock_sms_service.send_assignment_notice.call_args.kwargs["duties"]) == 4
-        # One token for the worker, not one per date.
-        mock_token_service.create_token.assert_called_once_with(worker_id=worker_id)
 
     def test_names_the_department_beside_each_date(
         self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
@@ -202,15 +188,6 @@ class TestSendPendingNotices:
         mock_sms_service.send_assignment_notice.assert_not_called()
         mock_schedule_repo.mark_notice_sent.assert_not_called()
 
-    def test_does_not_send_a_linkless_notice(self, service, mock_schedule_repo, mock_sms_service, mock_token_service):
-        # A notice with no link has nothing to act on, so it is deferred rather than wasted.
-        mock_token_service.create_token.side_effect = RuntimeError("token store down")
-        mock_schedule_repo.get_assignments_due_for_notice.return_value = [make_due_assignment()]
-
-        assert service.trigger_notices() == 0
-        mock_sms_service.send_assignment_notice.assert_not_called()
-        mock_schedule_repo.mark_notice_sent.assert_not_called()
-
     def test_no_work_is_not_an_error(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_notice.return_value = []
 
@@ -228,23 +205,6 @@ class TestSendDueReminders:
 
         assert service.trigger_manually() == 2
         assert mock_schedule_repo.mark_reminder_sent.call_count == 2
-
-    def test_includes_the_confirmation_link(self, service, mock_schedule_repo, mock_sms_service):
-        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_assignment()]
-        mock_sms_service.send_reminder.return_value = True
-
-        service.trigger_manually()
-        assert mock_sms_service.send_reminder.call_args.kwargs["confirmation_url"] == (
-            "https://app.example.com/confirm/tok"
-        )
-
-    def test_still_reminds_a_worker_who_already_confirmed(self, service, mock_schedule_repo, mock_sms_service):
-        # The RPC no longer filters to 'pending'. Confirming from the initial notice must not
-        # cancel the pre-service reminder.
-        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_assignment(status="confirmed")]
-        mock_sms_service.send_reminder.return_value = True
-
-        assert service.trigger_manually() == 1
 
     def test_does_not_mark_sent_when_sms_fails(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_assignment()]
@@ -288,15 +248,15 @@ class TestTriggerForSchedule:
 
         assert service.trigger_for_schedule(uuid4()) == 2
 
-    def test_skips_workers_who_declined(self, service, mock_schedule_repo, mock_sms_service):
-        # Re-sending is deliberate here (an HOD may have changed the rota), but chasing somebody
-        # about a duty they already turned down is not.
+    def test_reminds_everybody_without_exception(self, service, mock_schedule_repo, mock_sms_service):
+        # The declined filter was this method's only one. A head re-sending after changing a
+        # rota wants the whole team told, and there is no longer a state that opts anyone out.
         mock_schedule_repo.get_with_assignments.return_value = self._schedule_with(
-            [make_due_assignment(status="declined"), make_due_assignment(status="confirmed")]
+            [make_due_assignment(), make_due_assignment(), make_due_assignment()]
         )
         mock_sms_service.send_reminder.return_value = True
 
-        assert service.trigger_for_schedule(uuid4()) == 1
+        assert service.trigger_for_schedule(uuid4()) == 3
 
     def test_returns_zero_for_an_unknown_schedule(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_with_assignments.return_value = None

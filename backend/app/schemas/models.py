@@ -30,12 +30,6 @@ class WorkerStatus(StrEnum):
     INACTIVE = "inactive"
 
 
-class AssignmentStatus(StrEnum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    DECLINED = "declined"
-
-
 class UserRole(StrEnum):
     ADMIN = "admin"
     HOD = "hod"

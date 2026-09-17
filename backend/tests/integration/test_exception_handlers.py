@@ -23,16 +23,18 @@ class TestAppErrorHandler:
         assert response.json() == {"detail": "Worker abc not found"}
 
     def test_gone_error_maps_to_410(self):
-        # Drive an AppError subclass with a non-default status through a public endpoint.
+        # Drive an AppError subclass with a non-default status through a public endpoint. The
+        # availability link is the one that can actually raise it: an expired token is the
+        # normal end of a link's life, and the page has to say so rather than 404.
         from app.core.dependencies import get_confirmation_token_service
         from app.service.confirmation_tokens.service import ConfirmationTokenService
 
         mock_service = MagicMock(spec=ConfirmationTokenService)
-        mock_service.confirm.side_effect = GoneError("This link has expired")
+        mock_service.resolve_worker_id.side_effect = GoneError("This link has expired")
         app.dependency_overrides[get_confirmation_token_service] = lambda: mock_service
         try:
             client = TestClient(app)
-            response = client.post(f"/api/v1/confirm/{uuid4()}?assignment_id={uuid4()}&action=confirmed")
+            response = client.get(f"/api/v1/availability/link/{uuid4()}")
         finally:
             app.dependency_overrides.clear()
         assert response.status_code == 410

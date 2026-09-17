@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.schemas.models import AssignmentStatus, AvailabilityType, DayOfWeek
+from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import (
     DatePlanStatus,
     DateSelection,
@@ -278,21 +278,6 @@ class TestRoleAutoFill:
 
         assignments_arg = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
         assert assignments_arg[0]["department_role_id"] is None
-
-
-class TestUpdateAssignmentStatus:
-    def test_updates_successfully(self, service, mock_schedule_repo):
-        assignment = make_assignment()
-        confirmed = make_assignment(status=AssignmentStatus.CONFIRMED)
-        mock_schedule_repo.update_assignment_status.return_value = confirmed
-
-        result = service.update_assignment_status(assignment.id, AssignmentStatus.CONFIRMED)
-        assert result.status == AssignmentStatus.CONFIRMED
-
-    def test_raises_when_not_found(self, service, mock_schedule_repo):
-        mock_schedule_repo.update_assignment_status.return_value = None
-        with pytest.raises(NotFoundError, match="not found"):
-            service.update_assignment_status(uuid4(), AssignmentStatus.CONFIRMED)
 
 
 class TestUpdateAssignmentRole:

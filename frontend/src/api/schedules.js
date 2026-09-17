@@ -23,11 +23,6 @@ export const deleteSchedule = scheduleId => apiClient.delete(`/schedules/${sched
 export const getWorkerAssignments = workerId =>
     apiClient.get(`/schedules/workers/${workerId}/assignments`)
 
-export const updateAssignmentStatus = (assignmentId, status_update) =>
-    apiClient.patch(`/schedules/assignments/${assignmentId}/status`, null, {
-        params: { status_update },
-    })
-
 export const setAssignmentRole = (assignmentId, departmentRoleId) =>
     apiClient.patch(`/schedules/assignments/${assignmentId}/role`, null, {
         // Omit the param to clear the role (backend treats absent as None).

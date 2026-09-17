@@ -27,6 +27,6 @@ class TestFrontendUrlInvariant:
 
     @pytest.mark.parametrize("value", ["rota.example.org", "//rota.example.org", ""])
     def test_rejects_a_url_with_no_scheme(self, value):
-        # "rota.example.org/confirm/<uuid>" is not a link anything will open.
+        # "rota.example.org/availability/<uuid>" is not a link anything will open.
         with pytest.raises(ValidationError, match="scheme"):
             Settings(frontend_url=value)
