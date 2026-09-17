@@ -30,7 +30,7 @@ import {
     ImageDown,
 } from 'lucide-react'
 import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
-import { summarizeAssignments } from '@/lib/dashboard'
+import { summarizeStaffing } from '@/lib/staffing'
 
 export default function SchedulesPage() {
     const navigate = useNavigate()
@@ -259,10 +259,8 @@ export default function SchedulesPage() {
                                                         )
                                                     )
                                                     .map(schedule => {
-                                                        const { confirmed, total } =
-                                                            summarizeAssignments(
-                                                                schedule.schedule_assignments
-                                                            )
+                                                        const { assigned } =
+                                                            summarizeStaffing(schedule)
 
                                                         return (
                                                             <TableRow
@@ -295,16 +293,8 @@ export default function SchedulesPage() {
                                                                     {schedule.end_time?.slice(0, 5)}
                                                                 </TableCell>
                                                                 <TableCell>
-                                                                    <Badge
-                                                                        variant={
-                                                                            confirmed === total &&
-                                                                            total > 0
-                                                                                ? 'default'
-                                                                                : 'secondary'
-                                                                        }
-                                                                    >
-                                                                        {confirmed}/{total}{' '}
-                                                                        confirmed
+                                                                    <Badge variant="secondary">
+                                                                        {assigned} assigned
                                                                     </Badge>
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
@@ -361,9 +351,7 @@ export default function SchedulesPage() {
                                                 b.scheduled_date.localeCompare(a.scheduled_date)
                                             )
                                             .map(schedule => {
-                                                const { confirmed, total } = summarizeAssignments(
-                                                    schedule.schedule_assignments
-                                                )
+                                                const { assigned } = summarizeStaffing(schedule)
                                                 return (
                                                     <li key={schedule.id}>
                                                         <button
@@ -397,14 +385,9 @@ export default function SchedulesPage() {
                                                                 </p>
                                                                 <Badge
                                                                     className="mt-2"
-                                                                    variant={
-                                                                        confirmed === total &&
-                                                                        total > 0
-                                                                            ? 'default'
-                                                                            : 'secondary'
-                                                                    }
+                                                                    variant="secondary"
                                                                 >
-                                                                    {confirmed}/{total} confirmed
+                                                                    {assigned} assigned
                                                                 </Badge>
                                                             </div>
                                                             <ChevronRight

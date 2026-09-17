@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from supabase import Client
@@ -53,22 +53,3 @@ class ConfirmationTokenRepository(BaseRepository[ConfirmationTokenResponse]):
         )
         rows = response.data or []
         return self._to_model(rows[0]) if rows else None
-
-    def mark_used(self, token_id: UUID) -> bool:
-        """Record that the link was just acted on.
-
-        This does not consume the token — a worker may come back to answer another date.
-
-        Args:
-            token_id: The UUID of the token that was used.
-
-        Returns:
-            True if the row was updated, False if not found.
-        """
-        response = (
-            self.client.table(TABLE)
-            .update({"last_used_at": datetime.now(timezone.utc).isoformat()})
-            .eq("id", str(token_id))
-            .execute()
-        )
-        return len(response.data) > 0

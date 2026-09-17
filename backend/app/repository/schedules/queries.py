@@ -43,7 +43,6 @@ class AssignmentColumns:
     SCHEDULE_ID = "schedule_id"
     WORKER_ID = "worker_id"
     DEPARTMENT_ROLE_ID = "department_role_id"
-    STATUS = "status"
     REMINDER_SENT_AT = "reminder_sent_at"
     NOTICE_SENT_AT = "notice_sent_at"
     SUBTEAM_ID = "subteam_id"

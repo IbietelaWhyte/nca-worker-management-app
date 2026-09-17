@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider } from '@/context/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AppLayout from '@/components/layout/AppLayout'
@@ -17,9 +17,21 @@ const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
 const AccountPage = lazy(() => import('@/pages/AccountPage'))
 const HelpPage = lazy(() => import('@/pages/HelpPage'))
-const ConfirmPage = lazy(() => import('@/pages/ConfirmPage'))
 const AvailabilityLinkPage = lazy(() => import('@/pages/AvailabilityLinkPage'))
 const ResetPasswordPage = lazy(() => import('@/pages/ResetPasswordPage'))
+
+/**
+ * Old /confirm/{token} links, sent by SMS before confirming was removed, land here.
+ *
+ * The token is the same per-worker row the availability page uses, so the link still identifies
+ * its owner — it just has nothing to confirm any more. Redirecting turns a dead link sitting in
+ * somebody's messages into a working one, which is cheaper than the 404 they would otherwise hit
+ * and better than a page explaining a feature that no longer exists.
+ */
+const ConfirmLinkRedirect = () => {
+    const { token } = useParams()
+    return <Navigate to={`/availability/${token}`} replace />
+}
 
 const PageFallback = () => (
     <div className="min-h-screen flex items-center justify-center">
@@ -119,8 +131,8 @@ function App() {
                             </ProtectedLayout>
                         }
                     />
-                    {/* Public route — no auth required, accessible by workers via SMS link */}
-                    <Route path="/confirm/:token" element={<ConfirmPage />} />
+                    {/* Retired: confirming a duty. Kept so texts already sent still work. */}
+                    <Route path="/confirm/:token" element={<ConfirmLinkRedirect />} />
 
                     {/* Public route — reached from an SMS prompt, no session required */}
                     <Route path="/availability/:token" element={<AvailabilityLinkPage />} />

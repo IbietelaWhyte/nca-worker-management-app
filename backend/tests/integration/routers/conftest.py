@@ -96,7 +96,7 @@ def mock_worker_leave_service():
 
 @pytest.fixture
 def mock_confirmation_token_service():
-    """Stands in for the token behind the public availability and confirmation links."""
+    """Stands in for the token behind the public availability link."""
     return MagicMock(spec=ConfirmationTokenService)
 
 

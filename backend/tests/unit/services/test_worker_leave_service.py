@@ -96,7 +96,8 @@ class TestClashes:
 
         report = service.get_clashes(uuid4(), TODAY, TODAY + timedelta(days=7))
         assert [c.scheduled_date for c in report.clashes] == [inside.scheduled_date]
-        mock_schedule_repo.update_assignment_status.assert_not_called()
+        mock_schedule_repo.update_assignment_role.assert_not_called()
+        mock_schedule_repo.delete_assignments_for_schedule.assert_not_called()
         mock_leave_repo.create.assert_not_called()
 
     def test_duties_after_the_window_are_not_clashes(self, service, mock_schedule_repo):

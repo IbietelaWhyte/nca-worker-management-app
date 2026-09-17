@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { startOfToday } from 'date-fns'
 import { getMyProfile } from '@/api/account'
-import { getWorkerAssignments, updateAssignmentStatus } from '@/api/schedules'
+import { getWorkerAssignments } from '@/api/schedules'
 import { buildMyDuties } from '@/lib/dashboard'
 
 /**
@@ -15,7 +15,7 @@ import { buildMyDuties } from '@/lib/dashboard'
  * @param {{enabled?: boolean}} options
  */
 export function useMyDuties({ enabled = true } = {}) {
-    const [duties, setDuties] = useState({ next: null, awaitingReply: [], later: [] })
+    const [duties, setDuties] = useState({ next: null, later: [] })
     const [loading, setLoading] = useState(enabled)
     const [error, setError] = useState(null)
     // Null when the signed-in account has no worker record behind it — a real state, and different
@@ -45,12 +45,5 @@ export function useMyDuties({ enabled = true } = {}) {
         fetchDuties()
     }, [fetchDuties])
 
-    const answer = async (assignmentId, status) => {
-        await updateAssignmentStatus(assignmentId, status)
-        // Refetch rather than patch: declining removes the duty from the list and can promote a
-        // later one into the "next" slot, which is more re-derivation than a local splice is worth.
-        await fetchDuties()
-    }
-
-    return { ...duties, profile, loading, error, refetch: fetchDuties, answer }
+    return { ...duties, profile, loading, error, refetch: fetchDuties }
 }

@@ -84,7 +84,7 @@ function DepartmentBoard() {
 
 /** What a worker with no management role sees: their own duties, and nobody else's. */
 function MyDuties() {
-    const { next, later, profile, loading, error, answer } = useMyDuties()
+    const { next, later, profile, loading, error } = useMyDuties()
 
     if (loading) return <Loading what="your duties" />
 
@@ -135,7 +135,7 @@ function MyDuties() {
         <>
             <section>
                 <SectionLabel>Your next duty</SectionLabel>
-                <DutyCard assignment={next} onAnswer={answer} />
+                <DutyCard assignment={next} />
             </section>
 
             {later.length > 0 && (
@@ -143,11 +143,7 @@ function MyDuties() {
                     <SectionLabel>Also coming up</SectionLabel>
                     <div className="space-y-2.5">
                         {later.map(assignment => (
-                            <DutyCard
-                                key={assignment.id}
-                                assignment={assignment}
-                                onAnswer={answer}
-                            />
+                            <DutyCard key={assignment.id} assignment={assignment} />
                         ))}
                     </div>
                 </section>
@@ -165,7 +161,7 @@ export default function DashboardPage() {
                 <h2 className="text-2xl font-bold">{format(new Date(), 'EEEE, d MMMM')}</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
                     {isDepartmentHead
-                        ? 'What is coming up, and who still owes an answer.'
+                        ? 'What is coming up, and who is on it.'
                         : 'Your upcoming duties.'}
                 </p>
             </div>

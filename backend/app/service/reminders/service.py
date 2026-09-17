@@ -10,10 +10,8 @@ from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
-from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import AssignmentResponse, Schedule
 from app.service.availability_prompts.service import AvailabilityPromptService
-from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.sms.service import SMSService
 
 logger = get_logger(__name__)
@@ -35,7 +33,6 @@ class ReminderService:
         sms_service: SMSService,
         worker_repo: WorkerRepository,
         department_repo: DepartmentRepository,
-        token_service: ConfirmationTokenService | None = None,
         prompt_service: AvailabilityPromptService | None = None,
     ) -> None:
         """Initialize the ReminderService with required dependencies.
@@ -44,8 +41,7 @@ class ReminderService:
             schedule_repo: Repository for schedule database operations.
             sms_service: Service for sending SMS notifications.
             worker_repo: Repository for worker database operations.
-            token_service: Optional service for creating confirmation tokens.
-                           When provided, messages include a confirmation link.
+            department_repo: Repository for departments, to name the team in a message.
             prompt_service: Optional service for availability prompts. This service owns the only
                            scheduler in the process, so the daily prompt sweep is registered here
                            rather than starting a second one.
@@ -54,7 +50,6 @@ class ReminderService:
         self.sms_service = sms_service
         self.worker_repo = worker_repo
         self.department_repo = department_repo
-        self.token_service = token_service
         self.prompt_service = prompt_service
         # Created lazily in start(): this service is also constructed per-request to back the
         # manual trigger endpoints, and those instances must not each spin up a scheduler.
@@ -176,13 +171,6 @@ class ReminderService:
             log.warning("notice_skipped_no_phone")
             return False
 
-        confirmation_url = self._confirmation_url(worker_id)
-        if not confirmation_url:
-            # Without a link the message has no action to offer, and the assignments stay
-            # un-notified so the next run can try again.
-            log.warning("notice_skipped_no_confirmation_link")
-            return False
-
         schedules = [a.schedules for a in assignments if a.schedules]
         if not schedules:
             log.warning("notice_skipped_missing_schedule")
@@ -195,7 +183,6 @@ class ReminderService:
             to=worker.phone,
             worker_name=f"{worker.first_name} {worker.last_name}".strip(),
             duties=duties,
-            confirmation_url=confirmation_url,
         )
         if not sent:
             log.warning("notice_send_failed")
@@ -263,7 +250,6 @@ class ReminderService:
             schedule_title=schedule.title,
             scheduled_date=schedule.scheduled_date.strftime("%Y-%m-%d"),
             start_time=schedule.start_time.strftime("%H:%M"),
-            confirmation_url=self._confirmation_url(assignment.worker_id),
         )
         if not sent:
             log.warning("reminder_send_failed")
@@ -298,9 +284,9 @@ class ReminderService:
     def trigger_for_schedule(self, schedule_id: UUID) -> int:
         """Send reminders to everyone on one schedule, on demand.
 
-        Unlike the daily sweep this ignores `reminder_sent_at`, so an HOD can re-send after
-        changing a rota — but it still skips workers who have declined, who should not be chased
-        about a duty they have already turned down.
+        Unlike the daily sweep this ignores `reminder_sent_at`, so a head can re-send after
+        changing a rota. It now texts every worker on the schedule without exception — the
+        declined filter it used to apply was its only one, and there is no longer such a state.
 
         Args:
             schedule_id: The schedule whose workers to remind.
@@ -315,11 +301,7 @@ class ReminderService:
             return 0
 
         # get_with_assignments embeds the worker but not the schedule, which _send_reminder needs.
-        assignments = [
-            a.model_copy(update={"schedules": schedule})
-            for a in schedule.schedule_assignments
-            if a.status != AssignmentStatus.DECLINED
-        ]
+        assignments = [a.model_copy(update={"schedules": schedule}) for a in schedule.schedule_assignments]
         sent = self._send_reminders(assignments)
         log.info("schedule_reminders_finished", sent=sent, candidates=len(assignments))
         return sent
@@ -327,23 +309,6 @@ class ReminderService:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-
-    def _confirmation_url(self, worker_id: UUID) -> str | None:
-        """Mint or reuse the worker's confirmation link.
-
-        Args:
-            worker_id: The worker the link identifies.
-
-        Returns:
-            str | None: The URL, or None if tokens are unavailable or minting failed.
-        """
-        if not self.token_service:
-            return None
-        try:
-            return self.token_service.create_token(worker_id=worker_id)
-        except Exception as exc:  # noqa: BLE001 — a token failure must not abort the whole run
-            self.logger.warning("confirmation_token_creation_failed", worker_id=str(worker_id), error=str(exc))
-            return None
 
     def _department_name(self, department_id: UUID, cache: dict[UUID, str], log: structlog.stdlib.BoundLogger) -> str:
         """Look up a department's name, remembering it for the rest of the run.

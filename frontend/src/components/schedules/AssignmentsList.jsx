@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import {
     Select,
     SelectContent,
@@ -8,35 +7,17 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
-import { CheckCircle, XCircle, Clock } from 'lucide-react'
-
-const STATUS_CONFIG = {
-    pending: { label: 'Pending', variant: 'secondary', icon: Clock },
-    confirmed: { label: 'Confirmed', variant: 'default', icon: CheckCircle },
-    declined: { label: 'Declined', variant: 'destructive', icon: XCircle },
-}
 
 // Radix Select disallows an empty-string value, so use a sentinel for "no role".
 const NO_ROLE = '__none__'
 
 export default function AssignmentsList({
     groupedAssignments = [],
-    onStatusChange,
     onRoleChange,
     roles = [],
     canManage = false,
 }) {
-    const [loadingId, setLoadingId] = useState(null)
     const [roleLoadingId, setRoleLoadingId] = useState(null)
-
-    const handleStatusChange = async (assignmentId, status) => {
-        setLoadingId(assignmentId)
-        try {
-            await onStatusChange(assignmentId, status)
-        } finally {
-            setLoadingId(null)
-        }
-    }
 
     const handleRoleChange = async (assignmentId, value) => {
         setRoleLoadingId(assignmentId)
@@ -76,10 +57,6 @@ export default function AssignmentsList({
                             <div className="space-y-2">
                                 {group.assignments.map(assignment => {
                                     const worker = assignment.workers
-                                    const config =
-                                        STATUS_CONFIG[assignment.status] ?? STATUS_CONFIG.pending
-                                    const Icon = config.icon
-                                    const isLoading = loadingId === assignment.id
 
                                     return (
                                         <div
@@ -153,46 +130,6 @@ export default function AssignmentsList({
                                                             {assignment.department_roles.name}
                                                         </Badge>
                                                     )
-                                                )}
-
-                                                <Badge
-                                                    variant={config.variant}
-                                                    className="flex items-center gap-1"
-                                                >
-                                                    <Icon size={12} />
-                                                    {config.label}
-                                                </Badge>
-
-                                                {canManage && assignment.status !== 'confirmed' && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        disabled={isLoading}
-                                                        onClick={() =>
-                                                            handleStatusChange(
-                                                                assignment.id,
-                                                                'confirmed'
-                                                            )
-                                                        }
-                                                    >
-                                                        Confirm
-                                                    </Button>
-                                                )}
-                                                {canManage && assignment.status !== 'declined' && (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        disabled={isLoading}
-                                                        className="text-destructive hover:text-destructive"
-                                                        onClick={() =>
-                                                            handleStatusChange(
-                                                                assignment.id,
-                                                                'declined'
-                                                            )
-                                                        }
-                                                    >
-                                                        Decline
-                                                    </Button>
                                                 )}
                                             </div>
                                         </div>

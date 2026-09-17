@@ -12,22 +12,7 @@
  */
 
 import { differenceInCalendarDays, endOfMonth, format, parseISO } from 'date-fns'
-
-/**
- * Count an assignment list by status.
- *
- * Lives here rather than in a component because three places need it: the month calendar, the
- * schedules table, and the dashboard.
- *
- * @param {Array<{status: string}>} assignments
- * @returns {{confirmed: number, declined: number, pending: number, total: number}}
- */
-export const summarizeAssignments = assignments => {
-    const list = assignments ?? []
-    const confirmed = list.filter(a => a.status === 'confirmed').length
-    const declined = list.filter(a => a.status === 'declined').length
-    return { confirmed, declined, pending: list.length - confirmed - declined, total: list.length }
-}
+import { summarizeStaffing } from '@/lib/staffing'
 
 /** A date-only string from the API, parsed without the UTC shift a bare `new Date()` would add. */
 const parseDate = value => parseISO(`${value}T00:00:00`)
@@ -45,7 +30,7 @@ export const buildUpcoming = (byDepartment, today) =>
             (schedules ?? []).map(schedule => ({
                 schedule,
                 department,
-                summary: summarizeAssignments(schedule.schedule_assignments),
+                summary: summarizeStaffing(schedule),
                 daysAway: differenceInCalendarDays(parseDate(schedule.scheduled_date), today),
             }))
         )
@@ -60,9 +45,12 @@ export const buildUpcoming = (byDepartment, today) =>
 /**
  * The things worth acting on, most urgent first.
  *
- * Deliberately narrow: every item here is derivable from schedules already loaded. Availability
- * coverage is the obvious omission — `availability_prompts` records that a prompt was *sent* and
- * has no per-recipient rows, so "who hasn't replied" cannot be answered without a schema change.
+ * Deliberately narrow: every item here is derivable from schedules already loaded. It used to
+ * lead on who had declined and who had not replied; neither exists now that workers are told
+ * their duties rather than asked about them. What is left is coverage — a department with
+ * nothing on the rota — and setup gaps. The signal that replaces the old two is staffing against
+ * the numbers a department asked for, which needs the minimum and maximum this app does not
+ * store yet.
  *
  * @param {Array<object>} upcoming Output of `buildUpcoming`.
  * @param {Array<object>} departments Departments the viewer can see.
@@ -77,47 +65,6 @@ export const buildAttentionItems = (
     { includeSetupGaps = false } = {}
 ) => {
     const items = []
-
-    for (const entry of upcoming) {
-        const { schedule, department, summary, daysAway } = entry
-        const when = format(parseDate(schedule.scheduled_date), 'd MMMM')
-
-        if (summary.declined > 0) {
-            // Naming the one person who dropped out is the difference between a notification and
-            // something the head of department can act on without opening the rota.
-            const declined = (schedule.schedule_assignments ?? []).filter(
-                a => a.status === 'declined'
-            )
-            const who =
-                summary.declined === 1 && declined[0]?.workers
-                    ? `${declined[0].workers.first_name} ${declined[0].workers.last_name} declined`
-                    : `${summary.declined} people have declined`
-            items.push({
-                id: `declined-${schedule.id}`,
-                severity: 'high',
-                title: `${who} ${when}`,
-                detail: `${department.name} is ${summary.declined === 1 ? 'one' : summary.declined} short`,
-                href: `/schedules/${schedule.id}`,
-            })
-        }
-
-        // Silent on a rota nobody has answered — the state that quietly becomes a Sunday morning
-        // problem. Only worth raising once the date is close enough to act on.
-        if (
-            summary.total > 0 &&
-            summary.confirmed === 0 &&
-            summary.declined === 0 &&
-            daysAway <= 14
-        ) {
-            items.push({
-                id: `silent-${schedule.id}`,
-                severity: 'high',
-                title: `Nobody has replied for ${department.name} on ${when}`,
-                detail: `All ${summary.total} still pending`,
-                href: `/schedules/${schedule.id}`,
-            })
-        }
-    }
 
     // A department with nothing left this month. Checked against the month end rather than a
     // rolling window so it reads the way a rota is actually planned.
@@ -159,21 +106,19 @@ export const buildAttentionItems = (
 }
 
 /**
- * Split a worker's own assignments into the ones they still owe an answer on and the rest.
+ * A worker's own upcoming duties: the next one, and the rest.
  *
- * @param {Array<object>} assignments From `getWorkerAssignments`, any date, any status.
+ * The only filter is the date. A duty is a duty — there is no longer an answer that removes one
+ * from the list, so anything still on the rota is still expected of them.
+ *
+ * @param {Array<object>} assignments From `getWorkerAssignments`, any date.
  * @param {Date} today
- * @returns {{next: object|null, awaitingReply: Array<object>, later: Array<object>}}
+ * @returns {{next: object|null, later: Array<object>}}
  */
 export const buildMyDuties = (assignments, today) => {
     const upcoming = (assignments ?? [])
         .filter(a => a.schedules && parseDate(a.schedules.scheduled_date) >= today)
-        .filter(a => a.status !== 'declined')
         .sort((a, b) => a.schedules.scheduled_date.localeCompare(b.schedules.scheduled_date))
 
-    return {
-        next: upcoming[0] ?? null,
-        awaitingReply: upcoming.filter(a => a.status === 'pending'),
-        later: upcoming.slice(1),
-    }
+    return { next: upcoming[0] ?? null, later: upcoming.slice(1) }
 }

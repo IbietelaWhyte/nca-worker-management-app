@@ -7,7 +7,6 @@ from supabase import Client
 from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.schedules import queries as q
-from app.schemas.models import AssignmentStatus
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 
 logger = get_logger(__name__)
@@ -414,38 +413,6 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         assignment = AssignmentResponse.model_validate(response.data) if response else None
         if not assignment:
             log.warning("assignment_not_found")
-        return assignment
-
-    def update_assignment_status(self, assignment_id: UUID, status: AssignmentStatus) -> AssignmentResponse | None:
-        """
-        Update the status of a schedule assignment.
-
-        This method allows changing an assignment's status (e.g., from PENDING to
-        CONFIRMED, CANCELLED, or COMPLETED).
-
-        Args:
-            assignment_id (UUID): The unique identifier of the assignment to update.
-            status (AssignmentStatus): The new status to set (PENDING, CONFIRMED,
-                                       CANCELLED, or COMPLETED).
-
-        Returns:
-            AssignmentResponse | None: The updated assignment if successful, None if the
-                                      assignment was not found.
-        """
-        log = self.logger.bind(method="update_assignment_status", assignment_id=str(assignment_id), status=status)
-        response = (
-            self.client.table(q.ASSIGNMENTS_TABLE)
-            .update({q.AssignmentColumns.STATUS: status})
-            .eq(q.AssignmentColumns.ID, str(assignment_id))
-            .execute()
-        )
-        if not response.data:
-            log.warning("assignment_not_found")
-            return None
-        # Re-read rather than using the update's own response: PostgREST returns base-table
-        # columns only, and .select() is not chainable onto .update() in this client.
-        assignment = self.get_assignment_by_id(assignment_id)
-        log.info("assignment_status_updated")
         return assignment
 
     def update_assignment_role(self, assignment_id: UUID, department_role_id: UUID | None) -> AssignmentResponse | None:

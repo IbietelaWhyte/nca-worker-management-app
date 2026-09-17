@@ -24,12 +24,12 @@ export const FAQ_SECTIONS = [
                 answer: 'Open Availability and tap the dates you cannot serve. Tap a marked date again to undo it. You only mark the exceptions — every date you leave alone already counts as one you are free for, so there is nothing to do in a month you can serve throughout.',
             },
             {
-                question: 'I got a text saying I have been scheduled. What do I do?',
-                answer: 'Tap the link in the message and confirm or decline. You do not need to sign in, and one link covers every date in that text. Closer to the day you will get a second text reminding you.',
+                question: 'I got a text saying I have been scheduled.',
+                answer: 'It is telling you, not asking you. One text lists every date you are on, and you will get another reminding you before each service. There is nothing to reply to — the app does not read replies.',
             },
             {
-                question: 'I said yes, but now I cannot make it.',
-                answer: 'Open your dashboard and press "Can\'t make it" on that duty, or use the link from your text again. Your head of department is told, but nobody is put in your place automatically — so the earlier you say, the easier it is to find cover.',
+                question: 'I am on the rota but I cannot make it.',
+                answer: 'Tell your head of department. They can take you off that date or put somebody else in your place, and they are the only ones who can — nothing happens automatically, so the earlier you say, the easier it is to find cover. If it is a whole stretch of time rather than one date, ask them to book it as leave.',
             },
             {
                 question: 'Why can I no longer change a date?',
@@ -41,7 +41,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'How do I change my phone number or my password?',
-                answer: 'Both are on the Account page. Keep your phone number up to date — every reminder and confirmation link is sent to it by text.',
+                answer: 'Both are on the Account page. Keep your phone number up to date — your duties, your reminders and your availability link are all sent to it by text.',
             },
         ],
     },
@@ -64,7 +64,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Somebody needs to sign in to the app.',
-                answer: 'Ask an administrator to create their account; only administrators can. A worker does not need one to be scheduled — their duties, reminders and confirmation links reach them by text either way.',
+                answer: 'Ask an administrator to create their account; only administrators can. A worker does not need one to be scheduled — their duties, reminders and availability links reach them by text either way.',
             },
         ],
     },
@@ -107,10 +107,6 @@ export const FAQ_SECTIONS = [
             {
                 question: 'How do I collect availability from my team?',
                 answer: 'Open the department and send an availability request. The text asks people for the dates they cannot serve, and says that no reply means they are free — so silence is a usable answer rather than a gap you have to chase. You can send it now or have it go out each month on a day you choose. Workers get a link that works without signing in, so it reaches the ones with no account too. Each message costs money to send, so it is never sent automatically on your behalf.',
-            },
-            {
-                question: 'Somebody declined. What happens next?',
-                answer: 'Nothing automatic. The decline appears at the top of your dashboard with their name and the date, and you choose the replacement yourself.',
             },
             {
                 question: 'How do I share the rota with people who do not use the app?',
