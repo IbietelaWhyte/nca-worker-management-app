@@ -5,13 +5,17 @@ import SpecificDatesCalendar from '@/components/availability/SpecificDatesCalend
 import {
     clearAvailabilityByLink,
     getAvailabilityByLink,
-    setAvailabilityByLink,
+    markUnavailableByLink,
 } from '@/api/availabilityLink'
 import BrandMark from '@/components/layout/BrandMark'
 
 // The public twin of AvailabilityPage. Same calendar, but the worker is identified by the token
 // in the URL instead of a session — most workers have no login account, so a prompt pointing at
 // the app would reach almost nobody.
+//
+// It asks for the dates somebody CANNOT serve, matching the SMS that sent them here. Silence is
+// already an answer — the rota treats an unmarked date as available — so collecting "I can serve"
+// would be collecting an opinion nothing acts on.
 //
 // Page states:
 // loading -> resolving the token
@@ -25,6 +29,7 @@ export default function AvailabilityLinkPage() {
     const [pageState, setPageState] = useState('loading')
     const [workerName, setWorkerName] = useState('')
     const [dates, setDates] = useState([])
+    const [editableFrom, setEditableFrom] = useState(null)
     const [saving, setSaving] = useState(false)
     const [errorMessage, setErrorMessage] = useState('')
 
@@ -34,6 +39,7 @@ export default function AvailabilityLinkPage() {
                 const data = await getAvailabilityByLink(token)
                 setWorkerName(data.worker_name)
                 setDates(data.dates ?? [])
+                setEditableFrom(data.editable_from ?? null)
                 setPageState('ready')
             } catch (err) {
                 const status = err.response?.status
@@ -54,25 +60,27 @@ export default function AvailabilityLinkPage() {
         fetchAvailability()
     }, [token])
 
-    // Same three-state cycle as the signed-in page: unset -> available -> unavailable -> unset.
+    // Two states, same as the signed-in page: unmarked, or marked as a date they cannot serve.
     async function handleDateClick(dateStr, existing) {
         setSaving(true)
         setErrorMessage('')
         try {
-            if (!existing) {
-                const record = await setAvailabilityByLink(token, dateStr, true)
-                setDates(prev => [...prev, record])
-            } else if (existing.is_available) {
-                const record = await setAvailabilityByLink(token, dateStr, false)
-                setDates(prev => prev.map(d => (d.id === existing.id ? record : d)))
-            } else {
+            if (existing) {
                 await clearAvailabilityByLink(token, dateStr)
                 setDates(prev => prev.filter(d => d.id !== existing.id))
+            } else {
+                const record = await markUnavailableByLink(token, dateStr)
+                setDates(prev => [...prev, record])
             }
         } catch (err) {
-            if (err.response?.status === 410) {
+            const status = err.response?.status
+            if (status === 410) {
                 setErrorMessage('This link has expired.')
                 setPageState('invalid')
+            } else if (status === 400) {
+                // The cut-off. The server's message names the date and the deadline, and it is
+                // the only one that knows either, so it is shown rather than replaced.
+                setErrorMessage(err.response?.data?.detail ?? 'That date is closed for changes.')
             } else {
                 setErrorMessage('Could not save that date. Please try again.')
             }
@@ -105,8 +113,9 @@ export default function AvailabilityLinkPage() {
                                 Hi {workerName}
                             </h1>
                             <p className="text-sm text-muted-foreground mt-1">
-                                Tap the dates you can serve. Tap again to mark yourself unavailable,
-                                and once more to clear it.
+                                Tap any dates you <strong className="font-semibold">cannot</strong>{' '}
+                                serve. Leave the rest alone — we will take those as dates you are
+                                free. Tap a marked date again to undo it.
                             </p>
                         </div>
 
@@ -115,9 +124,10 @@ export default function AvailabilityLinkPage() {
                         )}
 
                         <SpecificDatesCalendar
-                            specificDates={dates}
+                            unavailableDates={dates}
                             onDateClick={handleDateClick}
                             loading={saving}
+                            editableFrom={editableFrom}
                         />
 
                         <p className="text-xs text-center text-muted-foreground">

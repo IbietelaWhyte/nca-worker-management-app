@@ -214,13 +214,11 @@
         --rdp-selected-border: none !important;
     }
 
-    /* react-day-picker specific date modifiers */
-    .rdp-day-available {
-        background-color: hsl(var(--success)) !important;
-        color: hsl(var(--success-foreground)) !important;
-        border-radius: 4px;
-    }
-
+    /* react-day-picker specific date modifiers.
+     *
+     * There is no matching "available" rule: the availability calendar asks only which dates a
+     * worker cannot serve, so an unmarked day is the available one and needs no colour of its
+     * own. Days past the cut-off are closed with react-day-picker's own `disabled` styling. */
     .rdp-day-unavailable {
         background-color: hsl(var(--destructive)) !important;
         color: hsl(var(--destructive-foreground)) !important;

@@ -21,7 +21,7 @@ export const FAQ_SECTIONS = [
         items: [
             {
                 question: 'How do I tell the app when I cannot serve?',
-                answer: 'Open Availability and tap a date. The first tap marks it as a date you can serve, a second marks you unavailable, and a third clears it again. You only need to mark the exceptions — a date you have left alone already counts as available.',
+                answer: 'Open Availability and tap the dates you cannot serve. Tap a marked date again to undo it. You only mark the exceptions — every date you leave alone already counts as one you are free for, so there is nothing to do in a month you can serve throughout.',
             },
             {
                 question: 'I got a text saying I have been scheduled. What do I do?',
@@ -30,6 +30,10 @@ export const FAQ_SECTIONS = [
             {
                 question: 'I said yes, but now I cannot make it.',
                 answer: 'Open your dashboard and press "Can\'t make it" on that duty, or use the link from your text again. Your head of department is told, but nobody is put in your place automatically — so the earlier you say, the easier it is to find cover.',
+            },
+            {
+                question: 'Why can I no longer change a date?',
+                answer: 'Availability closes once a date is too close for anyone to act on the answer, and dates already past are always closed. The message on screen tells you the earliest date you can still change. If something has come up on a date you can no longer edit, tell your head of department directly.',
             },
             {
                 question: 'How does the app decide who serves?',
@@ -97,8 +101,12 @@ export const FAQ_SECTIONS = [
                 answer: 'Once soon after the schedule is created, listing every date they are on, and again a few days before the service itself. You set that lead time on each schedule. Reminders go out in the morning.',
             },
             {
+                question: 'Somebody is away for a few weeks. What do I do?',
+                answer: 'Open Workers, find them and choose Leave, then set the first and last day they are away. While away they are not put on any rota and are not texted for availability, and they keep their departments and roles so nothing needs re-adding when they return. If they are already booked for dates inside that period you will see those listed before you confirm — those stay on the rota, so reassign them yourself. Use this rather than deactivating, which removes them from their departments altogether.',
+            },
+            {
                 question: 'How do I collect availability from my team?',
-                answer: 'Open the department and send an availability request. You can send it now or have it go out each month on a day you choose. Workers get a link that works without signing in, so it reaches the ones with no account too. Each message costs money to send, so it is never sent automatically on your behalf.',
+                answer: 'Open the department and send an availability request. The text asks people for the dates they cannot serve, and says that no reply means they are free — so silence is a usable answer rather than a gap you have to chase. You can send it now or have it go out each month on a day you choose. Workers get a link that works without signing in, so it reaches the ones with no account too. Each message costs money to send, so it is never sent automatically on your behalf.',
             },
             {
                 question: 'Somebody declined. What happens next?',

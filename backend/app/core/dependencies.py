@@ -14,6 +14,7 @@ from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.subteams.repository import SubteamRepository
+from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.service.account.service import AccountService
 from app.service.authentication.service import AuthenticationService
@@ -27,6 +28,7 @@ from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.sms.service import SMSService
 from app.service.subteams.service import SubteamService
+from app.service.worker_leave.service import WorkerLeaveService
 from app.service.workers.service import WorkerService
 
 # --- Database client ---
@@ -107,6 +109,18 @@ def get_availability_prompt_repository(client: Client = Depends(get_db)) -> Avai
     return AvailabilityPromptRepository(client)
 
 
+def get_worker_leave_repository(client: Client = Depends(get_db)) -> WorkerLeaveRepository:
+    """FastAPI dependency that provides a WorkerLeaveRepository instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+
+    Returns:
+        WorkerLeaveRepository: Repository for stretches a worker is away.
+    """
+    return WorkerLeaveRepository(client)
+
+
 def get_subteam_repository(client: Client = Depends(get_db)) -> SubteamRepository:
     """FastAPI dependency that provides a SubteamRepository instance.
 
@@ -153,6 +167,7 @@ def get_schedule_service(
     subteam_repo: SubteamRepository = Depends(get_subteam_repository),
     availability_repo: AvailabilityRepository = Depends(get_availability_repository),
     department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
+    leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
 ) -> ScheduleService:
     """FastAPI dependency that provides a ScheduleService instance.
 
@@ -163,6 +178,7 @@ def get_schedule_service(
         subteam_repo: SubteamRepository dependency.
         availability_repo: AvailabilityRepository dependency.
         department_role_repo: DepartmentRoleRepository dependency for role auto-fill.
+        leave_repo: WorkerLeaveRepository dependency, to drop workers who are away.
 
     Returns:
         ScheduleService: Service for schedule business logic operations.
@@ -174,6 +190,7 @@ def get_schedule_service(
         subteam_repo=subteam_repo,
         availability_repo=availability_repo,
         department_role_repo=department_role_repo,
+        leave_repo=leave_repo,
     )
 
 
@@ -303,6 +320,7 @@ def get_availability_prompt_service(
     worker_repo: WorkerRepository = Depends(get_worker_repository),
     sms_service: SMSService = Depends(get_sms_service),
     token_service: ConfirmationTokenService = Depends(get_confirmation_token_service),
+    leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
 ) -> AvailabilityPromptService:
     """FastAPI dependency that provides an AvailabilityPromptService instance.
 
@@ -312,6 +330,7 @@ def get_availability_prompt_service(
         worker_repo: WorkerRepository dependency, to resolve recipients.
         sms_service: SMSService dependency.
         token_service: ConfirmationTokenService dependency, for the per-worker link.
+        leave_repo: WorkerLeaveRepository dependency, to skip workers who are away.
 
     Returns:
         AvailabilityPromptService: Service for prompting workers to enter availability.
@@ -322,6 +341,29 @@ def get_availability_prompt_service(
         worker_repo=worker_repo,
         sms_service=sms_service,
         token_service=token_service,
+        leave_repo=leave_repo,
+    )
+
+
+def get_worker_leave_service(
+    leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
+) -> WorkerLeaveService:
+    """FastAPI dependency that provides a WorkerLeaveService instance.
+
+    Args:
+        leave_repo: WorkerLeaveRepository dependency.
+        worker_repo: WorkerRepository dependency, to validate the target worker.
+        schedule_repo: ScheduleRepository dependency, to report clashing duties.
+
+    Returns:
+        WorkerLeaveService: Service for recording stretches a worker is away.
+    """
+    return WorkerLeaveService(
+        leave_repo=leave_repo,
+        worker_repo=worker_repo,
+        schedule_repo=schedule_repo,
     )
 
 

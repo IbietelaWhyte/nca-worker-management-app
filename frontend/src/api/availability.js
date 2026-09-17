@@ -2,6 +2,10 @@ import apiClient from './client'
 
 export const getWorkerAvailability = workerId => apiClient.get(`/availability/workers/${workerId}`)
 
+// The cut-off: `editable_from` is the earliest date still open for changes, `notice_days` the
+// period behind it. Fetched rather than computed client-side — it is a server setting.
+export const getAvailabilityConfig = () => apiClient.get('/availability/config')
+
 export const setAvailability = data => apiClient.post('/availability', data)
 
 export const bulkSetAvailability = (workerId, records) =>

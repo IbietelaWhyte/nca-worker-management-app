@@ -40,6 +40,10 @@ export GMAIL_APP_PASSWORD=""
 # Frontend URL
 export FRONTEND_URL="https://nca-worker-management-app.vercel.app/"
 
+# Availability cut-off: how many days before a date it stops accepting answers.
+# 0 closes only dates already past; 7 means next Sunday locks this Sunday.
+export AVAILABILITY_NOTICE_DAYS=0
+
 # fine-grained, this repo, Issues: read and write
 export FEEDBACK_GITHUB_TOKEN=""
 export FEEDBACK_GITHUB_REPO="IbietelaWhyte/nca-worker-management-app"

@@ -25,6 +25,7 @@ from app.router import (
     feedback,
     schedules,
     subteams,
+    worker_leave,
     workers,
 )
 from app.service.reminders.service import ReminderService
@@ -46,6 +47,7 @@ def create_reminder_service() -> ReminderService:
     from app.repository.availability_prompts.repository import AvailabilityPromptRepository
     from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
     from app.repository.departments.repository import DepartmentRepository
+    from app.repository.worker_leave.repository import WorkerLeaveRepository
     from app.repository.workers.repository import WorkerRepository
     from app.service.availability_prompts.service import AvailabilityPromptService
     from app.service.confirmation_tokens.service import ConfirmationTokenService
@@ -66,6 +68,7 @@ def create_reminder_service() -> ReminderService:
         worker_repo=worker_repo,
         sms_service=sms_service,
         token_service=token_service,
+        leave_repo=WorkerLeaveRepository(client),
     )
     return ReminderService(
         schedule_repo=schedule_repo,
@@ -128,6 +131,7 @@ app.include_router(account.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(confirmation_tokens.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
+app.include_router(worker_leave.router, prefix="/api/v1")
 
 
 @app.exception_handler(AppError)

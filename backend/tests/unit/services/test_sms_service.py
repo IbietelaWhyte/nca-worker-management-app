@@ -5,6 +5,15 @@ import pytest
 from app.service.sms.service import SMSService
 
 URL = "https://app.example.com/confirm/abc"
+PROMPT_URL = "https://app.example.com/availability/abc"
+
+# A character outside this alphabet silently switches the whole message to UCS-2, which cuts a
+# segment from 160 characters to 70 and so doubles or triples the cost of a long message.
+GSM7 = set(
+    "@£$¥èéùìòÇØøÅå_ÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+    "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
+    "\n\r\f^{}\\[~]|€"
+)
 
 
 @pytest.fixture
@@ -82,10 +91,56 @@ class TestAssignmentNoticeBody:
         # A character outside GSM-7 (an em dash, a curly quote) silently switches the whole message
         # to UCS-2, which cuts a segment from 160 characters to 70 and doubles the cost of a long
         # roster. The separator between groups is a plain hyphen for exactly this reason.
-        gsm7 = set(
-            "@£$¥èéùìòÇØøÅå_ÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
-            "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà"
-            "\n\r\f^{}\\[~]|€"
-        )
         body = notice_body(service, duties)
-        assert not (set(body) - gsm7), f"non-GSM-7 characters: {sorted(set(body) - gsm7)}"
+        assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
+
+
+def prompt_body(service, worker_name="Ada", department_name="Ushering", url=PROMPT_URL) -> str:
+    """Send an availability prompt and return the body that reached send_sms."""
+    with patch.object(SMSService, "send_sms", return_value=True) as send:
+        service.send_availability_prompt(
+            to="+14165550101",
+            worker_name=worker_name,
+            department_name=department_name,
+            availability_url=url,
+        )
+    return str(send.call_args.args[1])
+
+
+class TestAvailabilityPromptBody:
+    """The exact string, because this is the whole feature for anyone without a login account."""
+
+    def test_it_asks_for_the_dates_they_cannot_serve(self, service):
+        # Negative, and unambiguously so. The rota treats an unrecorded date as available, so a
+        # message asking who is free collects an answer nothing acts on.
+        assert prompt_body(service) == (
+            f"Hi Ada, tell Ushering any dates you CANNOT serve. No reply means you are free: {PROMPT_URL}"
+        )
+
+    def test_it_says_what_doing_nothing_means(self, service):
+        # Most people read the text and never tap through, so the one who ignores it has to
+        # learn from the message itself that silence counts as "I am free".
+        assert "No reply means you are free" in prompt_body(service)
+
+    def test_the_body_stays_inside_gsm_7(self, service):
+        body = prompt_body(service)
+        assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
+
+    def test_the_wording_stays_within_its_character_budget(self, service):
+        # A second segment doubles the cost of prompting a whole department, every month. Name,
+        # department and URL are all out of this code's hands — a 36-character token alone eats
+        # half a segment — so what is guarded is the wording itself, which is the only part a
+        # future edit can inflate. 70 is a little above today's 68: enough to reword, not enough
+        # to add a sentence.
+        body = prompt_body(service, worker_name="", department_name="", url="")
+        assert len(body) <= 70, f"the fixed wording now costs {len(body)} characters: {body!r}"
+
+    def test_a_typical_prompt_fits_one_segment(self, service):
+        # The ordinary case: a first name, a short department, and a link on a real host.
+        body = prompt_body(
+            service,
+            worker_name="Ada",
+            department_name="Ushering",
+            url="https://rota.example.ca/availability/" + "0" * 36,
+        )
+        assert len(body) <= 160, f"{len(body)} characters spills into a second segment: {body}"

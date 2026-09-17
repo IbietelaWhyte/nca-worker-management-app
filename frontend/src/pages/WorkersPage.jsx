@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkers } from '@/hooks/useWorkers'
 import { useAuth } from '@/context/AuthContext'
@@ -6,6 +6,9 @@ import WorkerForm from '@/components/workers/WorkerForm'
 import RoleEditor from '@/components/workers/RoleEditor'
 import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
 import DeleteWorkerDialog from '@/components/workers/DeleteWorkerDialog'
+import WorkerLeaveDialog from '@/components/workers/WorkerLeaveDialog'
+import { getCurrentLeave } from '@/api/leave'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
@@ -18,7 +21,17 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Plus, Pencil, UserX, UserPlus, Shield, KeyRound, Trash2, MoreVertical } from 'lucide-react'
+import {
+    Plus,
+    Pencil,
+    UserX,
+    UserPlus,
+    Shield,
+    KeyRound,
+    Trash2,
+    MoreVertical,
+    CalendarOff,
+} from 'lucide-react'
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -36,6 +49,106 @@ const roleVariant = role =>
           : 'secondary'
 
 const roleLabel = role => ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1)
+
+// Parsed from local date parts: new Date('2026-10-20') is read as UTC and renders as the 19th
+// west of Greenwich.
+const shortDate = dateStr =>
+    new Date(dateStr + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })
+
+/** Shown wherever a worker's status is, so "on leave" is never mistaken for "inactive". */
+function StatusBadges({ worker, leave }) {
+    return (
+        <div className="flex flex-wrap items-center gap-1.5">
+            <Badge variant={worker.is_active ? 'default' : 'secondary'}>
+                {worker.is_active ? 'Active' : 'Inactive'}
+            </Badge>
+            {leave && <Badge variant="warning">On leave to {shortDate(leave.end_date)}</Badge>}
+        </div>
+    )
+}
+
+/**
+ * Every row action, behind one button.
+ *
+ * Shared by the desktop table cell and the mobile card. Inline, the five buttons ran to roughly
+ * 700px and pushed the table into a horizontal scroll on anything short of a wide monitor; they
+ * also read as five equally-weighted choices when four of them are occasional and one is
+ * destructive.
+ *
+ * Which items appear is the single source of truth for both layouts — the two lists were
+ * duplicated before, and had already drifted ("Create Account" against "Create account").
+ */
+function WorkerActionsMenu({
+    worker,
+    isAdmin,
+    isDepartmentHead,
+    onEdit,
+    onRoles,
+    onCreateAccount,
+    onLeave,
+    onDeactivate,
+    onDelete,
+    triggerClassName,
+}) {
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="icon"
+                    className={cn('shrink-0', triggerClassName)}
+                    aria-label={`Actions for ${worker.first_name} ${worker.last_name}`}
+                >
+                    <MoreVertical size={18} />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => onEdit(worker)}>
+                    <Pencil size={14} className="mr-2" />
+                    Edit
+                </DropdownMenuItem>
+                {isDepartmentHead && (
+                    <DropdownMenuItem onClick={() => onRoles(worker)}>
+                        <Shield size={14} className="mr-2" />
+                        Roles
+                    </DropdownMenuItem>
+                )}
+                {isAdmin && !worker.has_account && (
+                    <DropdownMenuItem onClick={() => onCreateAccount(worker)}>
+                        <KeyRound size={14} className="mr-2" />
+                        Create account
+                    </DropdownMenuItem>
+                )}
+                {isDepartmentHead && worker.is_active && (
+                    <DropdownMenuItem onClick={() => onLeave(worker)}>
+                        <CalendarOff size={14} className="mr-2" />
+                        Leave
+                    </DropdownMenuItem>
+                )}
+                {worker.is_active && (
+                    <DropdownMenuItem
+                        onClick={() => onDeactivate(worker)}
+                        className="text-destructive focus:text-destructive"
+                    >
+                        <UserX size={14} className="mr-2" />
+                        Deactivate
+                    </DropdownMenuItem>
+                )}
+                {/* Only offered once a worker is deactivated, so removal is always a deliberate
+                    second step. */}
+                {isDepartmentHead && !worker.is_active && (
+                    <DropdownMenuItem
+                        onClick={() => onDelete(worker)}
+                        className="text-destructive focus:text-destructive"
+                    >
+                        <Trash2 size={14} className="mr-2" />
+                        Delete
+                    </DropdownMenuItem>
+                )}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    )
+}
 
 /** Shared by the desktop table cell and the mobile card, so the two cannot drift. */
 function RoleBadges({ roles }) {
@@ -67,6 +180,33 @@ export default function WorkersPage() {
     const [accountWorker, setAccountWorker] = useState(null)
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
     const [deletingWorker, setDeletingWorker] = useState(null)
+    const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
+    const [leaveWorker, setLeaveWorker] = useState(null)
+    // worker id -> the leave they are on right now. Fetched as one list rather than folded into
+    // each worker, so the worker endpoint stays unaware of leave.
+    const [leaveByWorker, setLeaveByWorker] = useState({})
+
+    const refreshLeave = useCallback(() => {
+        // Heads and admins only — the endpoint is gated, and a plain worker has no roster view
+        // to badge. A failure is silent: a missing badge is cosmetic.
+        if (!isDepartmentHead) return
+        getCurrentLeave()
+            .then(response =>
+                setLeaveByWorker(
+                    Object.fromEntries(response.data.map(entry => [entry.worker_id, entry]))
+                )
+            )
+            .catch(() => {})
+    }, [isDepartmentHead])
+
+    useEffect(() => {
+        refreshLeave()
+    }, [refreshLeave])
+
+    const handleOpenLeave = worker => {
+        setLeaveWorker(worker)
+        setLeaveDialogOpen(true)
+    }
 
     const handleRegisterNewUser = () => {
         navigate('/workers/register')
@@ -190,7 +330,7 @@ export default function WorkersPage() {
                                 <TableHead>Phone</TableHead>
                                 {isAdmin && <TableHead>Roles</TableHead>}
                                 <TableHead>Status</TableHead>
-                                <TableHead className="text-right">Actions</TableHead>
+                                <TableHead className="w-16 text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -207,64 +347,25 @@ export default function WorkersPage() {
                                         </TableCell>
                                     )}
                                     <TableCell>
-                                        <Badge variant={worker.is_active ? 'default' : 'secondary'}>
-                                            {worker.is_active ? 'Active' : 'Inactive'}
-                                        </Badge>
+                                        <StatusBadges
+                                            worker={worker}
+                                            leave={leaveByWorker[worker.id]}
+                                        />
                                     </TableCell>
                                     <TableCell className="text-right">
-                                        <div className="flex justify-end gap-2">
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => handleOpenEdit(worker)}
-                                            >
-                                                <Pencil size={14} className="mr-1" />
-                                                Edit
-                                            </Button>
-                                            {isDepartmentHead && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleOpenRoleEdit(worker)}
-                                                >
-                                                    <Shield size={14} className="mr-1" />
-                                                    Roles
-                                                </Button>
-                                            )}
-                                            {isAdmin && !worker.has_account && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleOpenCreateAccount(worker)}
-                                                >
-                                                    <KeyRound size={14} className="mr-1" />
-                                                    Create Account
-                                                </Button>
-                                            )}
-                                            {worker.is_active && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleDeactivate(worker)}
-                                                    className="text-destructive hover:text-destructive"
-                                                >
-                                                    <UserX size={14} className="mr-1" />
-                                                    Deactivate
-                                                </Button>
-                                            )}
-                                            {/* Only offered once a worker is deactivated, so
-                                                removal is always a deliberate second step. */}
-                                            {isDepartmentHead && !worker.is_active && (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => handleOpenDelete(worker)}
-                                                    className="text-destructive hover:text-destructive"
-                                                >
-                                                    <Trash2 size={14} className="mr-1" />
-                                                    Delete
-                                                </Button>
-                                            )}
+                                        <div className="flex justify-end">
+                                            <WorkerActionsMenu
+                                                worker={worker}
+                                                isAdmin={isAdmin}
+                                                isDepartmentHead={isDepartmentHead}
+                                                onEdit={handleOpenEdit}
+                                                onRoles={handleOpenRoleEdit}
+                                                onCreateAccount={handleOpenCreateAccount}
+                                                onLeave={handleOpenLeave}
+                                                onDeactivate={handleDeactivate}
+                                                onDelete={handleOpenDelete}
+                                                triggerClassName="-mr-2"
+                                            />
                                         </div>
                                     </TableCell>
                                 </TableRow>
@@ -297,69 +398,34 @@ export default function WorkersPage() {
                                         </a>
                                     )}
                                 </div>
-                                <DropdownMenu>
-                                    <DropdownMenuTrigger asChild>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="-mr-2 shrink-0"
-                                            aria-label={`Actions for ${worker.first_name} ${worker.last_name}`}
-                                        >
-                                            <MoreVertical size={18} />
-                                        </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => handleOpenEdit(worker)}>
-                                            <Pencil size={14} className="mr-2" />
-                                            Edit
-                                        </DropdownMenuItem>
-                                        {isDepartmentHead && (
-                                            <DropdownMenuItem
-                                                onClick={() => handleOpenRoleEdit(worker)}
-                                            >
-                                                <Shield size={14} className="mr-2" />
-                                                Roles
-                                            </DropdownMenuItem>
-                                        )}
-                                        {isAdmin && !worker.has_account && (
-                                            <DropdownMenuItem
-                                                onClick={() => handleOpenCreateAccount(worker)}
-                                            >
-                                                <KeyRound size={14} className="mr-2" />
-                                                Create account
-                                            </DropdownMenuItem>
-                                        )}
-                                        {worker.is_active && (
-                                            <DropdownMenuItem
-                                                onClick={() => handleDeactivate(worker)}
-                                                className="text-destructive focus:text-destructive"
-                                            >
-                                                <UserX size={14} className="mr-2" />
-                                                Deactivate
-                                            </DropdownMenuItem>
-                                        )}
-                                        {isDepartmentHead && !worker.is_active && (
-                                            <DropdownMenuItem
-                                                onClick={() => handleOpenDelete(worker)}
-                                                className="text-destructive focus:text-destructive"
-                                            >
-                                                <Trash2 size={14} className="mr-2" />
-                                                Delete
-                                            </DropdownMenuItem>
-                                        )}
-                                    </DropdownMenuContent>
-                                </DropdownMenu>
+                                <WorkerActionsMenu
+                                    worker={worker}
+                                    isAdmin={isAdmin}
+                                    isDepartmentHead={isDepartmentHead}
+                                    onEdit={handleOpenEdit}
+                                    onRoles={handleOpenRoleEdit}
+                                    onCreateAccount={handleOpenCreateAccount}
+                                    onLeave={handleOpenLeave}
+                                    onDeactivate={handleDeactivate}
+                                    onDelete={handleOpenDelete}
+                                    triggerClassName="-mr-2"
+                                />
                             </div>
                             <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <Badge variant={worker.is_active ? 'default' : 'secondary'}>
-                                    {worker.is_active ? 'Active' : 'Inactive'}
-                                </Badge>
+                                <StatusBadges worker={worker} leave={leaveByWorker[worker.id]} />
                                 {isAdmin && <RoleBadges roles={worker.roles} />}
                             </div>
                         </li>
                     ))}
                 </ul>
             )}
+
+            <WorkerLeaveDialog
+                worker={leaveWorker}
+                open={leaveDialogOpen}
+                onOpenChange={setLeaveDialogOpen}
+                onChanged={refreshLeave}
+            />
 
             {/* Create / Edit dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

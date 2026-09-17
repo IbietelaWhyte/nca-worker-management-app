@@ -6,6 +6,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.repository.availability_prompts.repository import AvailabilityPromptRepository
 from app.repository.departments.repository import DepartmentRepository
+from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.availability_prompts.models import (
     AvailabilityPromptCreate,
@@ -19,7 +20,7 @@ logger = get_logger(__name__)
 
 
 class AvailabilityPromptService:
-    """Asks a department's workers, by SMS, to enter the dates they can serve.
+    """Asks a department's workers, by SMS, for the dates they cannot serve.
 
     A prompt is either sent on demand or queued for a date. Queued sends live in the database
     rather than in an in-process timer: the scheduler uses an in-memory jobstore, so a job queued
@@ -33,6 +34,7 @@ class AvailabilityPromptService:
         worker_repo: WorkerRepository,
         sms_service: SMSService,
         token_service: ConfirmationTokenService,
+        leave_repo: WorkerLeaveRepository,
     ) -> None:
         """Initialize the AvailabilityPromptService with required dependencies.
 
@@ -42,12 +44,14 @@ class AvailabilityPromptService:
             worker_repo: Repository for workers, to resolve recipients.
             sms_service: Service for sending SMS.
             token_service: Mints the per-worker link the SMS carries.
+            leave_repo: Repository for leave, to leave workers who are away alone.
         """
         self.prompt_repo = prompt_repo
         self.department_repo = department_repo
         self.worker_repo = worker_repo
         self.sms_service = sms_service
         self.token_service = token_service
+        self.leave_repo = leave_repo
         self.logger = logger.bind(service="AvailabilityPromptService")
 
     # ------------------------------------------------------------------
@@ -171,9 +175,17 @@ class AvailabilityPromptService:
             PromptSendResult: Per-outcome counts.
         """
         log = self.logger.bind(method="_prompt_department", department_id=str(department_id))
-        workers = [w for w in self.worker_repo.get_workers_by_department(department_id) if w.is_active]
 
-        result = PromptSendResult()
+        # Anyone away today is left alone. The test is "on leave on the day the text goes out",
+        # not "on leave during the month being planned": the point is not to badger somebody who
+        # is abroad or off sick right now, and a worker away for only part of a month still has
+        # other dates worth asking about. They cannot be scheduled for the days they are away
+        # either way — generation checks leave separately.
+        on_leave = {leave.worker_id for leave in self.leave_repo.get_active_on(date.today())}
+        active = [w for w in self.worker_repo.get_workers_by_department(department_id) if w.is_active]
+        workers = [w for w in active if w.id not in on_leave]
+
+        result = PromptSendResult(skipped_on_leave=len(active) - len(workers))
         for worker in workers:
             if not worker.phone:
                 # Counted rather than silently skipped: nothing in the UI flags a worker with no

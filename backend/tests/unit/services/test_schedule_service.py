@@ -32,6 +32,7 @@ def service(
     mock_subteam_repo,
     mock_availability_repo,
     mock_department_role_repo,
+    mock_leave_repo,
 ):
     # Default: workers have no standing role unless a test overrides this.
     mock_department_role_repo.get_role_for_worker_in_department.return_value = None
@@ -42,6 +43,7 @@ def service(
         subteam_repo=mock_subteam_repo,
         availability_repo=mock_availability_repo,
         department_role_repo=mock_department_role_repo,
+        leave_repo=mock_leave_repo,
     )
 
 
@@ -901,3 +903,98 @@ class TestGenerateScheduleDepartmentAll:
         assert by_subteam[str(seekers.id)] == 4
         assert by_subteam[str(checkin.id)] == 1
         assert len(assignments) == 5
+
+
+class TestLeaveExcludesWorkers:
+    """A worker recorded as away must not be rostered, on either generation path."""
+
+    def _leave(self, worker_id, start, end):
+        from datetime import datetime
+
+        from app.schemas.worker_leave.models import WorkerLeaveResponse
+
+        return WorkerLeaveResponse(
+            id=uuid4(),
+            worker_id=worker_id,
+            start_date=start,
+            end_date=end,
+            reason=None,
+            created_by=None,
+            created_at=datetime.now(),
+        )
+
+    def test_a_worker_on_leave_is_not_picked_for_a_single_date(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_availability_repo,
+        mock_leave_repo,
+    ):
+        dept = make_department(workers_per_slot=1)
+        away, free = make_worker(), make_worker()
+        schedule = make_schedule(department_id=dept.id)
+        scheduled_date = date(2026, 10, 11)
+
+        mock_department_repo.get_by_id.return_value = dept
+        # `away` is listed first, so round-robin would otherwise take them.
+        mock_worker_repo.get_department_only_workers.return_value = [away, free]
+        mock_availability_repo.get_by_worker_and_type.return_value = None
+        mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = schedule
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_schedule_repo.get_assignments_for_worker.return_value = []
+        mock_leave_repo.get_active_on.return_value = [self._leave(away.id, date(2026, 10, 5), date(2026, 10, 20))]
+
+        service.generate_schedule(
+            make_generate_request(department_id=dept.id, scheduled_date=scheduled_date), created_by=uuid4()
+        )
+
+        assignments = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
+        picked = {a["worker_id"] for a in assignments}
+        assert str(away.id) not in picked
+        assert str(free.id) in picked
+
+    def test_leave_is_checked_for_the_date_being_scheduled(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_availability_repo,
+        mock_leave_repo,
+    ):
+        # Not for today. A rota built in September for October has to ask about October.
+        dept = make_department(workers_per_slot=1)
+        mock_department_repo.get_by_id.return_value = dept
+        mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
+        mock_availability_repo.get_by_worker_and_type.return_value = None
+        mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = make_schedule(department_id=dept.id)
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = make_schedule(department_id=dept.id)
+        mock_schedule_repo.get_assignments_for_worker.return_value = []
+
+        scheduled_date = date(2026, 10, 11)
+        service.generate_schedule(
+            make_generate_request(department_id=dept.id, scheduled_date=scheduled_date), created_by=uuid4()
+        )
+        mock_leave_repo.get_active_on.assert_called_once_with(scheduled_date)
+
+    def test_leave_blocks_only_the_dates_it_covers_in_a_month(self, service, mock_leave_repo):
+        # The monthly path folds leave into the unavailability map, one batched fetch for the
+        # whole month rather than a query per date.
+        away = uuid4()
+        dates = [date(2026, 10, 4), date(2026, 10, 11), date(2026, 10, 18), date(2026, 10, 25)]
+        mock_leave_repo.get_for_workers.return_value = [self._leave(away, date(2026, 10, 8), date(2026, 10, 20))]
+
+        unavailable = service._build_unavailability_map([away], dates, dates[0], dates[-1])
+
+        assert away not in unavailable.get(date(2026, 10, 4), set())
+        assert away in unavailable[date(2026, 10, 11)]
+        assert away in unavailable[date(2026, 10, 18)]
+        assert away not in unavailable.get(date(2026, 10, 25), set())

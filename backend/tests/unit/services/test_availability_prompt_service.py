@@ -64,13 +64,21 @@ def mock_token_service():
 
 
 @pytest.fixture
-def service(mock_prompt_repo, mock_department_repo, mock_worker_repo, mock_sms_service, mock_token_service):
+def service(
+    mock_prompt_repo,
+    mock_department_repo,
+    mock_worker_repo,
+    mock_sms_service,
+    mock_token_service,
+    mock_leave_repo,
+):
     return AvailabilityPromptService(
         prompt_repo=mock_prompt_repo,
         department_repo=mock_department_repo,
         worker_repo=mock_worker_repo,
         sms_service=mock_sms_service,
         token_service=mock_token_service,
+        leave_repo=mock_leave_repo,
     )
 
 
@@ -204,3 +212,60 @@ class TestCreatePrompt:
     def test_monthly_day_is_capped_so_it_exists_in_february(self):
         with pytest.raises(ValueError):
             AvailabilityPromptCreate(mode=PromptMode.MONTHLY, repeat_day=30)
+
+
+class TestLeaveSuppressesThePrompt:
+    def _leave(self, worker_id):
+        from datetime import date, datetime
+
+        from app.schemas.worker_leave.models import WorkerLeaveResponse
+
+        return WorkerLeaveResponse(
+            id=uuid4(),
+            worker_id=worker_id,
+            start_date=date.today(),
+            end_date=date.today(),
+            reason=None,
+            created_by=None,
+            created_at=datetime.now(),
+        )
+
+    def test_a_worker_away_today_is_not_texted(
+        self, service, mock_department_repo, mock_worker_repo, mock_sms_service, mock_leave_repo
+    ):
+        away, free = make_worker(), make_worker()
+        mock_department_repo.get_by_id.return_value = make_department(name="Ushers")
+        mock_worker_repo.get_workers_by_department.return_value = [away, free]
+        mock_leave_repo.get_active_on.return_value = [self._leave(away.id)]
+
+        result = service.send_now(uuid4())
+
+        assert result.sent == 1
+        assert result.skipped_on_leave == 1
+        texted = {call.kwargs["to"] for call in mock_sms_service.send_availability_prompt.call_args_list}
+        assert texted == {free.phone}
+
+    def test_the_skip_is_counted_rather_than_silent(
+        self, service, mock_department_repo, mock_worker_repo, mock_leave_repo
+    ):
+        # A head who prompts ten people and hears about eight should be told why, or the
+        # suppression reads as a bug in the send.
+        workers = [make_worker(), make_worker()]
+        mock_department_repo.get_by_id.return_value = make_department(name="Ushers")
+        mock_worker_repo.get_workers_by_department.return_value = workers
+        mock_leave_repo.get_active_on.return_value = [self._leave(w.id) for w in workers]
+
+        result = service.send_now(uuid4())
+        assert (result.sent, result.skipped_on_leave) == (0, 2)
+
+    def test_an_inactive_worker_is_not_counted_as_on_leave(
+        self, service, mock_department_repo, mock_worker_repo, mock_leave_repo
+    ):
+        # The two reasons for skipping are distinct, and only one of them is temporary.
+        inactive = make_worker(is_active=False)
+        mock_department_repo.get_by_id.return_value = make_department(name="Ushers")
+        mock_worker_repo.get_workers_by_department.return_value = [inactive]
+        mock_leave_repo.get_active_on.return_value = []
+
+        result = service.send_now(uuid4())
+        assert (result.sent, result.skipped_on_leave) == (0, 0)

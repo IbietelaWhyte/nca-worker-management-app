@@ -9,12 +9,14 @@ from app.core.dependencies import (
     get_account_service,
     get_authentication_service,
     get_availability_service,
+    get_confirmation_token_service,
     get_department_role_service,
     get_department_service,
     get_feedback_service,
     get_reminder_service,
     get_schedule_service,
     get_subteam_service,
+    get_worker_leave_service,
     get_worker_service,
 )
 from app.main import app
@@ -22,12 +24,14 @@ from app.schemas.models import TokenPayload, UserRole
 from app.service.account.service import AccountService
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
+from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.feedback.service import FeedbackService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.subteams.service import SubteamService
+from app.service.worker_leave.service import WorkerLeaveService
 from app.service.workers.service import WorkerService
 
 
@@ -85,6 +89,17 @@ def mock_feedback_service():
     return MagicMock(spec=FeedbackService)
 
 
+@pytest.fixture
+def mock_worker_leave_service():
+    return MagicMock(spec=WorkerLeaveService)
+
+
+@pytest.fixture
+def mock_confirmation_token_service():
+    """Stands in for the token behind the public availability and confirmation links."""
+    return MagicMock(spec=ConfirmationTokenService)
+
+
 def make_client(
     role: UserRole = UserRole.WORKER,
     worker_service=None,
@@ -97,6 +112,8 @@ def make_client(
     authentication_service=None,
     account_service=None,
     feedback_service=None,
+    confirmation_token_service=None,
+    worker_leave_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
@@ -120,6 +137,10 @@ def make_client(
         app.dependency_overrides[get_account_service] = lambda: account_service
     if feedback_service:
         app.dependency_overrides[get_feedback_service] = lambda: feedback_service
+    if confirmation_token_service:
+        app.dependency_overrides[get_confirmation_token_service] = lambda: confirmation_token_service
+    if worker_leave_service:
+        app.dependency_overrides[get_worker_leave_service] = lambda: worker_leave_service
 
     return TestClient(app)
 

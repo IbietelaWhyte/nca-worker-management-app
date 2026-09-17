@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Country code applied to phone numbers entered without one, e.g. "4165550101" -> "+14165550101".
     default_phone_country_code: str = "+1"
 
+    # Availability cut-off (see service/availabilities/service.py). Workers are asked for the dates
+    # they CANNOT serve, and a date stops accepting answers this many days before it falls, so a
+    # rota is not undermined by an answer arriving too late to act on. The default of 0 closes only
+    # dates already past — "you cannot enter September's availability in October".
+    availability_notice_days: int = Field(default=0, ge=0)
+
     # Reminder scheduling (see service/reminders/service.py). Two jobs run on the background
     # scheduler: the pre-service reminder sweep once a day, and the "you have been scheduled"
     # notice frequently enough to feel immediate without polling hard. The notice interval is the
