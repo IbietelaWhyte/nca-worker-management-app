@@ -26,7 +26,7 @@ class TestGetSubteam:
 class TestCreateSubteam:
     def test_returns_201_when_created(self, mock_subteam_service):
         dept_id = uuid4()
-        subteam = make_subteam(department_id=dept_id, name="Toddlers", workers_per_slot=3)
+        subteam = make_subteam(department_id=dept_id, name="Toddlers", band=(2, 3))
         mock_subteam_service.create_subteam.return_value = subteam
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
@@ -35,11 +35,39 @@ class TestCreateSubteam:
             json={
                 "department_id": str(dept_id),
                 "name": "Toddlers",
-                "workers_per_slot": 3,
+                "min_workers_per_slot": 2,
+                "max_workers_per_slot": 3,
             },
         )
         assert response.status_code == 201
-        assert response.json()["workers_per_slot"] == 3
+        assert response.json()["max_workers_per_slot"] == 3
+
+    def test_rejects_a_half_set_band(self, mock_subteam_service):
+        # Both bounds or neither. A subteam inheriting a floor of 3 while overriding its
+        # ceiling to 2 is impossible, and spans two tables where no constraint can see it.
+        client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
+
+        response = client.post(
+            "/api/v1/subteams",
+            json={"department_id": str(uuid4()), "name": "Toddlers", "min_workers_per_slot": 3},
+        )
+        assert response.status_code == 422
+        mock_subteam_service.create_subteam.assert_not_called()
+
+    def test_rejects_an_inverted_band(self, mock_subteam_service):
+        client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
+
+        response = client.post(
+            "/api/v1/subteams",
+            json={
+                "department_id": str(uuid4()),
+                "name": "Toddlers",
+                "min_workers_per_slot": 5,
+                "max_workers_per_slot": 2,
+            },
+        )
+        assert response.status_code == 422
+        mock_subteam_service.create_subteam.assert_not_called()
 
     def test_returns_409_on_duplicate_name(self, mock_subteam_service):
         mock_subteam_service.create_subteam.side_effect = ConflictError("already exists")
@@ -68,13 +96,16 @@ class TestCreateSubteam:
 
 class TestUpdateSubteam:
     def test_returns_200_on_update(self, mock_subteam_service):
-        subteam = make_subteam(workers_per_slot=4)
+        subteam = make_subteam(band=(2, 4))
         mock_subteam_service.update_subteam.return_value = subteam
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.patch(f"/api/v1/subteams/{subteam.id}", json={"workers_per_slot": 4})
+        response = client.patch(
+            f"/api/v1/subteams/{subteam.id}",
+            json={"min_workers_per_slot": 2, "max_workers_per_slot": 4},
+        )
         assert response.status_code == 200
-        assert response.json()["workers_per_slot"] == 4
+        assert response.json()["max_workers_per_slot"] == 4
 
 
 class TestDeleteSubteam:

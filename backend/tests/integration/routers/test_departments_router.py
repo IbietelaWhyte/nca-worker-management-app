@@ -57,9 +57,22 @@ class TestCreateDepartment:
         mock_department_service.create_department.return_value = dept
         client = make_client(role=UserRole.ADMIN, department_service=mock_department_service)
 
-        response = client.post("/api/v1/departments", json={"name": "Choir", "workers_per_slot": 2})
+        response = client.post(
+            "/api/v1/departments",
+            json={"name": "Choir", "min_workers_per_slot": 2, "max_workers_per_slot": 4},
+        )
         assert response.status_code == 201
         assert response.json()["name"] == "Choir"
+
+    def test_rejects_a_maximum_below_the_minimum(self, mock_department_service):
+        client = make_client(role=UserRole.ADMIN, department_service=mock_department_service)
+
+        response = client.post(
+            "/api/v1/departments",
+            json={"name": "Choir", "min_workers_per_slot": 5, "max_workers_per_slot": 2},
+        )
+        assert response.status_code == 422
+        mock_department_service.create_department.assert_not_called()
 
     def test_returns_409_on_duplicate_name(self, mock_department_service):
         mock_department_service.create_department.side_effect = ConflictError("already exists")

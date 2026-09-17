@@ -8,6 +8,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { formatSlotRange } from '@/lib/staffing'
 
 const STATUS_CONFIG = {
     planned: { label: 'Planned', variant: 'default', Icon: CheckCircle },
@@ -27,7 +28,7 @@ export const groupKey = group => group.subteam?.id ?? ''
 /**
  * The reviewable month plan, grouped by subteam.
  *
- * A department-wide schedule staffs each subteam to its own workers_per_slot, so each
+ * A department-wide schedule staffs each subteam to its own band, so each
  * date shows a section per subteam. Swap options come from that group's own alternates,
  * which is what keeps a subteam's quota intact.
  */
@@ -76,9 +77,17 @@ export default function MonthPreviewTable({ preview, selection, onSwap }) {
                                                 <p className="text-xs font-medium text-muted-foreground">
                                                     {groupLabel(group)}
                                                 </p>
-                                                <span className="text-[11px] text-muted-foreground">
-                                                    {chosen.length}/{group.workers_needed}
-                                                </span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-[11px] text-muted-foreground">
+                                                        {chosen.length}/{group.max_workers}
+                                                    </span>
+                                                    {chosen.length < group.min_workers && (
+                                                        <Badge variant="destructive">
+                                                            {group.min_workers - chosen.length}{' '}
+                                                            short
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                             </div>
 
                                             {group.message && (
@@ -134,8 +143,7 @@ export default function MonthPreviewTable({ preview, selection, onSwap }) {
             <p className="text-xs text-muted-foreground">
                 {plannable.length} date{plannable.length === 1 ? '' : 's'} to create ·{' '}
                 {totalAssignments} assignment{totalAssignments === 1 ? '' : 's'} ·{' '}
-                {preview.workers_needed} worker{preview.workers_needed === 1 ? '' : 's'} needed per
-                date
+                {formatSlotRange(preview.min_workers, preview.max_workers)} workers per date
             </p>
         </div>
     )

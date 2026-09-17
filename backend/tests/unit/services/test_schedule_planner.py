@@ -17,9 +17,16 @@ def make_workers(count: int):
     return [make_worker(first_name=f"Worker{i}", email=f"worker{i}@example.com") for i in range(count)]
 
 
-def one_group(workers, workers_needed, **kwargs) -> PlanContext:
-    """A single-group context — the subteam-scoped / department-only shape."""
-    return PlanContext(groups=[GroupContext(key="", workers=workers, workers_needed=workers_needed)], **kwargs)
+def one_group(workers, band, **kwargs) -> PlanContext:
+    """A single-group context — the subteam-scoped / department-only shape.
+
+    `band` is (min, max), or a bare int for a band of exactly N — which is how every group
+    behaved before the minimum and maximum were split apart.
+    """
+    minimum, maximum = band if isinstance(band, tuple) else (band, band)
+    return PlanContext(
+        groups=[GroupContext(key="", workers=workers, min_workers=minimum, max_workers=maximum)], **kwargs
+    )
 
 
 def selected(plan, index: int = 0):
@@ -196,9 +203,9 @@ class TestGroups:
         seekers, discovery, checkin = make_workers(6), make_workers(5), make_workers(2)
         ctx = PlanContext(
             groups=[
-                GroupContext(key="seekers", workers=seekers, workers_needed=4),
-                GroupContext(key="discovery", workers=discovery, workers_needed=3),
-                GroupContext(key="checkin", workers=checkin, workers_needed=1),
+                GroupContext(key="seekers", workers=seekers, min_workers=4, max_workers=4),
+                GroupContext(key="discovery", workers=discovery, min_workers=3, max_workers=3),
+                GroupContext(key="checkin", workers=checkin, min_workers=1, max_workers=1),
             ]
         )
 
@@ -215,7 +222,9 @@ class TestGroups:
         # The bug this replaced: a flat department quota staffed only the first few
         # workers, leaving whole subteams with nobody.
         ctx = PlanContext(
-            groups=[GroupContext(key=f"team{i}", workers=make_workers(3), workers_needed=2) for i in range(4)]
+            groups=[
+                GroupContext(key=f"team{i}", workers=make_workers(3), min_workers=2, max_workers=2) for i in range(4)
+            ]
         )
 
         plans = plan_month(SUNDAYS, ctx)
@@ -227,8 +236,8 @@ class TestGroups:
         seekers, discovery = make_workers(4), make_workers(4)
         ctx = PlanContext(
             groups=[
-                GroupContext(key="seekers", workers=seekers, workers_needed=2),
-                GroupContext(key="discovery", workers=discovery, workers_needed=2),
+                GroupContext(key="seekers", workers=seekers, min_workers=2, max_workers=2),
+                GroupContext(key="discovery", workers=discovery, min_workers=2, max_workers=2),
             ]
         )
 
@@ -244,8 +253,8 @@ class TestGroups:
         seekers, discovery = make_workers(4), make_workers(4)
         ctx = PlanContext(
             groups=[
-                GroupContext(key="seekers", workers=seekers, workers_needed=2),
-                GroupContext(key="discovery", workers=discovery, workers_needed=2),
+                GroupContext(key="seekers", workers=seekers, min_workers=2, max_workers=2),
+                GroupContext(key="discovery", workers=discovery, min_workers=2, max_workers=2),
             ]
         )
 
@@ -260,8 +269,8 @@ class TestGroups:
         seekers, checkin = make_workers(4), make_workers(2)
         ctx = PlanContext(
             groups=[
-                GroupContext(key="seekers", workers=seekers, workers_needed=2),
-                GroupContext(key="checkin", workers=checkin, workers_needed=1),
+                GroupContext(key="seekers", workers=seekers, min_workers=2, max_workers=2),
+                GroupContext(key="checkin", workers=checkin, min_workers=1, max_workers=1),
             ]
         )
 
@@ -276,8 +285,8 @@ class TestGroups:
         full, thin = make_workers(4), make_workers(1)
         ctx = PlanContext(
             groups=[
-                GroupContext(key="full", workers=full, workers_needed=2),
-                GroupContext(key="thin", workers=thin, workers_needed=3),
+                GroupContext(key="full", workers=full, min_workers=2, max_workers=2),
+                GroupContext(key="thin", workers=thin, min_workers=3, max_workers=3),
             ]
         )
 
@@ -296,8 +305,8 @@ class TestGroups:
         everyone = {w.id for w in seekers + discovery}
         ctx = PlanContext(
             groups=[
-                GroupContext(key="seekers", workers=seekers, workers_needed=1),
-                GroupContext(key="discovery", workers=discovery, workers_needed=1),
+                GroupContext(key="seekers", workers=seekers, min_workers=1, max_workers=1),
+                GroupContext(key="discovery", workers=discovery, min_workers=1, max_workers=1),
             ],
             unavailable={SUNDAYS[0]: everyone, SUNDAYS[1]: {w.id for w in seekers}},
         )
@@ -312,8 +321,8 @@ class TestGroups:
     def test_a_group_with_no_members_reports_why(self):
         ctx = PlanContext(
             groups=[
-                GroupContext(key="staffed", workers=make_workers(2), workers_needed=1),
-                GroupContext(key="empty", workers=[], workers_needed=2),
+                GroupContext(key="staffed", workers=make_workers(2), min_workers=1, max_workers=1),
+                GroupContext(key="empty", workers=[], min_workers=2, max_workers=2),
             ]
         )
 
@@ -322,3 +331,102 @@ class TestGroups:
         empty = next(g for g in plans[0].groups if g.key == "empty")
         assert empty.status == DatePlanStatus.SKIPPED_NO_WORKERS
         assert empty.message == "This group has no workers."
+
+
+class TestStaffingBand:
+    """The band itself: fill to the ceiling, judge against the floor.
+
+    Pure, like the rest of this file — the rules that decide who serves and whether a date is
+    short belong here, where they are tested without a single repository mock.
+    """
+
+    def test_fills_to_the_maximum_when_enough_are_free(self):
+        ctx = one_group(make_workers(5), (2, 4))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert len(selected(plan)) == 4
+        assert plan.status == DatePlanStatus.PLANNED
+
+    def test_between_the_bounds_is_planned_not_short(self):
+        # The whole point of splitting the number: three people on a 2-4 band is a working
+        # rota, and flagging it would train heads to ignore the flag.
+        ctx = one_group(make_workers(3), (2, 4))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.PLANNED
+        assert plan.groups[0].message == "3 of 4 slots filled."
+
+    def test_understaffed_only_below_the_minimum(self):
+        ctx = one_group(make_workers(1), (2, 4))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert plan.status == DatePlanStatus.UNDERSTAFFED
+        assert plan.groups[0].message == "Only 1 of 2 workers available."
+
+    def test_at_the_maximum_says_nothing(self):
+        ctx = one_group(make_workers(4), (2, 4))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert plan.groups[0].message is None
+
+    def test_a_band_of_one_number_behaves_exactly_as_before(self):
+        # The migration's regression guard. Every department starts life with min == max,
+        # backfilled from workers_per_slot, and must keep behaving as it did.
+        ctx = one_group(make_workers(5), 3)
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.PLANNED
+        assert plan.groups[0].message is None
+
+    def test_a_minimum_of_zero_is_never_short(self):
+        # "Use whoever is free, never chase me about it" is a legitimate setting — which is
+        # why the band is resolved with `is None` rather than `or`, where 0 would be discarded.
+        ctx = one_group(make_workers(1), (0, 3))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert plan.status == DatePlanStatus.PLANNED
+
+    def test_alternates_are_everyone_past_the_maximum(self):
+        ctx = one_group(make_workers(6), (2, 4))
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert len(selected(plan)) == 4
+        assert len(alternates(plan)) == 2
+
+    def test_the_dates_message_counts_minimums(self):
+        # A date is only short because a group fell below its floor, so totalling ceilings
+        # here would contradict the per-group message sitting right beside it.
+        ctx = PlanContext(
+            groups=[
+                GroupContext(key="seekers", workers=make_workers(2), min_workers=2, max_workers=5),
+                GroupContext(key="discovery", workers=make_workers(1), min_workers=3, max_workers=6),
+            ]
+        )
+
+        plan = plan_month(SUNDAYS[:1], ctx)[0]
+
+        assert plan.status == DatePlanStatus.UNDERSTAFFED
+        assert plan.message == "3 of 5 slots filled."
+
+    def test_a_wide_band_still_spreads_turns_across_the_month(self):
+        # Filling to the ceiling must not mean the same people every week: with 8 workers and
+        # a 2-4 band over four Sundays, everyone should serve twice.
+        workers = make_workers(8)
+        ctx = one_group(workers, (2, 4))
+
+        plans = plan_month(SUNDAYS, ctx)
+
+        counts = {w.id: 0 for w in workers}
+        for plan in plans:
+            for worker_id in selected(plan):
+                counts[worker_id] += 1
+        assert set(counts.values()) == {2}

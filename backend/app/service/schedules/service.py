@@ -16,10 +16,12 @@ from app.repository.subteams.repository import SubteamRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.department_roles.models import DepartmentRoleResponse
+from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import (
     AssignmentResponse,
     DatePlan,
+    DatePlanStatus,
     DateSelection,
     MonthlyScheduleCommitRequest,
     MonthlySchedulePreview,
@@ -45,19 +47,45 @@ UNIQUE_VIOLATION = "23505"
 
 @dataclass
 class ScopeGroup:
-    """One roster to staff, with the quota it has to meet on each date.
+    """One roster to staff, with the band it has to fill on each date.
 
     `subteam` is None for the department-only roster (workers in no subteam).
     """
 
     subteam: SubteamResponse | None
-    workers_needed: int
+    min_workers: int
+    max_workers: int
     workers: list[Worker]
 
     @property
     def key(self) -> str:
         """Stable identity used to match planner results back to this group."""
         return str(self.subteam.id) if self.subteam else ""
+
+
+def _staffing_band(subteam: SubteamResponse | None, department: DepartmentResponse) -> tuple[int, int]:
+    """The (minimum, maximum) a group has to staff to.
+
+    A subteam overrides the whole band or inherits the whole band — `chk_subteam_inherit_both`
+    makes a half-set override unrepresentable — so one `is None` test settles both bounds.
+
+    Tested with `is None` rather than the old `subteam.workers_per_slot or ...`: a minimum of 0
+    ("use whoever is free, never flag it short") is now a legitimate setting, and `or` would
+    silently discard it in favour of the department's. The old expression was only ever safe
+    because a CHECK forbade 0, and that guard does not survive the split.
+
+    Args:
+        subteam: The group's subteam, or None for the department-only roster.
+        department: The department, which supplies the band when the subteam inherits.
+
+    Returns:
+        tuple[int, int]: Minimum and maximum workers for this group on one date.
+    """
+    if subteam is not None and subteam.min_workers_per_slot is not None:
+        # max is guaranteed non-None alongside min by chk_subteam_inherit_both; the `or` is a
+        # belt-and-braces default for a row that predates the constraint.
+        return subteam.min_workers_per_slot, subteam.max_workers_per_slot or subteam.min_workers_per_slot
+    return department.min_workers_per_slot, department.max_workers_per_slot
 
 
 def _active(workers: list[WorkerResponse]) -> list[Worker]:
@@ -161,7 +189,28 @@ class ScheduleService:
         return self.schedule_repo.get_assignments_for_worker(worker_id)
 
     def generate_schedule(self, data: ScheduleCreate, created_by: str) -> ScheduleResponse | None:
-        # bind the method and key parameters for better traceability in logs
+        """Generate one date's rota.
+
+        Runs through the same `plan_month` the monthly path uses, with a one-date list. Two
+        implementations of "whose turn is it" had drifted apart in every dimension that
+        matters — the old single-date sort had no tiebreaker (so two runs could legitimately
+        pick different people), no month-count term (so three ad-hoc dates in one month went
+        to overlapping people), and issued one history query per worker from inside the sort
+        key. Every selection rule now lives in the planner, gets written once, and is tested
+        there without a single mock.
+
+        Args:
+            data: What to schedule, for whom, and when.
+            created_by: Email of the signed-in user, recorded as the schedule's author.
+
+        Returns:
+            ScheduleResponse | None: The created schedule with its assignments embedded.
+
+        Raises:
+            ConflictError: If a schedule already exists for this department/date/subteam.
+            BadRequestError: If the scope has no workers, or none of them can serve that day.
+            NotFoundError: If the department, subteam, or the author's worker record is missing.
+        """
         log = self.logger.bind(
             method="generate_schedule",
             department_id=str(data.department_id),
@@ -171,9 +220,8 @@ class ScheduleService:
         )
         log.info("schedule_generation_started")
 
-        # 0. Check if a schedule already exists for this date/department/subteam combination
-        # For SUBTEAM scope: check if schedule exists for that specific subteam
-        # For DEPARTMENT_ONLY/DEPARTMENT_ALL: check if department-level schedule exists (subteam_id=null)
+        # Kept ahead of the planner rather than left to its SKIPPED_EXISTING: this message
+        # names the existing schedule's id, which is what the frontend offers a link to.
         check_subteam_id = data.subteam_id if data.scope == ScopeType.SUBTEAM else None
         existing_schedule = self.schedule_repo.get_existing_schedule(
             data.department_id, data.scheduled_date, check_subteam_id
@@ -185,96 +233,80 @@ class ScheduleService:
                 f"Please edit or delete the existing schedule (ID: {existing_schedule.id}) instead."
             )
 
-        # 1. Resolve the rosters to staff. A department-wide schedule gets one group per
-        #    subteam (each with its own workers_per_slot) plus one for un-subteamed
-        #    workers; other scopes get a single group.
         groups = self._resolve_scope_groups(data.department_id, data.scope, data.subteam_id)
-        workers_needed = sum(g.workers_needed for g in groups)
+        min_workers = sum(g.min_workers for g in groups)
+        max_workers = sum(g.max_workers for g in groups)
 
         log.info(
             "scope_groups_resolved",
             groups=len(groups),
-            workers_needed=workers_needed,
+            min_workers=min_workers,
+            max_workers=max_workers,
             eligible_workers=sum(len(g.workers) for g in groups),
         )
 
         if not any(g.workers for g in groups):
             raise BadRequestError(f"No workers found for this {_scope_description(data.scope)}")
 
-        # 2. Filter by availability — day_of_week in DB is 0=Sunday, Python is 0=Monday
-        day_of_week = data.scheduled_date.weekday()
-        db_day_of_week = (day_of_week + 1) % 7
+        scheduled_date = data.scheduled_date
+        context = self._build_plan_context(
+            groups=groups,
+            department_id=data.department_id,
+            scope=data.scope,
+            subteam_id=data.subteam_id,
+            dates=[scheduled_date],
+            # The month around the date, so the fairness count sees the rest of it. Generating
+            # three ad-hoc dates in one month now spreads them rather than reusing the same
+            # people, which the old per-date sort could not do.
+            month_start=scheduled_date.replace(day=1),
+            month_end=_last_day_of_month(scheduled_date.year, scheduled_date.month),
+        )
+        plan = plan_month([scheduled_date], context)[0]
 
-        # 3. Workers already scheduled on this date are out (prevent double-scheduling)
-        already_scheduled_worker_ids = set(self.schedule_repo.get_workers_scheduled_on_date(data.scheduled_date))
+        if plan.status == DatePlanStatus.SKIPPED_NO_WORKERS:
+            # The planner's message separates unavailable from already-scheduled, which the
+            # hand-rolled one this replaced did not.
+            raise BadRequestError(plan.message or f"No available workers found for {scheduled_date}")
+        if plan.status == DatePlanStatus.SKIPPED_EXISTING:
+            # Unreachable — the pre-check above already raised. Defensive, and loud if the two
+            # ever disagree about what "already exists" means.
+            raise ConflictError(plan.message or "A schedule already exists for this date.")
 
-        # 3b. So is anyone away. One query for the whole date rather than a lookup per worker,
-        #     and folded into `booked` because the effect is identical: not pickable today.
-        on_leave = {leave.worker_id for leave in self.leave_repo.get_active_on(data.scheduled_date)}
-
-        # 4. Fill each group from its own roster, least-recently-assigned first. `booked`
-        #    is shared so a worker cannot be taken twice on this date.
-        booked = set(already_scheduled_worker_ids) | on_leave
+        workers_by_id = {w.id: w for group in groups for w in group.workers}
         selected: list[Worker] = []
         selected_subteams: dict[UUID, UUID | None] = {}
+        subteam_by_key = {g.key: g.subteam for g in groups}
+        for group_plan in plan.groups:
+            subteam = subteam_by_key.get(group_plan.key)
+            for worker_id in group_plan.selected:
+                selected.append(workers_by_id[worker_id])
+                selected_subteams[worker_id] = subteam.id if subteam else None
 
-        for group in groups:
-            available = [
-                w
-                for w in group.workers
-                if w.id not in booked and self._is_worker_available(w.id, data.scheduled_date, db_day_of_week)
-            ]
-            ordered = self._sort_by_round_robin(
-                available, data.department_id, group.subteam.id if group.subteam else None
-            )
-            picked = ordered[: group.workers_needed]
+        if plan.status == DatePlanStatus.UNDERSTAFFED:
+            # Created anyway. A head generating one date wants the rota even when it is short —
+            # a partial rota they can fill by hand beats no rota at all.
+            log.warning("schedule_understaffed", message=plan.message, selected=len(selected))
 
-            if len(picked) < group.workers_needed:
-                log.warning(
-                    "insufficient_workers_selected",
-                    group=group.subteam.name if group.subteam else "department",
-                    needed=group.workers_needed,
-                    selected=len(picked),
-                )
-
-            for worker in picked:
-                booked.add(worker.id)
-                selected.append(worker)
-                selected_subteams[worker.id] = group.subteam.id if group.subteam else None
-
-        if not selected:
-            if already_scheduled_worker_ids:
-                raise BadRequestError(
-                    f"No available workers found for {data.scheduled_date}. "
-                    f"{len(already_scheduled_worker_ids)} worker(s) already scheduled on this date."
-                )
-            else:
-                raise BadRequestError(f"No available workers found for {data.scheduled_date}")
-
-        log.info(
-            "workers_selected",
-            count=len(selected),
-            needed=workers_needed,
-            worker_ids=[str(w.id) for w in selected],
-        )
-
-        # get the created_by user
         created_by_user = self.worker_repo.get_by_email(created_by)
         if not created_by_user:
             raise NotFoundError(f"User with email {created_by} not found")
 
-        # Set subteam_id based on scope: only SUBTEAM scope has subteam_id, others are None
+        # Only SUBTEAM scope pins the schedule to a subteam; the others are department-level.
         schedule_subteam_id = str(data.subteam_id) if data.scope == ScopeType.SUBTEAM else None
 
         schedule_data = {
             q.Columns.DEPARTMENT_ID: str(data.department_id),
             q.Columns.SUBTEAM_ID: schedule_subteam_id,
             q.Columns.TITLE: data.title,
-            q.Columns.SCHEDULED_DATE: data.scheduled_date.isoformat(),
+            q.Columns.SCHEDULED_DATE: scheduled_date.isoformat(),
             q.Columns.START_TIME: data.start_time.isoformat(),
             q.Columns.END_TIME: data.end_time.isoformat(),
             q.Columns.NOTES: data.notes,
             q.Columns.REMINDER_DAYS_BEFORE: data.reminder_days_before,
+            # Frozen here rather than re-read on every render: the department's numbers may
+            # change before this date comes round, and this rota was planned against these.
+            q.Columns.MIN_WORKERS: min_workers,
+            q.Columns.MAX_WORKERS: max_workers,
             q.Columns.CREATED_BY: str(created_by_user.id),
         }
         schedule = self.schedule_repo.create(schedule_data)
@@ -444,7 +476,8 @@ class ScheduleService:
         return MonthlySchedulePreview(
             year=data.year,
             month=data.month,
-            workers_needed=sum(g.workers_needed for g in groups),
+            min_workers=sum(g.min_workers for g in groups),
+            max_workers=sum(g.max_workers for g in groups),
             dates=[
                 DatePlan(
                     scheduled_date=plan.scheduled_date,
@@ -453,7 +486,8 @@ class ScheduleService:
                     groups=[
                         PlannedGroup(
                             subteam=subteam_by_key.get(group.key),
-                            workers_needed=group.workers_needed,
+                            min_workers=group.min_workers,
+                            max_workers=group.max_workers,
                             status=group.status,
                             assignments=[
                                 PlannedAssignment(
@@ -556,6 +590,8 @@ class ScheduleService:
                 q.Columns.END_TIME: data.end_time.isoformat(),
                 q.Columns.NOTES: data.notes,
                 q.Columns.REMINDER_DAYS_BEFORE: data.reminder_days_before,
+                q.Columns.MIN_WORKERS: sum(g.min_workers for g in groups),
+                q.Columns.MAX_WORKERS: sum(g.max_workers for g in groups),
                 q.Columns.CREATED_BY: str(created_by_user.id),
             }
             for selection in to_create
@@ -612,13 +648,13 @@ class ScheduleService:
     # ----------------------------------------------------------------
 
     def _resolve_scope_groups(self, department_id: UUID, scope: ScopeType, subteam_id: UUID | None) -> list[ScopeGroup]:
-        """Resolve the rosters to staff, each with its own quota.
+        """Resolve the rosters to staff, each with its own staffing band.
 
-        A department-wide schedule is not one pool of `department.workers_per_slot`
-        workers — each subteam has to be staffed to its own `workers_per_slot`, so
-        Children's Ministry fields four Seekers, three Discovery, and so on. That means
-        one group per subteam that has members, plus one for workers in no subteam.
-        Subteam-scoped and department-only schedules resolve to a single group.
+        A department-wide schedule is not one pool sharing the department's band — each
+        subteam has to be staffed to its own, so Children's Ministry fields four Seekers,
+        three Discovery, and so on. That means one group per subteam that has members, plus
+        one for workers in no subteam. Subteam-scoped and department-only schedules resolve
+        to a single group.
 
         Args:
             department_id: The department being scheduled.
@@ -645,47 +681,32 @@ class ScheduleService:
                 raise NotFoundError(f"Subteam {subteam_id} not found")
             members = self.subteam_repo.get_with_workers(subteam_id)
             workers = [w.worker for w in members if w.worker and w.worker.is_active] if members else []
-            return [
-                ScopeGroup(
-                    subteam=subteam,
-                    workers_needed=subteam.workers_per_slot or department.workers_per_slot,
-                    workers=workers,
-                )
-            ]
+            minimum, maximum = _staffing_band(subteam, department)
+            return [ScopeGroup(subteam=subteam, min_workers=minimum, max_workers=maximum, workers=workers)]
 
         if scope == ScopeType.DEPARTMENT_ONLY:
             response = self.worker_repo.get_department_only_workers(department_id)
-            return [
-                ScopeGroup(
-                    subteam=None,
-                    workers_needed=department.workers_per_slot,
-                    workers=_active(response),
-                )
-            ]
+            minimum, maximum = _staffing_band(None, department)
+            return [ScopeGroup(subteam=None, min_workers=minimum, max_workers=maximum, workers=_active(response))]
 
         # ScopeType.DEPARTMENT_ALL — one group per subteam, plus the un-subteamed workers.
         grouped = self.worker_repo.get_workers_by_department_grouped_by_subteam(department_id)
         subteams = sorted(self.subteam_repo.get_by_department(department_id), key=lambda s: s.name)
 
-        groups = [
-            ScopeGroup(
-                subteam=subteam,
-                workers_needed=subteam.workers_per_slot or department.workers_per_slot,
-                workers=_active(grouped.get(subteam.id, [])),
+        groups: list[ScopeGroup] = []
+        for subteam in subteams:
+            subteam_workers = _active(grouped.get(subteam.id, []))
+            if not subteam_workers:
+                continue
+            minimum, maximum = _staffing_band(subteam, department)
+            groups.append(
+                ScopeGroup(subteam=subteam, min_workers=minimum, max_workers=maximum, workers=subteam_workers)
             )
-            for subteam in subteams
-            if grouped.get(subteam.id)
-        ]
 
         department_only = _active(grouped.get(None, []))
         if department_only:
-            groups.append(
-                ScopeGroup(
-                    subteam=None,
-                    workers_needed=department.workers_per_slot,
-                    workers=department_only,
-                )
-            )
+            minimum, maximum = _staffing_band(None, department)
+            groups.append(ScopeGroup(subteam=None, min_workers=minimum, max_workers=maximum, workers=department_only))
 
         return groups
 
@@ -705,7 +726,10 @@ class ScheduleService:
         full history fetch per worker, which multiplied by a month's dates would be
         hundreds of round-trips against a capped connection pool.
         """
-        plan_groups = [GroupContext(key=g.key, workers=g.workers, workers_needed=g.workers_needed) for g in groups]
+        plan_groups = [
+            GroupContext(key=g.key, workers=g.workers, min_workers=g.min_workers, max_workers=g.max_workers)
+            for g in groups
+        ]
         worker_ids = [w.id for g in groups for w in g.workers]
         if not dates:
             return PlanContext(groups=plan_groups)
@@ -811,92 +835,3 @@ class ScheduleService:
             if role:
                 roles[worker_id] = role
         return roles
-
-    def _is_worker_available(self, worker_id: UUID, scheduled_date: date, day_of_week: int) -> bool:
-        # Specific date override takes precedence over recurring
-        specific = self.availability_repo.get_by_worker_and_type(
-            worker_id,
-            availability_type=AvailabilityType.SPECIFIC_DATE,
-            specific_date=scheduled_date,
-        )
-        if specific is not None:
-            return specific.is_available
-
-        recurring = self.availability_repo.get_by_worker_and_day(worker_id, day_of_week)
-        if recurring is not None:
-            return recurring.is_available
-
-        return True  # default to available if no record exists
-
-    def _sort_by_round_robin(
-        self, workers: list[Worker], department_id: UUID, subteam_id: UUID | None = None
-    ) -> list[Worker]:
-        """
-        Sort workers by round-robin fairness, scoped to department or subteam.
-
-        Workers with the oldest last assignment date (or never assigned) get priority.
-        Assignment history is filtered by scope:
-        - If subteam_id provided: Only count assignments for that specific subteam
-        - If subteam_id is None: Only count department-level assignments (subteam_id IS NULL)
-
-        Args:
-            workers: List of workers to sort
-            department_id: Department ID to scope the round-robin fairness
-            subteam_id: Optional subteam ID to further scope fairness
-
-        Returns:
-            Sorted list of workers (least recently assigned first)
-        """
-
-        def last_assigned(worker: Worker) -> date:
-            log = self.logger.bind(
-                method="_sort_by_round_robin.last_assigned",
-                worker_id=str(worker.id),
-                department_id=str(department_id),
-                subteam_id=str(subteam_id) if subteam_id else None,
-            )
-            assignments = self.schedule_repo.get_assignments_for_worker(worker.id)
-
-            # Filter assignments to match the scope
-            filtered_assignments = [
-                a
-                for a in assignments
-                if hasattr(a, "schedules")
-                and a.schedules
-                and a.schedules.department_id == department_id
-                and (
-                    # For subteam scope: match specific subteam
-                    (subteam_id is not None and a.schedules.subteam_id == subteam_id)
-                    # For department scope: only department-level schedules (subteam_id IS NULL)
-                    or (subteam_id is None and a.schedules.subteam_id is None)
-                )
-            ]
-
-            log.info(
-                "worker_assignments_for_round_robin",
-                total_assignments=len(assignments),
-                filtered_assignments=len(filtered_assignments),
-            )
-
-            if not filtered_assignments:
-                log.info("worker_never_assigned_in_scope, returning date.min")
-                return date.min
-
-            dates = [
-                a.schedules.scheduled_date
-                for a in filtered_assignments
-                if a.schedules is not None
-                and hasattr(a.schedules, "scheduled_date")
-                and a.schedules.scheduled_date is not None
-            ]
-            log.info(
-                "assignment_dates_for_worker_in_scope",
-                count=len(dates),
-                dates=dates,
-            )
-            return max(dates) if dates else date.min
-
-        return sorted(
-            workers,
-            key=last_assigned,
-        )

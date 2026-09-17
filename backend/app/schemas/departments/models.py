@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.workers.models import Worker
@@ -18,7 +18,8 @@ class Department(BaseModel):
     name: str
     description: str | None = None
     hod_id: UUID | None = None
-    workers_per_slot: int
+    min_workers_per_slot: int
+    max_workers_per_slot: int
     created_at: datetime
 
 
@@ -26,7 +27,25 @@ class DepartmentCreate(BaseModel):
     name: str
     description: str | None = None
     hod_id: UUID | None = None
-    workers_per_slot: int = 1
+    min_workers_per_slot: int = Field(default=1, ge=1)
+    max_workers_per_slot: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def validate_worker_range(self) -> "DepartmentCreate":
+        """Reject the band the DB would reject anyway, with a message a person can act on.
+
+        Same reasoning as AvailabilityPromptCreate: chk_dept_worker_range catches this, but a
+        constraint violation surfaces as a 500 with a constraint name in it.
+
+        Returns:
+            DepartmentCreate: The validated model.
+
+        Raises:
+            ValueError: If the maximum is below the minimum.
+        """
+        if self.max_workers_per_slot < self.min_workers_per_slot:
+            raise ValueError("The most workers must be the same as the fewest, or more")
+        return self
 
 
 class DepartmentResponse(Department):
@@ -41,4 +60,7 @@ class DepartmentUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
     hod_id: UUID | None = None
-    workers_per_slot: int | None = None
+    # No cross-field validator here: a PATCH may carry one bound and not the other, so the pair
+    # can only be judged against the merged row — DepartmentService.update does that.
+    min_workers_per_slot: int | None = Field(default=None, ge=1)
+    max_workers_per_slot: int | None = Field(default=None, ge=1)

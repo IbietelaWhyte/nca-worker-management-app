@@ -14,6 +14,7 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { Plus, Pencil, Trash2, ChevronRight } from 'lucide-react'
+import { formatSlotRange } from '@/lib/staffing'
 
 export default function DepartmentsPage() {
     const navigate = useNavigate()
@@ -97,7 +98,7 @@ export default function DepartmentsPage() {
                             <TableRow>
                                 <TableHead>Name</TableHead>
                                 <TableHead>Description</TableHead>
-                                <TableHead>Workers/Slot</TableHead>
+                                <TableHead>Per service</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
@@ -112,7 +113,12 @@ export default function DepartmentsPage() {
                                     <TableCell className="text-muted-foreground">
                                         {dept.description ?? '—'}
                                     </TableCell>
-                                    <TableCell>{dept.workers_per_slot}</TableCell>
+                                    <TableCell>
+                                        {formatSlotRange(
+                                            dept.min_workers_per_slot,
+                                            dept.max_workers_per_slot
+                                        )}
+                                    </TableCell>
                                     <TableCell className="text-right">
                                         <div
                                             className="flex justify-end gap-2"
@@ -168,7 +174,11 @@ export default function DepartmentsPage() {
                                         {dept.description ?? '—'}
                                     </p>
                                     <p className="mt-1 text-xs text-muted-foreground">
-                                        {dept.workers_per_slot} per slot
+                                        {formatSlotRange(
+                                            dept.min_workers_per_slot,
+                                            dept.max_workers_per_slot
+                                        )}{' '}
+                                        per service
                                     </p>
                                 </div>
                                 <ChevronRight

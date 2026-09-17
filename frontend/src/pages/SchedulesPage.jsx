@@ -259,8 +259,12 @@ export default function SchedulesPage() {
                                                         )
                                                     )
                                                     .map(schedule => {
-                                                        const { assigned } =
-                                                            summarizeStaffing(schedule)
+                                                        const {
+                                                            assigned,
+                                                            max,
+                                                            understaffed,
+                                                            full,
+                                                        } = summarizeStaffing(schedule)
 
                                                         return (
                                                             <TableRow
@@ -293,8 +297,16 @@ export default function SchedulesPage() {
                                                                     {schedule.end_time?.slice(0, 5)}
                                                                 </TableCell>
                                                                 <TableCell>
-                                                                    <Badge variant="secondary">
-                                                                        {assigned} assigned
+                                                                    <Badge
+                                                                        variant={
+                                                                            understaffed
+                                                                                ? 'destructive'
+                                                                                : full
+                                                                                  ? 'default'
+                                                                                  : 'secondary'
+                                                                        }
+                                                                    >
+                                                                        {assigned}/{max} assigned
                                                                     </Badge>
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
@@ -351,7 +363,8 @@ export default function SchedulesPage() {
                                                 b.scheduled_date.localeCompare(a.scheduled_date)
                                             )
                                             .map(schedule => {
-                                                const { assigned } = summarizeStaffing(schedule)
+                                                const { assigned, max, understaffed, full } =
+                                                    summarizeStaffing(schedule)
                                                 return (
                                                     <li key={schedule.id}>
                                                         <button
@@ -385,9 +398,15 @@ export default function SchedulesPage() {
                                                                 </p>
                                                                 <Badge
                                                                     className="mt-2"
-                                                                    variant="secondary"
+                                                                    variant={
+                                                                        understaffed
+                                                                            ? 'destructive'
+                                                                            : full
+                                                                              ? 'default'
+                                                                              : 'secondary'
+                                                                    }
                                                                 >
-                                                                    {assigned} assigned
+                                                                    {assigned}/{max} assigned
                                                                 </Badge>
                                                             </div>
                                                             <ChevronRight
