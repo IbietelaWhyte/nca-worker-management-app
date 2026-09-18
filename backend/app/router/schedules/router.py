@@ -153,8 +153,10 @@ def trigger_reminders(
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Manually trigger the reminder job — useful for testing."""
-    sent = reminder_service.trigger_manually()
-    return MessageResponse(message=f"Sent {sent} reminder(s)")
+    # Workers, not reminders: a person's due duties go out as one message however many lead
+    # times fall today, so counting messages is the only count that matches a phone.
+    reminded = reminder_service.trigger_manually()
+    return MessageResponse(message=f"Reminded {reminded} worker(s)")
 
 
 @router.post("/notices/trigger", response_model=MessageResponse)
@@ -174,5 +176,5 @@ def send_reminders_for_schedule(
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Manually trigger reminders for a specific schedule."""
-    sent = reminder_service.trigger_for_schedule(schedule_id)
-    return MessageResponse(message=f"Sent {sent} reminder(s) for schedule {schedule_id}")
+    reminded = reminder_service.trigger_for_schedule(schedule_id)
+    return MessageResponse(message=f"Reminded {reminded} worker(s) for schedule {schedule_id}")

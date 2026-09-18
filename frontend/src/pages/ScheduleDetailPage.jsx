@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useScheduleDetail } from '@/hooks/useScheduleDetail'
 import { useAuth } from '@/context/AuthContext'
 import AssignmentsList from '@/components/schedules/AssignmentsList'
+import { describeLeadTime } from '@/components/schedules/ReminderLeadTimesField'
 import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -108,7 +109,14 @@ export default function ScheduleDetailPage() {
     }, [schedule, showEmptySubteams, allSubteams])
 
     const handleSendReminders = async schedule => {
-        if (!confirm('Send SMS reminders to all assigned workers now?')) return
+        // Worth saying out loud, because it used to be false: a manual send once burned the
+        // automatic reminder, and now records nothing, so the ladder still fires as planned.
+        if (
+            !confirm(
+                'Text everyone on this rota now? Their scheduled reminders still go out as planned.'
+            )
+        )
+            return
         setReminderLoading(true)
         setReminderMessage(null)
         try {
@@ -145,6 +153,7 @@ export default function ScheduleDetailPage() {
     const assignments = schedule?.schedule_assignments ?? []
     const totalCount = assignments.length
     const staffing = summarizeStaffing(schedule)
+    const reminderLadder = schedule.reminder_days_before ?? []
 
     return (
         <div className="space-y-6">
@@ -160,6 +169,13 @@ export default function ScheduleDetailPage() {
                             {format(new Date(schedule.scheduled_date + 'T00:00:00'), 'PPPP')}
                             {' · '}
                             {schedule.start_time?.slice(0, 5)} – {schedule.end_time?.slice(0, 5)}
+                        </p>
+                        {/* Read-only: the ladder is chosen at generation and nowhere else, so
+                            this is the only place a head can see what a rota will actually send. */}
+                        <p className="text-muted-foreground text-xs mt-1">
+                            {reminderLadder.length === 0
+                                ? 'No reminders'
+                                : `Reminders: ${reminderLadder.map(describeLeadTime).join(', ').toLowerCase()}`}
                         </p>
                     </div>
                 </div>

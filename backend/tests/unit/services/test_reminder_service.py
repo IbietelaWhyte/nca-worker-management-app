@@ -6,7 +6,7 @@ import pytest
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
+from app.schemas.schedules.models import AssignmentResponse, DueReminder, ScheduleResponse
 from app.schemas.workers.models import WorkerResponse
 from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
@@ -24,7 +24,7 @@ def make_department(department_id, name: str) -> DepartmentResponse:
 
 
 def make_due_assignment(**kwargs) -> AssignmentResponse:
-    """Builds an assignment with worker and schedule embedded, as the RPCs return it.
+    """Builds an assignment with worker and schedule embedded, as the notice RPC returns it.
 
     Pass `department_name` to also embed the department, as a plain PostgREST select does; the
     notice RPC returns row_to_json(s) and so cannot carry an embed, hence it is off by default.
@@ -39,7 +39,6 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
         worker_id=worker_id,
         department_role_id=kwargs.get("department_role_id"),
         subteam_id=kwargs.get("subteam_id"),
-        reminder_sent_at=None,
         notice_sent_at=kwargs.get("notice_sent_at"),
         workers=WorkerResponse(
             id=worker_id,
@@ -59,11 +58,29 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
             scheduled_date=kwargs.get("scheduled_date", "2026-03-15"),
             start_time=kwargs.get("start_time", "09:00:00"),
             end_time=kwargs.get("end_time", "11:00:00"),
-            reminder_days_before=kwargs.get("reminder_days_before", 2),
+            reminder_days_before=kwargs.get("reminder_days_before", [2]),
             notes=kwargs.get("notes", "Be on time!"),
             created_by=kwargs.get("created_by", uuid4()),
             created_at=kwargs.get("schedule_created_at", "2026-02-01T10:00:00Z"),
         ),
+    )
+
+
+def make_due_reminder(**kwargs) -> DueReminder:
+    """One (assignment, lead time) pair, as the reminder RPC now returns it.
+
+    Built from the same embeds as the notice row so the two sweeps can be compared directly;
+    what differs is the shape, not the data. `days_before` is the half of the key that must
+    survive the round trip — marking the assignment alone would cancel the rest of the ladder.
+    """
+    assignment = make_due_assignment(**kwargs)
+    return DueReminder(
+        assignment_id=assignment.id,
+        schedule_id=assignment.schedule_id,
+        worker_id=assignment.worker_id,
+        days_before=kwargs.get("days_before", 1),
+        workers=assignment.workers,
+        schedules=assignment.schedules,
     )
 
 
@@ -197,33 +214,78 @@ class TestSendPendingNotices:
 
 
 class TestSendDueReminders:
-    def test_sends_reminders_and_marks_sent(self, service, mock_schedule_repo, mock_sms_service):
+    def test_groups_a_workers_due_dates_into_one_message(self, service, mock_schedule_repo, mock_sms_service):
+        # The reason the sweep is grouped at all. A ladder of three lead times against four
+        # Sundays puts twelve rows in front of this job for one person, and twelve texts would
+        # be the feature working exactly as designed and still being wrong.
+        worker_id = uuid4()
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = [
-            make_due_assignment(),
-            make_due_assignment(),
+            make_due_reminder(worker_id=worker_id, scheduled_date=day, days_before=lead)
+            for day, lead in (("2026-08-02", 1), ("2026-08-05", 3), ("2026-08-09", 7))
+        ]
+        mock_sms_service.send_reminder.return_value = True
+
+        assert service.trigger_manually() == 1
+        mock_sms_service.send_reminder.assert_called_once()
+        assert len(mock_sms_service.send_reminder.call_args.kwargs["duties"]) == 3
+
+    def test_marks_the_lead_time_and_not_just_the_assignment(self, service, mock_schedule_repo, mock_sms_service):
+        # The whole point of the new table: recording the assignment alone would cancel every
+        # rung of the ladder that has not fired yet.
+        worker_id = uuid4()
+        reminders = [
+            make_due_reminder(worker_id=worker_id, scheduled_date="2026-08-02", days_before=1),
+            make_due_reminder(worker_id=worker_id, scheduled_date="2026-08-09", days_before=7),
+        ]
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = reminders
+        mock_sms_service.send_reminder.return_value = True
+
+        service.trigger_manually()
+        marked = mock_schedule_repo.mark_reminders_sent.call_args.args[0]
+        assert sorted(marked) == sorted((r.assignment_id, r.days_before) for r in reminders)
+
+    def test_one_message_per_worker(self, service, mock_schedule_repo, mock_sms_service):
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [
+            make_due_reminder(),
+            make_due_reminder(),
         ]
         mock_sms_service.send_reminder.return_value = True
 
         assert service.trigger_manually() == 2
-        assert mock_schedule_repo.mark_reminder_sent.call_count == 2
+        assert mock_schedule_repo.mark_reminders_sent.call_count == 2
+
+    def test_names_the_department_beside_each_date(
+        self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
+    ):
+        department_id = uuid4()
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [
+            make_due_reminder(department_id=department_id, scheduled_date="2026-08-02")
+        ]
+        mock_department_repo.get_by_id.side_effect = lambda did: make_department(did, "Ushering")
+        mock_sms_service.send_reminder.return_value = True
+
+        service.trigger_manually()
+        assert mock_sms_service.send_reminder.call_args.kwargs["duties"] == [("Ushering", "Sun 02 Aug at 09:00")]
 
     def test_does_not_mark_sent_when_sms_fails(self, service, mock_schedule_repo, mock_sms_service):
-        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_assignment()]
+        # Unmarked means the pair is still missing from assignment_reminder_sends, so tomorrow's
+        # sweep will not pick it up — the RPC matches an exact date. A failure here is a miss.
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_reminder()]
         mock_sms_service.send_reminder.return_value = False
 
         assert service.trigger_manually() == 0
-        mock_schedule_repo.mark_reminder_sent.assert_not_called()
+        mock_schedule_repo.mark_reminders_sent.assert_not_called()
 
     def test_skips_assignments_missing_worker_data(self, service, mock_schedule_repo, mock_sms_service):
-        assignment = make_due_assignment()
-        assignment.workers = None
-        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [assignment]
+        reminder = make_due_reminder()
+        reminder.workers = None
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [reminder]
 
         assert service.trigger_manually() == 0
         mock_sms_service.send_reminder.assert_not_called()
 
     def test_skips_a_worker_with_no_phone(self, service, mock_schedule_repo, mock_sms_service):
-        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_assignment(phone=None)]
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [make_due_reminder(phone=None)]
 
         assert service.trigger_manually() == 0
         mock_sms_service.send_reminder.assert_not_called()
@@ -258,6 +320,17 @@ class TestTriggerForSchedule:
         mock_sms_service.send_reminder.return_value = True
 
         assert service.trigger_for_schedule(uuid4()) == 3
+
+    def test_records_nothing_it_sends(self, service, mock_schedule_repo, mock_sms_service):
+        # This send answers no particular lead time, so any days_before it recorded would be
+        # invented — and an invented one lands on a rung that has not fired yet and cancels it,
+        # silently, days later. A head re-sending after a change must not cost the team their
+        # real reminder. Asserted so it is not "fixed" back into marking.
+        mock_schedule_repo.get_with_assignments.return_value = self._schedule_with([make_due_assignment()])
+        mock_sms_service.send_reminder.return_value = True
+
+        assert service.trigger_for_schedule(uuid4()) == 1
+        assert mock_schedule_repo.mark_reminders_sent.call_args.args[0] == []
 
     def test_returns_zero_for_an_unknown_schedule(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_with_assignments.return_value = None

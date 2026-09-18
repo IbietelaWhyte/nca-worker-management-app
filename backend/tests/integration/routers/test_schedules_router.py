@@ -61,7 +61,7 @@ class TestGenerateSchedule:
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
                 "end_time": "11:00:00",
-                "reminder_days_before": 1,
+                "reminder_days_before": [1],
             },
         )
         assert response.status_code == 201
@@ -82,7 +82,7 @@ class TestGenerateSchedule:
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
                 "end_time": "11:00:00",
-                "reminder_days_before": 1,
+                "reminder_days_before": [1],
             },
         )
         assert response.status_code == 400
@@ -102,7 +102,7 @@ class TestGenerateSchedule:
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
                 "end_time": "11:00:00",
-                "reminder_days_before": 1,
+                "reminder_days_before": [1],
             },
         )
         assert response.status_code == 403
@@ -125,11 +125,62 @@ class TestGenerateSchedule:
                 "scheduled_date": "2026-03-15",
                 "start_time": "09:00:00",
                 "end_time": "11:00:00",
-                "reminder_days_before": 1,
+                "reminder_days_before": [1],
             },
         )
         assert response.status_code == 409
         assert "already exists" in response.json()["detail"]
+
+
+class TestReminderLeadTimes:
+    """The ladder is set once, at generation, so the request body is the only place to guard it."""
+
+    def _generate(self, service, lead_times):
+        client = make_client(role=UserRole.HOD, schedule_service=service)
+        return client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "scope": "department_only",
+                "title": "Sunday Service",
+                "scheduled_date": "2026-03-15",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": lead_times,
+            },
+        )
+
+    def test_accepts_a_ladder(self, mock_schedule_service):
+        mock_schedule_service.generate_schedule.return_value = make_schedule()
+        assert self._generate(mock_schedule_service, [7, 3, 1]).status_code == 201
+        assert mock_schedule_service.generate_schedule.call_args.args[0].reminder_days_before == [7, 3, 1]
+
+    def test_accepts_no_reminders_at_all(self, mock_schedule_service):
+        # A real choice for a team that works off the printed rota. Forcing one reminder would
+        # spend their money for them, and the notice still goes out either way.
+        mock_schedule_service.generate_schedule.return_value = make_schedule()
+        assert self._generate(mock_schedule_service, []).status_code == 201
+        assert mock_schedule_service.generate_schedule.call_args.args[0].reminder_days_before == []
+
+    def test_orders_the_ladder_furthest_out_first(self, mock_schedule_service):
+        mock_schedule_service.generate_schedule.return_value = make_schedule()
+        self._generate(mock_schedule_service, [1, 7, 3])
+        assert mock_schedule_service.generate_schedule.call_args.args[0].reminder_days_before == [7, 3, 1]
+
+    def test_collapses_a_repeated_lead_time_rather_than_refusing_it(self, mock_schedule_service):
+        # A slip, not an error worth a 422 — and the send table's primary key would make the
+        # second text a no-op anyway.
+        mock_schedule_service.generate_schedule.return_value = make_schedule()
+        assert self._generate(mock_schedule_service, [3, 3, 1]).status_code == 201
+        assert mock_schedule_service.generate_schedule.call_args.args[0].reminder_days_before == [3, 1]
+
+    def test_rejects_a_negative_lead_time(self, mock_schedule_service):
+        assert self._generate(mock_schedule_service, [-1]).status_code == 422
+        mock_schedule_service.generate_schedule.assert_not_called()
+
+    def test_rejects_more_lead_times_than_a_phone_bill_can_bear(self, mock_schedule_service):
+        assert self._generate(mock_schedule_service, [1, 2, 3, 4, 5, 6]).status_code == 422
+        mock_schedule_service.generate_schedule.assert_not_called()
 
 
 class TestGetWorkerAssignments:
@@ -220,7 +271,7 @@ MONTH_PREVIEW_BODY = {
     "days_of_week": ["sunday"],
     "start_time": "09:00:00",
     "end_time": "11:00:00",
-    "reminder_days_before": 1,
+    "reminder_days_before": [1],
 }
 
 
@@ -331,7 +382,7 @@ class TestGenerateMonthlySchedule:
             "title": "Sunday Service",
             "start_time": "09:00:00",
             "end_time": "11:00:00",
-            "reminder_days_before": 1,
+            "reminder_days_before": [1],
             "dates": [
                 {"scheduled_date": "2026-03-01", "worker_ids": [str(worker_id or uuid4())]},
             ],

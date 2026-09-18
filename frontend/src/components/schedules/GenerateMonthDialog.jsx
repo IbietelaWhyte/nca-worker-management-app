@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select'
 import { useSubteams } from '@/hooks/useSubteams'
 import MonthPreviewTable, { groupKey } from './MonthPreviewTable'
+import ReminderLeadTimesField from './ReminderLeadTimesField'
 
 const SCOPE_OPTIONS = {
     DEPARTMENT_ONLY: 'department_only',
@@ -39,7 +40,9 @@ const defaultForm = {
     start_time: '09:00',
     end_time: '11:00',
     notes: '',
-    reminder_days_before: 1,
+    // A ladder now, not a number. One reminder the day before is the shape every existing
+    // schedule already has, so it stays the default.
+    reminder_days_before: [1],
 }
 
 /**
@@ -84,7 +87,7 @@ export default function GenerateMonthDialog({
         start_time: form.start_time + ':00',
         end_time: form.end_time + ':00',
         notes: form.notes || null,
-        reminder_days_before: parseInt(form.reminder_days_before),
+        reminder_days_before: form.reminder_days_before,
     })
 
     const handlePreview = async e => {
@@ -373,20 +376,12 @@ export default function GenerateMonthDialog({
                 </div>
             )}
 
-            {/* Reminder days */}
-            <div className="space-y-2">
-                <Label htmlFor="month-reminder">Send reminder (days before)</Label>
-                <Input
-                    id="month-reminder"
-                    name="reminder_days_before"
-                    type="number"
-                    min="0"
-                    max="14"
-                    value={form.reminder_days_before}
-                    onChange={handleChange}
-                    className="w-24"
-                />
-            </div>
+            {/* Reminder ladder */}
+            <ReminderLeadTimesField
+                id="month-reminder"
+                value={form.reminder_days_before}
+                onChange={days => setForm(prev => ({ ...prev, reminder_days_before: days }))}
+            />
 
             {/* Notes */}
             <div className="space-y-2">
