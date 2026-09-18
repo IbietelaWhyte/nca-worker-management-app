@@ -10,10 +10,12 @@ Two things shape the design:
   the next date's ordering. Without that carry-forward every date would sort from the
   same starting state and the same handful of workers would win every week.
 - **A date is filled group by group.** A department-wide schedule has to staff each
-  subteam to its own `workers_per_slot` — Seekers needs its four people and Discovery
-  its three — so a group is planned against its own roster and its own quota, and
-  fairness rotates within it. A subteam-scoped or department-only schedule is simply
-  the one-group case.
+  subteam to its own band — Seekers needs its four people and Discovery its three — so
+  a group is planned against its own roster and its own band, and fairness rotates
+  within it. A subteam-scoped or department-only schedule is simply the one-group case.
+- **A group has a range, not a quota.** `max_workers` is how many to take when the
+  people are there; `min_workers` is the only figure that judges the outcome. A group
+  that fields three against a band of 2-4 is planned, not short.
 """
 
 from dataclasses import dataclass, field
@@ -32,12 +34,16 @@ class GroupContext:
         key: Stable identity for the group — a subteam id as a string, or "" for the
             department-only roster. Used to match results back to a subteam.
         workers: Eligible, active workers for this group.
-        workers_needed: Slots this group must fill on each date.
+        min_workers: The number below which this group cannot run. The only figure that
+            judges an outcome — short of `max_workers` but at or above this one is
+            fully planned, not understaffed.
+        max_workers: Slots to fill when enough people are free. Never exceeded.
     """
 
     key: str
     workers: list[Worker]
-    workers_needed: int
+    min_workers: int
+    max_workers: int
 
 
 @dataclass
@@ -69,7 +75,8 @@ class GroupPlanResult:
     """One group's outcome on one date. Worker ids are in priority order."""
 
     key: str
-    workers_needed: int
+    min_workers: int
+    max_workers: int
     status: DatePlanStatus
     selected: list[UUID] = field(default_factory=list)
     alternates: list[UUID] = field(default_factory=list)
@@ -145,15 +152,18 @@ def _plan_group(
     if not free:
         return GroupPlanResult(
             key=group.key,
-            workers_needed=group.workers_needed,
+            min_workers=group.min_workers,
+            max_workers=group.max_workers,
             status=DatePlanStatus.SKIPPED_NO_WORKERS,
             message=_no_workers_message(group.workers, unavailable, booked),
         )
 
     free.sort(key=lambda w: _fairness_key(w, month_count, last_assigned))
 
-    selected = free[: group.workers_needed]
-    alternates = free[group.workers_needed :]
+    # Fill to the ceiling when the people are there. The floor never limits the take —
+    # it only judges the result afterwards.
+    selected = free[: group.max_workers]
+    alternates = free[group.max_workers :]
 
     # Carry this group's picks forward so later dates — and later groups on this date —
     # see them. This is the entire balancing mechanism.
@@ -162,21 +172,45 @@ def _plan_group(
         last_assigned[worker.id] = scheduled_date
         booked.add(worker.id)
 
-    understaffed = len(selected) < group.workers_needed
     return GroupPlanResult(
         key=group.key,
-        workers_needed=group.workers_needed,
-        status=DatePlanStatus.UNDERSTAFFED if understaffed else DatePlanStatus.PLANNED,
+        min_workers=group.min_workers,
+        max_workers=group.max_workers,
+        status=_group_status(len(selected), group),
         selected=[w.id for w in selected],
         alternates=[w.id for w in alternates],
-        message=(f"Only {len(selected)} of {group.workers_needed} workers available." if understaffed else None),
+        message=_staffing_message(len(selected), group),
     )
+
+
+def _group_status(filled: int, group: GroupContext) -> DatePlanStatus:
+    """UNDERSTAFFED is judged against the minimum alone.
+
+    Short of the maximum is not a problem worth flagging: the maximum says how many to use
+    when they are there, the minimum says the number below which the group cannot run. A
+    band of 2-4 that fields 3 is planned.
+    """
+    return DatePlanStatus.UNDERSTAFFED if filled < group.min_workers else DatePlanStatus.PLANNED
+
+
+def _staffing_message(filled: int, group: GroupContext) -> str | None:
+    """Say what was filled, but only when it is worth saying.
+
+    Below the floor is a problem and names the floor. Between the two is worth mentioning —
+    a head may want to add somebody — but against the ceiling, so it does not read as a
+    complaint. At the ceiling there is nothing to say.
+    """
+    if filled < group.min_workers:
+        return f"Only {filled} of {group.min_workers} workers available."
+    if filled < group.max_workers:
+        return f"{filled} of {group.max_workers} slots filled."
+    return None
 
 
 def _aggregate(scheduled_date: date, groups: list[GroupPlanResult]) -> DatePlanResult:
     """Roll group outcomes up into the date's own status.
 
-    A date is only PLANNED when every group is fully staffed; it is SKIPPED_NO_WORKERS
+    A date is only PLANNED when every group reached its minimum; it is SKIPPED_NO_WORKERS
     only when no group could field anyone at all.
     """
     if groups and all(g.status == DatePlanStatus.SKIPPED_NO_WORKERS for g in groups):
@@ -190,7 +224,9 @@ def _aggregate(scheduled_date: date, groups: list[GroupPlanResult]) -> DatePlanR
     short = [g for g in groups if g.status != DatePlanStatus.PLANNED]
     if short:
         filled = sum(len(g.selected) for g in groups)
-        needed = sum(g.workers_needed for g in groups)
+        # Minimums, not maximums: the date is only UNDERSTAFFED because a group fell below
+        # its floor, so totalling ceilings here would contradict the per-group message.
+        needed = sum(g.min_workers for g in groups)
         return DatePlanResult(
             scheduled_date=scheduled_date,
             status=DatePlanStatus.UNDERSTAFFED,

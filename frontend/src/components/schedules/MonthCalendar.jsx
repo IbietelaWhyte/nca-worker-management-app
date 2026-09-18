@@ -79,7 +79,8 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
 
                                 <div className="space-y-1">
                                     {daySchedules.map(schedule => {
-                                        const { assigned } = summarizeStaffing(schedule)
+                                        const { assigned, max, understaffed, full } =
+                                            summarizeStaffing(schedule)
                                         return (
                                             <button
                                                 key={schedule.id}
@@ -91,7 +92,17 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
                                                     {schedule.title}
                                                 </p>
                                                 <div className="flex items-center gap-1 mt-0.5">
-                                                    <Badge variant="secondary">{assigned}</Badge>
+                                                    <Badge
+                                                        variant={
+                                                            understaffed
+                                                                ? 'destructive'
+                                                                : full
+                                                                  ? 'default'
+                                                                  : 'secondary'
+                                                        }
+                                                    >
+                                                        {assigned}/{max}
+                                                    </Badge>
                                                     <span className="text-[10px] text-muted-foreground">
                                                         {schedule.start_time?.slice(0, 5)}
                                                     </span>

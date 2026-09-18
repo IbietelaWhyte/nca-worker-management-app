@@ -26,6 +26,13 @@ class Schedule(BaseModel):
     start_time: time
     end_time: time
     reminder_days_before: int
+    # The staffing band in force when this schedule was generated, summed across its groups.
+    # Frozen at generation rather than re-resolved on read: the department's numbers may change
+    # before the date comes round, and this rota was planned against these. Nullable because
+    # rows created before the band existed have no honest answer — callers fall back to the
+    # assignment count rather than rendering "0 needed".
+    min_workers: int | None = None
+    max_workers: int | None = None
     notes: str | None = None
     # Nullable because schedules_created_by_fkey is ON DELETE SET NULL: removing the worker who
     # created a schedule leaves the schedule standing without a creator. Typed non-optional, this
@@ -145,17 +152,21 @@ class PlannedGroup(BaseModel):
     """One roster's staffing on one date.
 
     A department-wide schedule has a group per subteam plus one for workers in no
-    subteam, each carrying its own quota. Subteam-scoped and department-only schedules
+    subteam, each carrying its own band. Subteam-scoped and department-only schedules
     have a single group.
     """
 
     # None for the department-only roster (workers in no subteam).
     subteam: SubteamResponse | None = None
-    workers_needed: int
+    # `max_workers` is what the planner filled to; `min_workers` is what judges the result.
+    # Renamed rather than redefined from `workers_needed` — a kept name meaning something new
+    # is the kind of break nothing catches.
+    min_workers: int
+    max_workers: int
     status: DatePlanStatus
     assignments: list[PlannedAssignment] = []
     # Free but not picked for this group — powers the swap control in the preview UI.
-    # Restricted to the group so a swap can never break a subteam's quota.
+    # Restricted to the group so a swap can never break another subteam's staffing.
     alternates: list[WorkerResponse] = []
     message: str | None = None
 
@@ -170,8 +181,9 @@ class DatePlan(BaseModel):
 class MonthlySchedulePreview(BaseModel):
     year: int
     month: int
-    # Total slots per date, summed across every group.
-    workers_needed: int
+    # Totals per date, summed across every group.
+    min_workers: int
+    max_workers: int
     dates: list[DatePlan]
 
 

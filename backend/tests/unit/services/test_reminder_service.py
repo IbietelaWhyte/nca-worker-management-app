@@ -17,7 +17,8 @@ def make_department(department_id, name: str) -> DepartmentResponse:
     return DepartmentResponse(
         id=department_id,
         name=name,
-        workers_per_slot=1,
+        min_workers_per_slot=1,
+        max_workers_per_slot=1,
         created_at="2026-01-01T08:00:00Z",
     )
 

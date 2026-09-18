@@ -34,6 +34,8 @@ class Columns:
     SUBTEAM_ID = "subteam_id"
     NOTES = "notes"
     REMINDER_DAYS_BEFORE = "reminder_days_before"
+    MIN_WORKERS = "min_workers"
+    MAX_WORKERS = "max_workers"
     CREATED_BY = "created_by"
     CREATED_AT = "created_at"
 

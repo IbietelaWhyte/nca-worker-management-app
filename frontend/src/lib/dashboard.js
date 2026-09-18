@@ -47,10 +47,12 @@ export const buildUpcoming = (byDepartment, today) =>
  *
  * Deliberately narrow: every item here is derivable from schedules already loaded. It used to
  * lead on who had declined and who had not replied; neither exists now that workers are told
- * their duties rather than asked about them. What is left is coverage — a department with
- * nothing on the rota — and setup gaps. The signal that replaces the old two is staffing against
- * the numbers a department asked for, which needs the minimum and maximum this app does not
- * store yet.
+ * their duties rather than asked about them. What replaces them is staffing measured against the
+ * numbers each department asked for — a fact about the rota rather than a count of replies.
+ *
+ * Below the minimum is the one unambiguous problem: the rota cannot run as planned, and the head
+ * is the only person who can fix it. Room below the maximum is worth a quiet mention close in,
+ * where "we could use one more" is still actionable, and nothing at all further out.
  *
  * @param {Array<object>} upcoming Output of `buildUpcoming`.
  * @param {Array<object>} departments Departments the viewer can see.
@@ -65,6 +67,36 @@ export const buildAttentionItems = (
     { includeSetupGaps = false } = {}
 ) => {
     const items = []
+
+    for (const entry of upcoming) {
+        const { schedule, department, summary, daysAway } = entry
+        const when = format(parseDate(schedule.scheduled_date), 'd MMMM')
+
+        if (summary.understaffed) {
+            items.push({
+                id: `understaffed-${schedule.id}`,
+                severity: 'high',
+                title:
+                    summary.assigned === 0
+                        ? `Nobody is on ${department.name} for ${when}`
+                        : `${department.name} is ${summary.short === 1 ? 'one' : summary.short} short on ${when}`,
+                detail: `${summary.assigned} of at least ${summary.min} places filled`,
+                href: `/schedules/${schedule.id}`,
+            })
+            // Never both items for one schedule — short is the only thing worth saying.
+            continue
+        }
+
+        if (!summary.full && daysAway <= 14) {
+            items.push({
+                id: `room-${schedule.id}`,
+                severity: 'low',
+                title: `${department.name} has room on ${when}`,
+                detail: `${summary.assigned} of ${summary.max} places filled`,
+                href: `/schedules/${schedule.id}`,
+            })
+        }
+    }
 
     // A department with nothing left this month. Checked against the month end rather than a
     // rolling window so it reads the way a rota is actually planned.

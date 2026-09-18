@@ -20,6 +20,7 @@ from tests.unit.services.conftest import (
     make_department_role,
     make_schedule,
     make_subteam,
+    make_subteam_member,
     make_worker,
 )
 
@@ -83,7 +84,7 @@ class TestGenerateSchedule:
         mock_department_repo,
         mock_availability_repo,
     ):
-        dept = make_department(workers_per_slot=2)
+        dept = make_department(band=2)
         workers = [make_worker(), make_worker(), make_worker()]
         schedule = make_schedule(department_id=dept.id)
 
@@ -131,16 +132,27 @@ class TestGenerateSchedule:
     ):
         dept = make_department()
         workers = [make_worker(), make_worker()]
-        # All workers marked unavailable via specific date override
-        unavailable = make_availability(is_available=False)
+        the_date = date(2026, 3, 15)
 
         mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = workers
-        mock_availability_repo.get_by_worker_and_type.return_value = unavailable
+        # One batched fetch for the whole roster now, not a pair of queries per worker.
+        mock_availability_repo.get_for_workers.return_value = [
+            make_availability(
+                worker_id=w.id,
+                availability_type=AvailabilityType.SPECIFIC_DATE,
+                day_of_week=None,
+                specific_date=the_date,
+                is_available=False,
+            )
+            for w in workers
+        ]
 
-        with pytest.raises(BadRequestError, match="No available workers"):
-            service.generate_schedule(make_generate_request(), created_by=uuid4())
+        # The planner's own message, which separates "unavailable" from "already scheduled" —
+        # the hand-rolled one it replaced could only say that nobody was free.
+        with pytest.raises(BadRequestError, match="No workers available for this date"):
+            service.generate_schedule(make_generate_request(scheduled_date=the_date), created_by=uuid4())
 
     def test_specific_date_overrides_recurring(
         self,
@@ -150,22 +162,34 @@ class TestGenerateSchedule:
         mock_worker_repo,
         mock_availability_repo,
     ):
-        """A specific date unavailability should override recurring availability."""
-        dept = make_department(workers_per_slot=1)
+        """A specific date beats the recurring weekly setting, in either direction."""
+        dept = make_department(band=1)
         worker = make_worker()
-        # Recurring says available, specific date says unavailable
-        specific_unavailable = make_availability(is_available=False)
+        the_date = date(2026, 3, 15)  # a Sunday
 
         mock_schedule_repo.get_existing_schedule.return_value = None
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [worker]
-        # Specific date override returns unavailable — recurring should be ignored
-        mock_availability_repo.get_by_worker_and_type.return_value = specific_unavailable
+        mock_availability_repo.get_for_workers.return_value = [
+            # Free every Sunday...
+            make_availability(
+                worker_id=worker.id,
+                availability_type=AvailabilityType.RECURRING,
+                day_of_week=DayOfWeek.SUNDAY,
+                is_available=True,
+            ),
+            # ...except this one.
+            make_availability(
+                worker_id=worker.id,
+                availability_type=AvailabilityType.SPECIFIC_DATE,
+                day_of_week=None,
+                specific_date=the_date,
+                is_available=False,
+            ),
+        ]
 
-        with pytest.raises(BadRequestError, match="No available workers"):
-            service.generate_schedule(make_generate_request(), created_by=uuid4())
-        # Verify recurring availability was never checked
-        mock_availability_repo.get_by_worker_and_day.assert_not_called()
+        with pytest.raises(BadRequestError, match="No workers available for this date"):
+            service.generate_schedule(make_generate_request(scheduled_date=the_date), created_by=uuid4())
 
     def test_raises_when_department_not_found(self, service, mock_schedule_repo, mock_department_repo):
         mock_schedule_repo.get_existing_schedule.return_value = None
@@ -184,7 +208,7 @@ class TestRoundRobin:
         mock_schedule_repo,
     ):
         """Worker with no prior assignments should be selected first."""
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         never_assigned = make_worker()
         recently_assigned = make_worker()
         schedule_id = uuid4()
@@ -198,16 +222,10 @@ class TestRoundRobin:
 
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [recently_assigned, never_assigned]
-        mock_availability_repo.get_by_worker_and_type.return_value = None
-        mock_availability_repo.get_by_worker_and_day.return_value = None
         mock_schedule_repo.get_existing_schedule.return_value = None
-
-        def get_assignments(worker_id):
-            if worker_id == recently_assigned.id:
-                return [prior_assignment]
-            return []
-
-        mock_schedule_repo.get_assignments_for_worker.side_effect = get_assignments
+        # One fetch for the whole roster. The old path issued this query per worker from
+        # inside the sort key, which is N round-trips on a request thread.
+        mock_schedule_repo.get_assignment_history_for_workers.return_value = [prior_assignment]
         schedule = make_schedule()
         mock_schedule_repo.create.return_value = schedule
         mock_schedule_repo.bulk_create_assignments.return_value = []
@@ -229,7 +247,7 @@ class TestRoleAutoFill:
         mock_availability_repo,
         mock_department_role_repo,
     ):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
         role = make_department_role(department_id=dept.id)
         schedule = make_schedule(department_id=dept.id)
@@ -259,7 +277,7 @@ class TestRoleAutoFill:
         mock_availability_repo,
         mock_department_role_repo,
     ):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
         schedule = make_schedule(department_id=dept.id)
 
@@ -383,7 +401,7 @@ class TestPreviewMonthlySchedule:
     def test_plans_every_matching_weekday_in_the_month(
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
-        dept = make_department(workers_per_slot=2)
+        dept = make_department(band=2)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(10)]
 
@@ -391,13 +409,13 @@ class TestPreviewMonthlySchedule:
 
         # March 2026 has five Sundays: 1, 8, 15, 22, 29.
         assert [p.scheduled_date.day for p in result.dates] == [1, 8, 15, 22, 29]
-        assert result.workers_needed == 2
+        assert (result.min_workers, result.max_workers) == (2, 2)
         assert all(p.status == DatePlanStatus.PLANNED for p in result.dates)
         assert all(len(plan_assignments(p)) == 2 for p in result.dates)
 
     def test_writes_nothing(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(3)]
 
@@ -411,7 +429,7 @@ class TestPreviewMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, availability_repo = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(6)]
 
@@ -427,7 +445,7 @@ class TestPreviewMonthlySchedule:
         schedule_repo.get_workers_scheduled_on_date.assert_not_called()
 
     def test_balances_workers_across_the_month(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         # Five Sundays, five workers, one slot each -> everyone serves exactly once.
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(5)]
@@ -442,7 +460,7 @@ class TestPreviewMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         _, availability_repo = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         away, other = make_worker(), make_worker()
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [away, other]
@@ -466,7 +484,7 @@ class TestPreviewMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         _, availability_repo = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [worker]
@@ -498,7 +516,7 @@ class TestPreviewMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(3)]
         schedule_repo.get_by_department.return_value = [
@@ -512,7 +530,7 @@ class TestPreviewMonthlySchedule:
         assert by_date[date(2026, 3, 1)] == DatePlanStatus.PLANNED
 
     def test_flags_understaffed_dates(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
-        dept = make_department(workers_per_slot=4)
+        dept = make_department(band=4)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker(), make_worker()]
 
@@ -522,7 +540,7 @@ class TestPreviewMonthlySchedule:
         assert all(len(plan_assignments(p)) == 2 for p in result.dates)
 
     def test_supports_multiple_weekdays(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker() for _ in range(10)]
 
@@ -554,7 +572,7 @@ class TestCommitMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         w1, w2 = make_worker(), make_worker()
         creator = make_worker()
 
@@ -586,7 +604,7 @@ class TestCommitMonthlySchedule:
 
     def test_honours_the_exact_workers_supplied(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         workers = [make_worker() for _ in range(4)]
         swapped_in = workers[3]
 
@@ -610,7 +628,7 @@ class TestCommitMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         w1, w2 = make_worker(), make_worker()
 
         mock_department_repo.get_by_id.return_value = dept
@@ -640,7 +658,7 @@ class TestCommitMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
 
         mock_department_repo.get_by_id.return_value = dept
@@ -660,7 +678,7 @@ class TestCommitMonthlySchedule:
 
     def test_rejects_a_worker_outside_the_scope(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
         mock_worker_repo.get_by_email.return_value = make_worker()
@@ -677,7 +695,7 @@ class TestCommitMonthlySchedule:
         self, service, monthly_repos, mock_worker_repo, mock_department_repo
     ):
         schedule_repo, _ = monthly_repos
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
 
         mock_department_repo.get_by_id.return_value = dept
@@ -697,7 +715,7 @@ class TestCommitMonthlySchedule:
         schedule_repo.delete_schedules.assert_called_once_with([created[0].id])
 
     def test_raises_when_creator_not_found(self, service, monthly_repos, mock_worker_repo, mock_department_repo):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         worker = make_worker()
         mock_department_repo.get_by_id.return_value = dept
         mock_worker_repo.get_department_only_workers.return_value = [worker]
@@ -722,10 +740,10 @@ class TestDepartmentAllSubteamQuotas:
     @pytest.fixture
     def children_ministry(self, mock_department_repo, mock_subteam_repo, mock_worker_repo, monthly_repos):
         """Mirrors the real Children's Ministry: 3 subteams with different quotas."""
-        dept = make_department(name="Children's Ministry", workers_per_slot=2)
-        seekers = make_subteam(department_id=dept.id, name="Seekers", workers_per_slot=4)
-        discovery = make_subteam(department_id=dept.id, name="Discovery", workers_per_slot=3)
-        checkin = make_subteam(department_id=dept.id, name="Check In/Out", workers_per_slot=1)
+        dept = make_department(name="Children's Ministry", band=2)
+        seekers = make_subteam(department_id=dept.id, name="Seekers", band=4)
+        discovery = make_subteam(department_id=dept.id, name="Discovery", band=3)
+        checkin = make_subteam(department_id=dept.id, name="Check In/Out", band=1)
 
         rosters = {
             seekers.id: [make_worker() for _ in range(5)],
@@ -748,11 +766,11 @@ class TestDepartmentAllSubteamQuotas:
 
         first = result.dates[0]
         by_name = {(g.subteam.name if g.subteam else "Department"): g for g in first.groups}
-        assert by_name["Seekers"].workers_needed == 4
-        assert by_name["Discovery"].workers_needed == 3
-        assert by_name["Check In/Out"].workers_needed == 1
+        assert (by_name["Seekers"].min_workers, by_name["Seekers"].max_workers) == (4, 4)
+        assert (by_name["Discovery"].min_workers, by_name["Discovery"].max_workers) == (3, 3)
+        assert (by_name["Check In/Out"].min_workers, by_name["Check In/Out"].max_workers) == (1, 1)
         # No subteam quota set on the department-only group -> department default.
-        assert by_name["Department"].workers_needed == 2
+        assert (by_name["Department"].min_workers, by_name["Department"].max_workers) == (2, 2)
 
     def test_no_subteam_is_left_empty(self, service, children_ministry):
         dept, _, _ = children_ministry
@@ -764,7 +782,7 @@ class TestDepartmentAllSubteamQuotas:
         for date_plan in result.dates:
             for group in date_plan.groups:
                 label = group.subteam.name if group.subteam else "Department"
-                assert len(group.assignments) == group.workers_needed, f"{label} on {date_plan.scheduled_date}"
+                assert len(group.assignments) == group.max_workers, f"{label} on {date_plan.scheduled_date}"
 
     def test_total_workers_needed_sums_every_group(self, service, children_ministry):
         dept, _, _ = children_ministry
@@ -774,7 +792,7 @@ class TestDepartmentAllSubteamQuotas:
         )
 
         # 4 Seekers + 3 Discovery + 1 Check In/Out + 2 department-only
-        assert result.workers_needed == 10
+        assert (result.min_workers, result.max_workers) == (10, 10)
         assert all(len(plan_assignments(p)) == 10 for p in result.dates)
 
     def test_workers_are_drawn_only_from_their_own_subteam(self, service, children_ministry):
@@ -806,7 +824,7 @@ class TestDepartmentAllSubteamQuotas:
         self, service, children_ministry, mock_subteam_repo, mock_worker_repo
     ):
         dept, subteams, rosters = children_ministry
-        empty = make_subteam(department_id=dept.id, name="Pacesetters", workers_per_slot=3)
+        empty = make_subteam(department_id=dept.id, name="Pacesetters", band=3)
         mock_subteam_repo.get_by_department.return_value = [*subteams.values(), empty]
 
         result = service.preview_monthly_schedule(
@@ -854,9 +872,9 @@ class TestGenerateScheduleDepartmentAll:
         mock_worker_repo,
         mock_availability_repo,
     ):
-        dept = make_department(workers_per_slot=2)
-        seekers = make_subteam(department_id=dept.id, name="Seekers", workers_per_slot=4)
-        checkin = make_subteam(department_id=dept.id, name="Check In/Out", workers_per_slot=1)
+        dept = make_department(band=2)
+        seekers = make_subteam(department_id=dept.id, name="Seekers", band=4)
+        checkin = make_subteam(department_id=dept.id, name="Check In/Out", band=1)
         seeker_workers = [make_worker() for _ in range(5)]
         checkin_workers = [make_worker(), make_worker()]
 
@@ -917,22 +935,19 @@ class TestLeaveExcludesWorkers:
         mock_availability_repo,
         mock_leave_repo,
     ):
-        dept = make_department(workers_per_slot=1)
+        dept = make_department(band=1)
         away, free = make_worker(), make_worker()
         schedule = make_schedule(department_id=dept.id)
         scheduled_date = date(2026, 10, 11)
 
         mock_department_repo.get_by_id.return_value = dept
-        # `away` is listed first, so round-robin would otherwise take them.
+        # `away` is listed first, so fairness would otherwise take them.
         mock_worker_repo.get_department_only_workers.return_value = [away, free]
-        mock_availability_repo.get_by_worker_and_type.return_value = None
-        mock_availability_repo.get_by_worker_and_day.return_value = None
         mock_schedule_repo.get_existing_schedule.return_value = None
         mock_schedule_repo.create.return_value = schedule
         mock_schedule_repo.bulk_create_assignments.return_value = []
         mock_schedule_repo.get_with_assignments.return_value = schedule
-        mock_schedule_repo.get_assignments_for_worker.return_value = []
-        mock_leave_repo.get_active_on.return_value = [self._leave(away.id, date(2026, 10, 5), date(2026, 10, 20))]
+        mock_leave_repo.get_for_workers.return_value = [self._leave(away.id, date(2026, 10, 5), date(2026, 10, 20))]
 
         service.generate_schedule(
             make_generate_request(department_id=dept.id, scheduled_date=scheduled_date), created_by=uuid4()
@@ -949,26 +964,29 @@ class TestLeaveExcludesWorkers:
         mock_schedule_repo,
         mock_worker_repo,
         mock_department_repo,
-        mock_availability_repo,
         mock_leave_repo,
     ):
-        # Not for today. A rota built in September for October has to ask about October.
-        dept = make_department(workers_per_slot=1)
+        # Not for today. A rota built in September for October has to ask about October — a
+        # worker away this week is fine for a date three weeks out.
+        dept = make_department(band=1)
+        # A roster of one, so "was this worker blocked?" has an unambiguous answer: blocked
+        # means generation raises rather than picks somebody else.
+        back_now = make_worker()
         mock_department_repo.get_by_id.return_value = dept
-        mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
-        mock_availability_repo.get_by_worker_and_type.return_value = None
-        mock_availability_repo.get_by_worker_and_day.return_value = None
+        mock_worker_repo.get_department_only_workers.return_value = [back_now]
         mock_schedule_repo.get_existing_schedule.return_value = None
         mock_schedule_repo.create.return_value = make_schedule(department_id=dept.id)
         mock_schedule_repo.bulk_create_assignments.return_value = []
         mock_schedule_repo.get_with_assignments.return_value = make_schedule(department_id=dept.id)
-        mock_schedule_repo.get_assignments_for_worker.return_value = []
+        # Away in September, back well before the October date being scheduled.
+        mock_leave_repo.get_for_workers.return_value = [self._leave(back_now.id, date(2026, 9, 1), date(2026, 9, 20))]
 
-        scheduled_date = date(2026, 10, 11)
         service.generate_schedule(
-            make_generate_request(department_id=dept.id, scheduled_date=scheduled_date), created_by=uuid4()
+            make_generate_request(department_id=dept.id, scheduled_date=date(2026, 10, 11)), created_by=uuid4()
         )
-        mock_leave_repo.get_active_on.assert_called_once_with(scheduled_date)
+
+        assignments = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
+        assert {a["worker_id"] for a in assignments} == {str(back_now.id)}, "leave that has ended must not block"
 
     def test_leave_blocks_only_the_dates_it_covers_in_a_month(self, service, mock_leave_repo):
         # The monthly path folds leave into the unavailability map, one batched fetch for the
@@ -983,3 +1001,73 @@ class TestLeaveExcludesWorkers:
         assert away in unavailable[date(2026, 10, 11)]
         assert away in unavailable[date(2026, 10, 18)]
         assert away not in unavailable.get(date(2026, 10, 25), set())
+
+
+class TestStaffingBandResolution:
+    """How a group's (minimum, maximum) is resolved, and what is recorded on the schedule."""
+
+    def _generate(self, service, mock_schedule_repo, mock_department_repo, mock_worker_repo, dept, workers):
+        schedule = make_schedule(department_id=dept.id)
+        mock_department_repo.get_by_id.return_value = dept
+        mock_worker_repo.get_department_only_workers.return_value = workers
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = schedule
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        service.generate_schedule(make_generate_request(department_id=dept.id), created_by=uuid4())
+        return mock_schedule_repo.create.call_args[0][0]
+
+    def test_the_band_is_frozen_onto_the_schedule(
+        self, service, mock_schedule_repo, mock_department_repo, mock_worker_repo
+    ):
+        # Recorded at generation rather than re-resolved on read: the department's numbers may
+        # change before the date comes round, and this rota was planned against these ones.
+        dept = make_department(band=(2, 4))
+
+        row = self._generate(
+            service, mock_schedule_repo, mock_department_repo, mock_worker_repo, dept, [make_worker() for _ in range(6)]
+        )
+
+        assert (row["min_workers"], row["max_workers"]) == (2, 4)
+
+    def test_a_wide_band_takes_more_people_than_the_minimum(
+        self, service, mock_schedule_repo, mock_department_repo, mock_worker_repo
+    ):
+        dept = make_department(band=(2, 4))
+        mock_department_repo.get_by_id.return_value = dept
+        self._generate(
+            service, mock_schedule_repo, mock_department_repo, mock_worker_repo, dept, [make_worker() for _ in range(6)]
+        )
+
+        assignments = mock_schedule_repo.bulk_create_assignments.call_args[0][0]
+        assert len(assignments) == 4
+
+    def test_a_subteam_overrides_the_department_band(
+        self, service, mock_department_repo, mock_subteam_repo, mock_worker_repo, monthly_repos
+    ):
+        dept = make_department(band=(2, 3))
+        subteam = make_subteam(department_id=dept.id, name="Seekers", band=(4, 6))
+        mock_department_repo.get_by_id.return_value = dept
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_subteam_repo.get_with_workers.return_value = [make_subteam_member(worker=make_worker()) for _ in range(8)]
+
+        result = service.preview_monthly_schedule(
+            make_month_preview_request(department_id=dept.id, scope="subteam", subteam_id=subteam.id)
+        )
+
+        assert (result.min_workers, result.max_workers) == (4, 6)
+
+    def test_a_subteam_that_inherits_uses_the_departments_band(
+        self, service, mock_department_repo, mock_subteam_repo, mock_worker_repo, monthly_repos
+    ):
+        dept = make_department(band=(2, 3))
+        subteam = make_subteam(department_id=dept.id, name="Seekers")  # band=None — inherit
+        mock_department_repo.get_by_id.return_value = dept
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_subteam_repo.get_with_workers.return_value = [make_subteam_member(worker=make_worker()) for _ in range(8)]
+
+        result = service.preview_monthly_schedule(
+            make_month_preview_request(department_id=dept.id, scope="subteam", subteam_id=subteam.id)
+        )
+
+        assert (result.min_workers, result.max_workers) == (2, 3)

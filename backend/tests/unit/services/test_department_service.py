@@ -32,7 +32,9 @@ class TestCreateDepartment:
         mock_department_repo.get_by_name.return_value = None
         mock_department_repo.create.return_value = dept
 
-        result = service.create_department(DepartmentCreate(name="Choir", workers_per_slot=3))
+        result = service.create_department(
+            DepartmentCreate(name="Choir", min_workers_per_slot=2, max_workers_per_slot=3)
+        )
         assert result.name == "Choir"
         mock_department_repo.create.assert_called_once()
 
@@ -48,12 +50,12 @@ class TestCreateDepartment:
 class TestUpdateDepartment:
     def test_updates_successfully(self, service, mock_department_repo):
         dept = make_department()
-        updated = make_department(workers_per_slot=5)
+        updated = make_department(band=(3, 5))
         mock_department_repo.get_by_id.return_value = dept
         mock_department_repo.update.return_value = updated
 
-        result = service.update_department(dept.id, DepartmentUpdate(workers_per_slot=5))
-        assert result.workers_per_slot == 5
+        result = service.update_department(dept.id, DepartmentUpdate(min_workers_per_slot=3, max_workers_per_slot=5))
+        assert result.max_workers_per_slot == 5
 
     def test_raises_when_not_found(self, service, mock_department_repo):
         mock_department_repo.get_by_id.return_value = None

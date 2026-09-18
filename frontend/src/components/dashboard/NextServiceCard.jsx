@@ -50,6 +50,11 @@ export default function NextServiceCard({ entry }) {
                 <div className="flex flex-wrap items-center gap-2">
                     <Badge>Next</Badge>
                     <Badge variant="outline">{relativeDay(daysAway)}</Badge>
+                    {summary.understaffed && (
+                        <Badge variant="destructive">
+                            {summary.short === 1 ? 'One short' : `${summary.short} short`}
+                        </Badge>
+                    )}
                 </div>
                 <p className="text-lg font-bold tracking-tight text-foreground">
                     {format(parseISO(`${schedule.scheduled_date}T00:00:00`), 'EEEE d MMMM')}
@@ -64,8 +69,11 @@ export default function NextServiceCard({ entry }) {
                     {schedule.start_time?.slice(0, 5)} – {schedule.end_time?.slice(0, 5)}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                    <span className="font-semibold text-foreground">{summary.assigned}</span>{' '}
-                    {summary.assigned === 1 ? 'person is' : 'people are'} on this rota
+                    <span className="font-semibold text-foreground">
+                        {summary.assigned} of {summary.max}
+                    </span>{' '}
+                    places filled
+                    {summary.understaffed && ` · at least ${summary.min} needed`}
                 </p>
             </CardHeader>
 

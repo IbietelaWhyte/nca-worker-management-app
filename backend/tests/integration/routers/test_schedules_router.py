@@ -251,7 +251,8 @@ class TestPreviewMonthlySchedule:
         mock_schedule_service.preview_monthly_schedule.return_value = MonthlySchedulePreview(
             year=2026,
             month=3,
-            workers_needed=2,
+            min_workers=2,
+            max_workers=4,
             dates=[
                 DatePlan(scheduled_date=date(2026, 3, 1), status=DatePlanStatus.PLANNED),
                 DatePlan(
@@ -270,7 +271,7 @@ class TestPreviewMonthlySchedule:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["workers_needed"] == 2
+        assert (body["min_workers"], body["max_workers"]) == (2, 4)
         assert [d["status"] for d in body["dates"]] == ["planned", "skipped_existing"]
 
     def test_returns_403_for_worker_role(self, mock_schedule_service):

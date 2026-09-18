@@ -4,6 +4,8 @@ import { useAuth } from '@/context/AuthContext'
 import AssignmentsList from '@/components/schedules/AssignmentsList'
 import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell } from 'lucide-react'
 import { format } from 'date-fns'
@@ -142,6 +144,7 @@ export default function ScheduleDetailPage() {
 
     const assignments = schedule?.schedule_assignments ?? []
     const totalCount = assignments.length
+    const staffing = summarizeStaffing(schedule)
 
     return (
         <div className="space-y-6">
@@ -177,9 +180,22 @@ export default function ScheduleDetailPage() {
             <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/30">
                 <div className="text-center">
                     <p className="text-2xl font-bold">{totalCount}</p>
-                    <p className="text-xs text-muted-foreground">
-                        {totalCount === 1 ? 'Worker assigned' : 'Workers assigned'}
+                    <p className="text-xs text-muted-foreground">Assigned</p>
+                </div>
+                <div className="text-center">
+                    <p className="text-2xl font-bold text-muted-foreground">
+                        {formatSlotRange(staffing.min, staffing.max)}
                     </p>
+                    <p className="text-xs text-muted-foreground">Wanted</p>
+                </div>
+                <div className="ml-auto">
+                    {staffing.understaffed ? (
+                        <Badge variant="destructive">{staffing.short} short</Badge>
+                    ) : staffing.full ? (
+                        <Badge>Fully staffed</Badge>
+                    ) : (
+                        <Badge variant="secondary">Room for {staffing.max - totalCount} more</Badge>
+                    )}
                 </div>
             </div>
 
