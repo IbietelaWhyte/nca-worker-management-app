@@ -179,7 +179,7 @@ def make_schedule(**kwargs) -> ScheduleResponse:
         start_time=kwargs.get("start_time", "09:00:00"),
         end_time=kwargs.get("end_time", "11:00:00"),
         notes=kwargs.get("notes", None),
-        reminder_days_before=kwargs.get("reminder_days_before", 1),
+        reminder_days_before=kwargs.get("reminder_days_before", [1]),
         min_workers=kwargs.get("min_workers", None),
         max_workers=kwargs.get("max_workers", None),
         created_by=kwargs.get("created_by", uuid4()),
@@ -207,7 +207,7 @@ def make_assignment(**kwargs) -> AssignmentResponse:
         worker_id=kwargs.get("worker_id", uuid4()),
         department_role_id=kwargs.get("department_role_id", None),
         subteam_id=kwargs.get("subteam_id", None),
-        reminder_sent_at=kwargs.get("reminder_sent_at", None),
+        notice_sent_at=kwargs.get("notice_sent_at", None),
         workers=kwargs.get("workers", None),
         schedules=kwargs.get("schedules", None),
     )

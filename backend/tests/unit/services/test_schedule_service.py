@@ -58,7 +58,7 @@ def make_generate_request(**kwargs) -> ScheduleCreate:
         scheduled_date=kwargs.get("scheduled_date", date(2026, 3, 15)),  # Sunday
         start_time=kwargs.get("start_time", time(9, 0)),
         end_time=kwargs.get("end_time", time(11, 0)),
-        reminder_days_before=kwargs.get("reminder_days_before", 1),
+        reminder_days_before=kwargs.get("reminder_days_before", [1]),
     )
 
 
@@ -361,7 +361,7 @@ def make_month_preview_request(**kwargs) -> MonthlySchedulePreviewRequest:
         days_of_week=kwargs.get("days_of_week", [DayOfWeek.SUNDAY]),
         start_time=kwargs.get("start_time", time(9, 0)),
         end_time=kwargs.get("end_time", time(11, 0)),
-        reminder_days_before=kwargs.get("reminder_days_before", 1),
+        reminder_days_before=kwargs.get("reminder_days_before", [1]),
     )
 
 
@@ -374,7 +374,7 @@ def make_month_commit_request(**kwargs) -> MonthlyScheduleCommitRequest:
         dates=kwargs.get("dates", []),
         start_time=kwargs.get("start_time", time(9, 0)),
         end_time=kwargs.get("end_time", time(11, 0)),
-        reminder_days_before=kwargs.get("reminder_days_before", 1),
+        reminder_days_before=kwargs.get("reminder_days_before", [1]),
     )
 
 

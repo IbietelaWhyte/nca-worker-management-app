@@ -52,35 +52,28 @@ class SMSService:
         self,
         to: str,
         worker_name: str,
-        schedule_title: str,
-        scheduled_date: str,
-        start_time: str,
+        duties: list[tuple[str, str]],
     ) -> bool:
-        """Send a schedule reminder SMS to a worker.
+        """Remind a worker of every duty whose lead time falls today, in one message.
 
         The message is a statement, not a question. Nothing consumes inbound SMS — there is no
         Twilio webhook — so anything that invited a reply would invite one nobody reads. A worker
         who cannot make a date speaks to their head of department, who edits the rota.
 
+        It takes a list for the same reason the notice does, and more urgently: a schedule now
+        reminds at several lead times, so a ladder of three against four Sundays could put twelve
+        separate texts on one phone in a month.
+
         Args:
             to: Recipient phone number in E.164 format.
             worker_name: Name of the worker receiving the reminder.
-            schedule_title: Title/name of the scheduled event.
-            scheduled_date: Date of the scheduled event.
-            start_time: Start time of the scheduled event.
+            duties: (department name, human-readable date) pairs, soonest first.
 
         Returns:
             bool: True if reminder sent successfully, False if sending failed.
         """
-        body = (
-            f"Hi {worker_name}, a reminder that you are scheduled for '{schedule_title}' "
-            f"on {scheduled_date} at {start_time}."
-        )
-        self.logger.info(
-            "sending_reminder",
-            to=mask_phone(to),
-            scheduled_date=scheduled_date,
-        )
+        body = f"Hi {worker_name}, a reminder that you are scheduled for {self._describe_duties(duties)}."
+        self.logger.info("sending_reminder", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
 
     def send_availability_prompt(
@@ -151,14 +144,17 @@ class SMSService:
         Returns:
             bool: True if the notice was sent, False if sending failed.
         """
-        summary = self._describe_duties(duties)
-        body = f"Hi {worker_name}, {summary}."
+        body = f"Hi {worker_name}, you have been scheduled for {self._describe_duties(duties)}."
         self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
 
     @staticmethod
     def _describe_duties(duties: list[tuple[str, str]]) -> str:
-        """Render the "you have been scheduled for ..." clause of an assignment notice.
+        """Render a worker's dates as an object phrase, e.g. "Sun 02 Aug at 09:00 in Ushering".
+
+        Deliberately carries no verb: the notice announces ("you have been scheduled for ...") and
+        the reminder recalls ("a reminder that you are scheduled for ..."), but the list of dates
+        in between is the same list, and it is the part with the formatting traps in it.
 
         Every character here stays inside GSM-7. An em dash (or any other character outside it)
         forces the whole message to UCS-2, which halves a segment from 160 characters to 70 and so
@@ -168,23 +164,23 @@ class SMSService:
             duties: (department name, human-readable date) pairs, soonest first.
 
         Returns:
-            str: The clause, without a trailing full stop.
+            str: The phrase, with neither a leading verb nor a trailing full stop.
         """
         dates = [when for _, when in duties]
 
         # A department we could not name would render as a dangling ": ", so drop the department
-        # framing entirely rather than half-applying it. The notice itself still has to go out.
+        # framing entirely rather than half-applying it. The message itself still has to go out.
         if any(not department for department, _ in duties):
             if len(dates) == 1:
-                return f"you have been scheduled for {dates[0]}"
-            return f"you have been scheduled for {len(dates)} dates: {', '.join(dates)}"
+                return dates[0]
+            return f"{len(dates)} dates: {', '.join(dates)}"
 
         if len(duties) == 1:
             department, when = duties[0]
-            return f"you have been scheduled for {when} in {department}"
+            return f"{when} in {department}"
 
         by_department: dict[str, list[str]] = {}
         for department, when in duties:
             by_department.setdefault(department, []).append(when)
         groups = "; ".join(f"{department}: {', '.join(whens)}" for department, whens in by_department.items())
-        return f"you have been scheduled for {len(duties)} dates - {groups}"
+        return f"{len(duties)} dates - {groups}"

@@ -25,7 +25,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'I got a text saying I have been scheduled.',
-                answer: 'It is telling you, not asking you. One text lists every date you are on, and you will get another reminding you before each service. There is nothing to reply to — the app does not read replies.',
+                answer: 'It is telling you, not asking you. One text lists every date you are on, and you will get reminders closer to the time — how many is up to your head of department. There is nothing to reply to — the app does not read replies.',
             },
             {
                 question: 'I am on the rota but I cannot make it.',
@@ -98,7 +98,7 @@ export const FAQ_SECTIONS = [
         items: [
             {
                 question: 'When do workers actually get a text?',
-                answer: 'Once soon after the schedule is created, listing every date they are on, and again a few days before the service itself. You set that lead time on each schedule. Reminders go out in the morning.',
+                answer: 'Once soon after the schedule is created, listing every date they are on, and then once for each reminder you set on the schedule — a week out, three days out, the night before, whichever you choose. Reminders go out in the morning, and a worker with several duties due that day gets one text covering all of them. You can also set no reminders at all if your team works off the printed rota.',
             },
             {
                 question: 'Somebody is away for a few weeks. What do I do?',
