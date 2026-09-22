@@ -1,14 +1,45 @@
 from datetime import date, datetime, time
 from enum import StrEnum
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import DayOfWeek
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerResponse
+
+# Matches schedules.chk_reminder_days. Five is a cap on someone's phone bill, not on the schema:
+# a mistyped ladder against a forty-person department is forty texts per extra entry.
+MAX_REMINDER_LEAD_TIMES = 5
+
+
+def _normalize_lead_times(values: list[int]) -> list[int]:
+    """Collapse duplicates and order a reminder ladder furthest-out first.
+
+    Deduplication is done here rather than by a constraint because a repeated lead time is a
+    slip, not an error worth a 422 — and `assignment_reminder_sends`' primary key would make the
+    second send a no-op anyway. Sorting descending puts them in the order they fire, which is how
+    both the form and the schedule header read them back.
+
+    The cap is applied *after* deduplication, so `[1, 1, 1, 1, 1, 1]` is one reminder rather than
+    six rejected ones.
+    """
+    unique = sorted(set(values), reverse=True)
+    if len(unique) > MAX_REMINDER_LEAD_TIMES:
+        raise ValueError(f"at most {MAX_REMINDER_LEAD_TIMES} reminders per schedule")
+    return unique
+
+
+# An empty ladder is allowed and means no reminders at all, only the "you have been scheduled"
+# notice: a real choice for a team that works off the printed rota, and not one the app should
+# spend their money overriding.
+ReminderLeadTimes = Annotated[
+    list[Annotated[int, Field(ge=0, le=365)]],
+    AfterValidator(_normalize_lead_times),
+]
 
 
 class ScopeType(StrEnum):
@@ -25,7 +56,9 @@ class Schedule(BaseModel):
     scheduled_date: date
     start_time: time
     end_time: time
-    reminder_days_before: int
+    # A ladder, not a number: {7, 3, 1} is a week out, three days out and the night before. Read
+    # straight from a smallint[] column, so no normalization here — the write paths validate.
+    reminder_days_before: list[int]
     # The staffing band in force when this schedule was generated, summed across its groups.
     # Frozen at generation rather than re-resolved on read: the department's numbers may change
     # before the date comes round, and this rota was planned against these. Nullable because
@@ -55,7 +88,7 @@ class ScheduleCreate(BaseModel):
     start_time: time
     end_time: time
     notes: str | None = None
-    reminder_days_before: int
+    reminder_days_before: ReminderLeadTimes
 
     @model_validator(mode="after")
     def validate_scope_fields(self) -> "ScheduleCreate":
@@ -72,14 +105,37 @@ class AssignmentResponse(BaseModel):
     worker_id: UUID
     department_role_id: UUID | None = None
     subteam_id: UUID | None = None
-    # Two separate notifications: notice_sent_at is the "you have been scheduled" message sent
-    # shortly after creation, reminder_sent_at the one sent reminder_days_before the service.
+    # The "you have been scheduled" message, sent once per assignment shortly after creation.
+    # The pre-service reminder has no counterpart here: a schedule has several lead times and
+    # "the 7-day one went out, the 3-day one has not" is set membership, which one timestamp
+    # cannot hold. Those live in assignment_reminder_sends, a row per (assignment, lead time).
     notice_sent_at: datetime | None = None
-    reminder_sent_at: datetime | None = None
     workers: WorkerResponse | None = None  # Nested worker object from joined query
     subteams: SubteamResponse | None = None  # Nested subteam object from joined query
     department_roles: DepartmentRoleResponse | None = None  # Nested role object from joined query
     schedules: "Schedule | None" = None  # Nested schedule object from joined query
+
+
+class DueReminder(BaseModel):
+    """One (assignment, lead time) pair whose reminder falls on the date being swept.
+
+    Deliberately not an `AssignmentResponse`. The RPC returns a row per lead time now, so an
+    assignment appears once per ladder entry; validating those as assignments would keep working
+    and hand the caller duplicates that each mark the whole assignment reminded. The RPC's first
+    column is named `assignment_id` for the same reason — the rename is what forces every caller
+    to be rewritten rather than silently drifting.
+
+    `days_before` has to survive the round trip: it is half the key the send is recorded under,
+    and a fabricated one would mark a genuinely-due reminder as already sent.
+    """
+
+    assignment_id: UUID
+    schedule_id: UUID
+    worker_id: UUID
+    days_before: int
+    # row_to_json() embeds, optional like every other embed in this module.
+    workers: WorkerResponse | None = None
+    schedules: Schedule | None = None
 
 
 class ScheduleResponse(Schedule):
@@ -105,7 +161,7 @@ class MonthlyScheduleBase(BaseModel):
     start_time: time
     end_time: time
     notes: str | None = None
-    reminder_days_before: int = Field(ge=0)
+    reminder_days_before: ReminderLeadTimes
 
     @model_validator(mode="after")
     def validate_scope_and_times(self) -> "MonthlyScheduleBase":

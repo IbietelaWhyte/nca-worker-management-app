@@ -113,7 +113,7 @@ The frontend greys closed days out rather than letting the tap fail, and needs t
 
 Nothing asks a worker for their availability unless a head does. `AvailabilityPromptService` (`service/availability_prompts/`) texts a department's workers the public `/availability/{token}` link, either immediately or on a schedule. Its endpoints live on the **departments** router (`GET|POST /departments/{id}/availability-prompts`, `POST .../send`, `DELETE .../{prompt_id}`), driven by `AvailabilityPromptDialog`.
 
-- **A scheduled send is a database row, not an in-process timer.** The `BackgroundScheduler` uses the default in-memory jobstore, so a job queued for next month would not survive a restart and would fire once per replica. A daily sweep (`send_due_prompts`) reads `availability_prompts` instead, with `last_sent_on` as the marker — the same nullable-column-as-marker idiom as `reminder_sent_at`.
+- **A scheduled send is a database row, not an in-process timer.** The `BackgroundScheduler` uses the default in-memory jobstore, so a job queued for next month would not survive a restart and would fire once per replica. A daily sweep (`send_due_prompts`) reads `availability_prompts` instead, with `last_sent_on` as the marker — the same nullable-column-as-marker idiom as `notice_sent_at`.
 - Two modes: `once` (`send_on`) and `monthly` (`repeat_day`). `repeat_day` is capped at **28** so the day exists in February — landing slightly early beats silently skipping a month. The mode/field pairing is enforced twice, in `AvailabilityPromptCreate` and in Postgres check constraints; the Pydantic copy exists to give a person a message they can act on.
 - A one-off is due on or **after** `send_on`, so a prompt whose day passed while the app was down still goes out. `last_sent_on` stops a second sweep the same day re-sending, and a sent one-off is deactivated. `mark_sent` runs even when some messages failed — a partial failure must not re-prompt the whole department.
 - Recipients are the department's active workers minus anyone on leave **today**, and every outcome is counted (`sent`, `skipped_no_phone`, `skipped_on_leave`, `failed`): nothing else in the UI reveals a worker with no phone number.
@@ -184,12 +184,20 @@ The planner is tested directly in `tests/unit/services/test_schedule_planner.py`
 `ReminderService` (`service/reminders/`) owns the app's only APScheduler `BackgroundScheduler`, started from the `lifespan` hook with **three jobs**:
 
 - `assignment_notices` — interval, every `settings.notice_interval_minutes` (default 10). The "you have been scheduled" message, sent as soon after generation as the interval allows.
-- `daily_reminders` — cron at `settings.reminder_hour` (default 8). The pre-service reminder, `schedules.reminder_days_before` ahead of the date.
+- `daily_reminders` — cron at `settings.reminder_hour` (default 8). The pre-service reminders, one per lead time in `schedules.reminder_days_before`.
 - `availability_prompts` — cron at the same hour, and only on an instance that was given a `prompt_service`. `main.py`'s `create_reminder_service` passes one; the `get_reminder_service` DI factory behind the manual-trigger endpoints does not and never starts a scheduler, which is what the `if self.prompt_service` guard in `start()` is for.
 
 `trigger_manually` / `trigger_notices` / `trigger_for_schedule` force a run. SMS goes through `SMSService` (`service/sms/`, Twilio).
 
-**A duty is announced twice, by two different paths.** The notice fires minutes after a rota is generated; the reminder fires days before the date. Each is tracked by its own nullable timestamp on `schedule_assignments` (`notice_sent_at` / `reminder_sent_at`, added in `20260831120000_two_stage_assignment_notifications.sql`). The notice **groups a worker's assignments into one message** — somebody rostered onto every Sunday of a month gets one text, not five — and `mark_notice_sent` marks the whole batch in a single statement, so a crash mid-run cannot re-announce half of it.
+**A duty is announced at least twice, by two different paths.** The notice fires minutes after a rota is generated and is tracked by `schedule_assignments.notice_sent_at`; the reminders fire at each lead time in the schedule's ladder. **Both sweeps group by worker** — somebody rostered onto every Sunday of a month gets one notice, not five, and one reminder per day a lead time falls due however many duties it covers. `mark_notice_sent` marks a whole batch in a single statement, so a crash mid-run cannot re-announce half of it.
+
+**`reminder_days_before` is a `smallint[]`, and a send is a row.** `{7,3,1}` is a week out, three days out and the night before; `{}` is allowed and means no reminders at all, only the notice. A single `reminder_sent_at` timestamp could not say "the 7-day one went out, the 3-day one has not", so `20260918092000_multiple_schedule_reminders.sql` replaced it with `assignment_reminder_sends (assignment_id, days_before, sent_at)`. Three consequences to keep:
+
+- The composite primary key *is* the once-only guarantee, the index the RPC's `NOT EXISTS` probes, and — being non-partial — a legal `on_conflict` target, so `mark_reminders_sent` is an idempotent upsert. It is the other side of the 42P10 trap above.
+- **`get_assignments_due_for_reminder` returns one row per (assignment, lead time)** and its first column is `assignment_id`, not `id`. The rename is deliberate: left as `id`, `AssignmentResponse.model_validate` would keep succeeding and hand back duplicates that each mark the whole assignment reminded. `DueReminder` is its model, and `days_before` has to survive the round trip because it is half the key the send is recorded under.
+- **`trigger_for_schedule` records nothing** (`marks=[]`). It answers no particular lead time, so any `days_before` it wrote would be invented — and an invented one lands on a rung that has not fired yet and cancels it, silently, days later. `test_records_nothing_it_sends` exists so this is not "fixed" back into marking.
+
+`SMSService._describe_duties` carries **no verb** so the notice ("you have been scheduled for ...") and the reminder ("a reminder that you are scheduled for ...") share the one place with the formatting traps in it.
 
 **Nobody confirms or declines a duty.** `20260918090000_remove_assignment_confirmation.sql` dropped `schedule_assignments.status`, the `assignment_status` enum, the `/confirm` router and every confirmed/declined display. Asking never closed a loop — nothing reassigned a declined slot, so the one concrete effect of declining was to stop being reminded about a duty still on the rota. Both texts are now statements, and a worker who cannot make a date speaks to their head, who edits the rota. Don't reintroduce a status column as a way to record that.
 
@@ -231,7 +239,7 @@ supabase db reset               # reset + reapply + seed
 supabase migration repair --status reverted $MIGRATION_ID   # after a failed push
 ```
 
-Core tables: `workers`, `worker_app_roles`, `worker_leave`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `availability`, `schedules`, `schedule_assignments`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
+Core tables: `workers`, `worker_app_roles`, `worker_leave`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `availability`, `schedules`, `schedule_assignments`, `assignment_reminder_sends`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
 
 See `docs/database-migrations.md`. When adding tables/columns, also add RLS policies and update the corresponding repository (`queries.py` constants included) + Pydantic schema.
 

@@ -1,5 +1,6 @@
 TABLE = "schedules"
 ASSIGNMENTS_TABLE = "schedule_assignments"
+REMINDER_SENDS_TABLE = "assignment_reminder_sends"
 
 SELECT_ALL = "*"
 SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers(*), subteams(*), department_roles(*))"
@@ -22,6 +23,10 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_AND_DEPARTMENT_INNER = "*, schedules!inner(*, departments(*))"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_NOTICE = "get_assignments_due_for_notice"
+# The composite primary key of assignment_reminder_sends, and a legal ON CONFLICT arbiter because
+# it is a plain index rather than a partial one — recording a send is therefore an idempotent
+# upsert, and two scheduler runs racing produce one row rather than two texts.
+REMINDER_SEND_CONFLICT_TARGET = "assignment_id,days_before"
 
 
 class Columns:
@@ -45,7 +50,12 @@ class AssignmentColumns:
     SCHEDULE_ID = "schedule_id"
     WORKER_ID = "worker_id"
     DEPARTMENT_ROLE_ID = "department_role_id"
-    REMINDER_SENT_AT = "reminder_sent_at"
     NOTICE_SENT_AT = "notice_sent_at"
     SUBTEAM_ID = "subteam_id"
     CREATED_AT = "created_at"
+
+
+class ReminderSendColumns:
+    ASSIGNMENT_ID = "assignment_id"
+    DAYS_BEFORE = "days_before"
+    SENT_AT = "sent_at"

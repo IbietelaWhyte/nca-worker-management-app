@@ -10,7 +10,8 @@ from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
-from app.schemas.schedules.models import AssignmentResponse, Schedule
+from app.schemas.schedules.models import AssignmentResponse, DueReminder, Schedule
+from app.schemas.workers.models import WorkerResponse
 from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.sms.service import SMSService
 
@@ -18,10 +19,11 @@ logger = get_logger(__name__)
 
 
 class ReminderService:
-    """Sends workers the two SMS messages that bracket an assignment.
+    """Sends workers the SMS messages that bracket an assignment.
 
-    A worker hears about a duty twice: a notice shortly after the schedule is created, in time to
-    arrange cover if they cannot make it, and a reminder `reminder_days_before` the service. Both
+    A worker hears about a duty at least twice: a notice shortly after the schedule is created, in
+    time to arrange cover if they cannot make it, then once for each lead time in the schedule's
+    `reminder_days_before` ladder. Both kinds group a person's dates into a single message, and
     are driven by background jobs rather than the request that creates the schedule — a monthly
     commit can create thirty assignments at once, and sending those inline would occupy a request
     thread through thirty serial Twilio calls, with no retry for whichever ones failed.
@@ -197,66 +199,84 @@ class ReminderService:
     # ------------------------------------------------------------------
 
     def _send_due_reminders(self) -> int:
-        """Send reminders for every assignment whose lead time falls today.
+        """Remind everyone whose lead time falls today, one message per worker.
+
+        A schedule reminds at several lead times now, so the sweep is grouped exactly as the
+        notice job is: three lead times across four Sundays is twelve rows for one person, and
+        twelve texts would be the feature working as designed and still being wrong.
 
         Returns:
-            int: How many reminders were sent.
+            int: How many workers were reminded.
         """
         today = date.today()
         log = self.logger.bind(method="_send_due_reminders", date=today.isoformat())
         due = self.schedule_repo.get_assignments_due_for_reminder(today)
-        log.info("reminders_due", count=len(due))
-        sent = self._send_reminders(due)
-        log.info("reminder_job_finished", sent=sent, due=len(due))
-        return sent
+        if not due:
+            return 0
 
-    def _send_reminders(self, assignments: list[AssignmentResponse]) -> int:
-        """Send one reminder per assignment, marking each that succeeds.
+        by_worker: dict[UUID, list[DueReminder]] = defaultdict(list)
+        for reminder in due:
+            by_worker[reminder.worker_id].append(reminder)
+        log.info("reminders_due", workers=len(by_worker), reminders=len(due))
+
+        # Run-scoped for the same reason as the notice sweep's: a department is fetched once, and
+        # a cache held on self would keep serving its old name after a rename.
+        department_names: dict[UUID, str] = {}
+
+        reminded = 0
+        for worker_id, reminders in by_worker.items():
+            marks = [(r.assignment_id, r.days_before) for r in reminders]
+            schedules = [r.schedules for r in reminders if r.schedules]
+            if self._send_reminder(worker_id, reminders[0].workers, schedules, marks, department_names):
+                reminded += 1
+        log.info("reminder_job_finished", reminded=reminded, workers=len(by_worker))
+        return reminded
+
+    def _send_reminder(
+        self,
+        worker_id: UUID,
+        worker: WorkerResponse | None,
+        schedules: list[Schedule],
+        marks: list[tuple[UUID, int]],
+        department_names: dict[UUID, str],
+    ) -> bool:
+        """Send one worker their reminder and record the lead times it covered.
+
+        `marks` is passed in rather than derived from `schedules` because the manual trigger has
+        no lead time to record — see `trigger_for_schedule`. An empty list means "send, record
+        nothing", which is a legitimate outcome and not a bug to be tidied away.
 
         Args:
-            assignments: Assignments to remind about.
+            worker_id: The worker being reminded, for the log even when their record is missing.
+            worker: That worker, as embedded on the due rows.
+            schedules: The duties whose reminders fall today, soonest first.
+            marks: (assignment id, lead time) pairs to record once the message is away.
+            department_names: Run-scoped cache of department id to name, shared across workers.
 
         Returns:
-            int: How many reminders were sent.
+            bool: True if the SMS was sent.
         """
-        sent = 0
-        for assignment in assignments:
-            if self._send_reminder(assignment):
-                sent += 1
-        return sent
+        log = self.logger.bind(method="_send_reminder", worker_id=str(worker_id), dates=len(schedules))
 
-    def _send_reminder(self, assignment: AssignmentResponse) -> bool:
-        """Send a single pre-service reminder.
-
-        Args:
-            assignment: The assignment to remind about, with worker and schedule embedded.
-
-        Returns:
-            bool: True if the SMS was sent and the assignment marked.
-        """
-        log = self.logger.bind(method="_send_reminder", assignment_id=str(assignment.id))
-
-        worker, schedule = assignment.workers, assignment.schedules
-        if not worker or not schedule:
-            log.warning("reminder_skipped_missing_data")
-            return False
-        if not worker.phone:
+        if not worker or not worker.phone:
             log.warning("reminder_skipped_no_phone")
             return False
+        if not schedules:
+            log.warning("reminder_skipped_missing_schedule")
+            return False
 
+        duties = [(self._department_name(s.department_id, department_names, log), self._describe(s)) for s in schedules]
         sent = self.sms_service.send_reminder(
             to=worker.phone,
             worker_name=f"{worker.first_name} {worker.last_name}".strip(),
-            schedule_title=schedule.title,
-            scheduled_date=schedule.scheduled_date.strftime("%Y-%m-%d"),
-            start_time=schedule.start_time.strftime("%H:%M"),
+            duties=duties,
         )
         if not sent:
             log.warning("reminder_send_failed")
             return False
 
-        self.schedule_repo.mark_reminder_sent(assignment.id)
-        log.info("reminder_sent")
+        self.schedule_repo.mark_reminders_sent(marks)
+        log.info("reminder_sent", marked=len(marks))
         return True
 
     # ------------------------------------------------------------------
@@ -284,15 +304,20 @@ class ReminderService:
     def trigger_for_schedule(self, schedule_id: UUID) -> int:
         """Send reminders to everyone on one schedule, on demand.
 
-        Unlike the daily sweep this ignores `reminder_sent_at`, so a head can re-send after
-        changing a rota. It now texts every worker on the schedule without exception — the
+        Unlike the daily sweep this ignores what has already gone out, so a head can re-send
+        after changing a rota. It texts every worker on the schedule without exception — the
         declined filter it used to apply was its only one, and there is no longer such a state.
+
+        **It records nothing** (`marks=[]`). This send answers no particular lead time, so any
+        `days_before` it wrote would be invented, and an invented one lands on a rung of the
+        ladder that has not fired yet and cancels it — silently, days later. Before the ladder
+        existed this method burned the automatic reminder outright; now it costs nothing.
 
         Args:
             schedule_id: The schedule whose workers to remind.
 
         Returns:
-            int: How many reminders were sent.
+            int: How many workers were reminded.
         """
         log = self.logger.bind(method="trigger_for_schedule", schedule_id=str(schedule_id))
         schedule = self.schedule_repo.get_with_assignments(schedule_id)
@@ -300,10 +325,13 @@ class ReminderService:
             log.warning("schedule_not_found")
             return 0
 
-        # get_with_assignments embeds the worker but not the schedule, which _send_reminder needs.
-        assignments = [a.model_copy(update={"schedules": schedule}) for a in schedule.schedule_assignments]
-        sent = self._send_reminders(assignments)
-        log.info("schedule_reminders_finished", sent=sent, candidates=len(assignments))
+        department_names: dict[UUID, str] = {}
+        sent = 0
+        for assignment in schedule.schedule_assignments:
+            # One schedule, so one duty each: unique (schedule_id, worker_id) rules out a repeat.
+            if self._send_reminder(assignment.worker_id, assignment.workers, [schedule], [], department_names):
+                sent += 1
+        log.info("schedule_reminders_finished", sent=sent, candidates=len(schedule.schedule_assignments))
         return sent
 
     # ------------------------------------------------------------------

@@ -88,15 +88,13 @@ class TestAssignmentNoticeBody:
         assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
 
 
-def reminder_body(service, title="Sunday Service") -> str:
+def reminder_body(service, duties=None) -> str:
     """Send a pre-service reminder and return the body that reached send_sms."""
     with patch.object(SMSService, "send_sms", return_value=True) as send:
         service.send_reminder(
             to="+14165550101",
             worker_name="Ada",
-            schedule_title=title,
-            scheduled_date="2026-08-02",
-            start_time="09:00",
+            duties=duties if duties is not None else [("Ushering", "Sun 02 Aug at 09:00")],
         )
     return str(send.call_args.args[1])
 
@@ -108,11 +106,36 @@ class TestReminderBody:
         # No link and no "reply CONFIRM": there is no Twilio inbound webhook, so anything that
         # invited a reply would invite one nobody reads.
         assert reminder_body(service) == (
-            "Hi Ada, a reminder that you are scheduled for 'Sunday Service' on 2026-08-02 at 09:00."
+            "Hi Ada, a reminder that you are scheduled for Sun 02 Aug at 09:00 in Ushering."
         )
 
-    def test_the_body_stays_inside_gsm_7(self, service):
-        body = reminder_body(service)
+    def test_several_due_dates_arrive_as_one_sentence(self, service):
+        # A ladder of lead times across a month of Sundays is what makes this a list rather than
+        # a single date: the sweep groups a person's due duties, so the body has to carry them.
+        body = reminder_body(
+            service,
+            [("Ushering", "Sun 02 Aug at 09:00"), ("Ushering", "Sun 09 Aug at 09:00")],
+        )
+        assert body == (
+            "Hi Ada, a reminder that you are scheduled for "
+            "2 dates - Ushering: Sun 02 Aug at 09:00, Sun 09 Aug at 09:00."
+        )
+
+    def test_an_unnameable_department_still_reads_as_a_sentence(self, service):
+        assert reminder_body(service, [("", "Sun 02 Aug at 09:00")]) == (
+            "Hi Ada, a reminder that you are scheduled for Sun 02 Aug at 09:00."
+        )
+
+    @pytest.mark.parametrize(
+        "duties",
+        [
+            [("Ushering", "Sun 02 Aug at 09:00")],
+            [("Ushering", "Sun 02 Aug at 09:00"), ("Choir", "Sun 09 Aug at 09:00")],
+            [("", "Sun 02 Aug at 09:00")],
+        ],
+    )
+    def test_the_body_stays_inside_gsm_7(self, service, duties):
+        body = reminder_body(service, duties)
         assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
 
 

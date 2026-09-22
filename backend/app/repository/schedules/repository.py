@@ -7,7 +7,7 @@ from supabase import Client
 from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.schedules import queries as q
-from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
+from app.schemas.schedules.models import AssignmentResponse, DueReminder, ScheduleResponse
 
 logger = get_logger(__name__)
 
@@ -475,18 +475,20 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             log.debug("no_assignments_to_delete")
         return deleted
 
-    def get_assignments_due_for_reminder(self, reminder_date: date) -> list[AssignmentResponse]:
+    def get_assignments_due_for_reminder(self, reminder_date: date) -> list[DueReminder]:
         """
-        Retrieve all assignments that are due for reminders on a specific date.
+        Retrieve every reminder falling due on a specific date.
 
-        This method fetches assignments where the schedule date minus the reminder
-        lead time matches the given reminder date, allowing the system to send
-        timely notifications to workers about upcoming shifts.
+        A schedule carries a ladder of lead times, so a row here is one (assignment, lead time)
+        pair rather than an assignment: the same duty appears once for each entry in the ladder
+        whose date lands on `reminder_date`, and each is recorded separately once sent. Pairs
+        already recorded in `assignment_reminder_sends` are excluded by the function itself.
 
         Args:
-            reminder_date (date): The date for which to retrieve assignments due for reminders.
+            reminder_date (date): The date for which to retrieve reminders now due.
         Returns:
-            list[AssignmentResponse]: A list of assignments that are due for reminders on the specified date
+            list[DueReminder]: Due (assignment, lead time) pairs, ordered by worker so the caller
+                can group a person's duties into a single message.
         """
         log = self.logger.bind(method="get_assignments_due_for_reminder", reminder_date=reminder_date.isoformat())
         # We will be calling the database function directly here since the logic is complex and involves a join
@@ -494,9 +496,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             q.FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER, {"check_date": reminder_date.isoformat()}
         ).execute()
         data = response.data if isinstance(response.data, list) else []
-        assignments = [AssignmentResponse.model_validate(row) for row in data]
-        log.debug("fetched_assignments_due_for_reminder", count=len(assignments))
-        return assignments
+        reminders = [DueReminder.model_validate(row) for row in data]
+        log.debug("fetched_assignments_due_for_reminder", count=len(reminders))
+        return reminders
 
     def get_assignments_due_for_notice(self) -> list[AssignmentResponse]:
         """
@@ -541,28 +543,41 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.info("notice_marked_sent", updated=updated)
         return updated
 
-    def mark_reminder_sent(self, assignment_id: UUID) -> bool:
+    def mark_reminders_sent(self, sends: list[tuple[UUID, int]]) -> int:
         """
-        Mark an assignment as having had its reminder sent.
+        Record the (assignment, lead time) pairs one reminder message covered.
 
-        This method updates the assignment record to indicate that a reminder has been
-        sent for it, preventing duplicate reminders from being sent in the future.
+        Takes a list because a worker's duties are reminded about in a single text, exactly as
+        mark_notice_sent does — and a pair rather than an id because a schedule reminds several
+        times: marking the whole assignment would cancel the lead times still to come.
+
+        An upsert rather than an insert, so a second scheduler run racing the first lands on the
+        composite primary key and does nothing instead of raising. `sent_at` is left out of the
+        payload deliberately: PostgREST only updates the columns it is sent, so a re-run keeps
+        the original send time rather than rewriting it.
 
         Args:
-            assignment_id (UUID): The unique identifier of the assignment to update.
+            sends (list[tuple[UUID, int]]): (assignment id, lead time in days) pairs to record.
         Returns:
-            bool: True if the assignment was successfully updated, False if the assignment was not found.
+            int: How many rows were written.
         """
-        log = self.logger.bind(method="mark_reminder_sent", assignment_id=str(assignment_id))
+        if not sends:
+            return 0
+        log = self.logger.bind(method="mark_reminders_sent", count=len(sends))
         response = (
-            self.client.table(q.ASSIGNMENTS_TABLE)
-            .update({q.AssignmentColumns.REMINDER_SENT_AT: datetime.now(timezone.utc).isoformat()})
-            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            self.client.table(q.REMINDER_SENDS_TABLE)
+            .upsert(
+                [
+                    {
+                        q.ReminderSendColumns.ASSIGNMENT_ID: str(assignment_id),
+                        q.ReminderSendColumns.DAYS_BEFORE: days_before,
+                    }
+                    for assignment_id, days_before in sends
+                ],
+                on_conflict=q.REMINDER_SEND_CONFLICT_TARGET,
+            )
             .execute()
         )
-        success = len(response.data) > 0
-        if success:
-            log.info("reminder_marked_sent")
-        else:
-            log.warning("assignment_not_found")
-        return success
+        written = len(response.data or [])
+        log.info("reminders_marked_sent", written=written)
+        return written
