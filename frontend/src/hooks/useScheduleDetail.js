@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
+    addAssignment,
     getSchedule,
+    removeAssignment,
+    replaceAssignmentWorker,
     setAssignmentRole,
     triggerReminders,
     triggerRemindersForSchedule,
@@ -40,6 +43,23 @@ export function useScheduleDetail(scheduleId) {
         return response.data
     }
 
+    // The three edit paths all return the whole schedule, so they replace it rather than
+    // patching a row — which is what keeps the subteam grouping and the staffing counts
+    // right after an edit without a second request. The warnings are handed back to the
+    // caller to render; the hook deliberately does not hold them, because they belong to
+    // the action the head just took rather than to the schedule.
+    const replaceFrom = response => {
+        setSchedule(response.data.schedule)
+        return response.data.warnings ?? []
+    }
+
+    const addWorker = async workerId => replaceFrom(await addAssignment(scheduleId, workerId))
+
+    const swapWorker = async (assignmentId, workerId) =>
+        replaceFrom(await replaceAssignmentWorker(assignmentId, workerId))
+
+    const removeWorker = async assignmentId => replaceFrom(await removeAssignment(assignmentId))
+
     const sendReminders = async () => {
         const response = await triggerReminders()
         return response.data
@@ -56,6 +76,9 @@ export function useScheduleDetail(scheduleId) {
         error,
         refetch: fetchSchedule,
         changeAssignmentRole,
+        addWorker,
+        swapWorker,
+        removeWorker,
         sendReminders,
         sendRemindersForSchedule,
     }

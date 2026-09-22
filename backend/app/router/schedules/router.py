@@ -14,11 +14,13 @@ from app.core.exceptions import AppError, BadRequestError
 from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
     AssignmentResponse,
+    AssignmentWorkerRequest,
     MonthlyScheduleCommitRequest,
     MonthlySchedulePreview,
     MonthlySchedulePreviewRequest,
     MonthlyScheduleResult,
     ScheduleCreate,
+    ScheduleEditResult,
     ScheduleResponse,
 )
 from app.service.reminders.service import ReminderService
@@ -106,6 +108,63 @@ def generate_monthly_schedule(
     if token.email is None:
         raise BadRequestError("User email is required to create schedule")
     return service.commit_monthly_schedule(data, created_by=token.email)
+
+
+# ----------------------------------------------------------------
+# Editing a generated rota
+#
+# ROUTE ORDER: the DELETE below must stay ahead of DELETE /{schedule_id}. FastAPI matches in
+# declaration order, so the other way round "assignments" is parsed as a schedule uuid and
+# every removal 422s.
+# ----------------------------------------------------------------
+
+
+@router.post(
+    "/{schedule_id}/assignments",
+    response_model=ScheduleEditResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def add_assignment(
+    schedule_id: UUID,
+    data: AssignmentWorkerRequest,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> ScheduleEditResult:
+    """Put another worker on a generated rota, and text them."""
+    worker_service.authorize_create_assignment(token, service.get_schedule(schedule_id).department_id)
+    return service.add_assignment(schedule_id, data.worker_id)
+
+
+@router.patch("/assignments/{assignment_id}/worker", response_model=ScheduleEditResult)
+def replace_assignment_worker(
+    assignment_id: UUID,
+    data: AssignmentWorkerRequest,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> ScheduleEditResult:
+    """Swap one worker out of a duty and another in. Both are texted."""
+    assignment = service.get_assignment(assignment_id)
+    worker_service.authorize_create_assignment(token, service.get_schedule(assignment.schedule_id).department_id)
+    return service.replace_assignment_worker(assignment_id, data.worker_id)
+
+
+@router.delete("/assignments/{assignment_id}", response_model=ScheduleEditResult)
+def remove_assignment(
+    assignment_id: UUID,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> ScheduleEditResult:
+    """Take a worker off a rota and text them.
+
+    Returns the schedule rather than 204: a removal can leave the rota short, and the warning
+    saying so is the whole reason a head is told anything at all.
+    """
+    assignment = service.get_assignment(assignment_id)
+    worker_service.authorize_create_assignment(token, service.get_schedule(assignment.schedule_id).department_id)
+    return service.remove_assignment(assignment_id)
 
 
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)

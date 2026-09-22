@@ -1,7 +1,8 @@
 from datetime import date, time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from postgrest.exceptions import APIError
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.models import AvailabilityType, DayOfWeek
@@ -34,6 +35,7 @@ def service(
     mock_availability_repo,
     mock_department_role_repo,
     mock_leave_repo,
+    mock_sms_service,
 ):
     # Default: workers have no standing role unless a test overrides this.
     mock_department_role_repo.get_role_for_worker_in_department.return_value = None
@@ -45,6 +47,7 @@ def service(
         availability_repo=mock_availability_repo,
         department_role_repo=mock_department_role_repo,
         leave_repo=mock_leave_repo,
+        sms_service=mock_sms_service,
     )
 
 
@@ -1071,3 +1074,362 @@ class TestStaffingBandResolution:
         )
 
         assert (result.min_workers, result.max_workers) == (2, 3)
+
+
+# ----------------------------------------------------------------
+# Editing a generated rota
+# ----------------------------------------------------------------
+
+
+class EditFixture:
+    """Wires the repositories for one department-only rota that can be edited.
+
+    Every edit path reads the same handful of things — the schedule, the department, the
+    eligible roster, the worker — so setting them up once keeps each test to the one fact it
+    is about.
+    """
+
+    def __init__(self, repos, *, band=(2, 4), on_rota=2, spare=1):
+        schedule_repo, worker_repo, department_repo, role_repo = repos
+        self.department = make_department(band=band)
+        self.on_rota = [make_worker(first_name=f"On{i}", phone=f"+1416555010{i}") for i in range(on_rota)]
+        self.spare = [make_worker(first_name=f"Spare{i}", phone=f"+1416555020{i}") for i in range(spare)]
+        self.schedule = make_schedule(
+            department_id=self.department.id,
+            min_workers=band[0],
+            max_workers=band[1],
+            scheduled_date=date(2026, 8, 2),
+        )
+        self.schedule.schedule_assignments = [
+            make_assignment(schedule_id=self.schedule.id, worker_id=w.id, workers=w) for w in self.on_rota
+        ]
+
+        schedule_repo.get_with_assignments.return_value = self.schedule
+        schedule_repo.create_assignment.side_effect = lambda data: make_assignment(
+            schedule_id=self.schedule.id, worker_id=UUID(data["worker_id"])
+        )
+        department_repo.get_by_id.return_value = self.department
+        # The whole roster, on and off the rota — _eligible_worker resolves against this.
+        worker_repo.get_department_only_workers.return_value = self.on_rota + self.spare
+        worker_repo.get_by_id.side_effect = lambda wid: next(
+            (w for w in self.on_rota + self.spare if w.id == wid), None
+        )
+        role_repo.get_role_for_worker_in_department.return_value = None
+
+    def assignment_of(self, worker):
+        """The assignment row holding a given worker, with the schedule embedded as the
+        repository's edit-path read returns it."""
+        row = next(a for a in self.schedule.schedule_assignments if a.worker_id == worker.id)
+        return row.model_copy(update={"schedules": self.schedule})
+
+
+@pytest.fixture
+def edit(mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo):
+    return EditFixture((mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo))
+
+
+class TestAddAssignment:
+    def test_adds_a_worker_and_stamps_their_role(self, service, edit, mock_schedule_repo, mock_department_role_repo):
+        role = make_department_role(department_id=edit.department.id)
+        mock_department_role_repo.get_role_for_worker_in_department.return_value = role
+
+        service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        written = mock_schedule_repo.create_assignment.call_args.args[0]
+        assert written["worker_id"] == str(edit.spare[0].id)
+        assert written["department_role_id"] == str(role.id)
+
+    def test_texts_the_added_worker_immediately(self, service, edit, mock_sms_service, mock_schedule_repo):
+        # The sweep would find the row on its own, but only within ten minutes, and the head is
+        # standing in front of them.
+        service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        mock_sms_service.send_assignment_notice.assert_called_once()
+        assert mock_sms_service.send_assignment_notice.call_args.kwargs["duties"] == [
+            (edit.department.name, "Sun 02 Aug at 09:00")
+        ]
+        mock_schedule_repo.mark_notice_sent.assert_called_once()
+
+    def test_leaves_the_notice_unmarked_when_the_text_fails(self, service, edit, mock_sms_service, mock_schedule_repo):
+        # Unmarked means notice_sent_at stays NULL and the ten-minute sweep retries, which is
+        # the whole reason this path needs no warning of its own.
+        mock_sms_service.send_assignment_notice.return_value = False
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        mock_schedule_repo.mark_notice_sent.assert_not_called()
+        assert result.warnings == []
+
+    def test_warns_when_the_added_worker_has_no_phone(self, service, edit, mock_worker_repo):
+        edit.spare[0].phone = None
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        assert any("no phone number" in w for w in result.warnings)
+
+    def test_refuses_a_worker_already_on_the_rota(self, service, edit, mock_schedule_repo):
+        with pytest.raises(ConflictError, match="already on this rota"):
+            service.add_assignment(edit.schedule.id, edit.on_rota[0].id)
+        mock_schedule_repo.create_assignment.assert_not_called()
+
+    def test_refuses_once_the_rota_is_at_its_maximum(
+        self, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo, service
+    ):
+        # Judged against the band frozen on the row, which is the number the screen shows.
+        full = EditFixture(
+            (mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo),
+            band=(2, 2),
+            on_rota=2,
+        )
+        with pytest.raises(ConflictError, match="maximum of 2"):
+            service.add_assignment(full.schedule.id, full.spare[0].id)
+        mock_schedule_repo.create_assignment.assert_not_called()
+
+    def test_allows_an_add_to_a_rota_that_predates_the_band(
+        self, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo, service
+    ):
+        # min_workers/max_workers are nullable for rows generated before the band existed.
+        # There is no honest ceiling to enforce, so the edit goes through rather than being
+        # refused against a number nobody chose.
+        old = EditFixture((mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo))
+        old.schedule.min_workers = None
+        old.schedule.max_workers = None
+
+        service.add_assignment(old.schedule.id, old.spare[0].id)
+        mock_schedule_repo.create_assignment.assert_called_once()
+
+    def test_refuses_somebody_outside_the_scope(self, service, edit, mock_worker_repo, mock_schedule_repo):
+        outsider = make_worker(first_name="Vera", last_name="Rubin")
+        mock_worker_repo.get_by_id.side_effect = lambda wid: outsider if wid == outsider.id else None
+
+        with pytest.raises(BadRequestError, match="Vera Rubin is not an active member"):
+            service.add_assignment(edit.schedule.id, outsider.id)
+        mock_schedule_repo.create_assignment.assert_not_called()
+
+    def test_raises_for_an_unknown_worker(self, service, edit, mock_worker_repo):
+        mock_worker_repo.get_by_id.side_effect = lambda wid: None
+        with pytest.raises(NotFoundError, match="Worker"):
+            service.add_assignment(edit.schedule.id, uuid4())
+
+    def test_warns_rather_than_refusing_when_the_worker_is_unavailable(
+        self, service, edit, mock_availability_repo, mock_schedule_repo
+    ):
+        # A head moving somebody onto a date they marked off has usually already spoken to
+        # them. The app reports the clash; it does not overrule the conversation.
+        mock_availability_repo.get_for_workers.return_value = [
+            make_availability(
+                worker_id=edit.spare[0].id,
+                availability_type=AvailabilityType.SPECIFIC_DATE,
+                specific_date=date(2026, 8, 2),
+                day_of_week=None,
+                is_available=False,
+            )
+        ]
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        assert any("marked unavailable or on leave" in w for w in result.warnings)
+        mock_schedule_repo.create_assignment.assert_called_once()
+
+    def test_warns_when_the_worker_is_already_on_another_rota(self, service, edit, mock_schedule_repo):
+        mock_schedule_repo.get_workers_scheduled_on_date.return_value = [edit.spare[0].id]
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        assert any("already on another rota" in w for w in result.warnings)
+
+    def test_maps_a_concurrent_duplicate_to_a_conflict(self, service, edit, mock_schedule_repo):
+        # Two heads editing the same rota at once: unique (schedule_id, worker_id) is what
+        # actually decides it, and 23505 has to read as a conflict rather than a 500.
+        mock_schedule_repo.create_assignment.side_effect = APIError({"code": "23505", "message": "duplicate"})
+
+        with pytest.raises(ConflictError, match="already on this rota"):
+            service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+
+class TestReplaceAssignmentWorker:
+    def test_swaps_the_worker_on_the_row(self, service, edit, mock_schedule_repo):
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        service.replace_assignment_worker(assignment.id, edit.spare[0].id)
+
+        args = mock_schedule_repo.reassign_assignment.call_args.args
+        assert args[0] == assignment.id
+        assert args[1] == edit.spare[0].id
+
+    def test_texts_both_people(self, service, edit, mock_schedule_repo, mock_sms_service):
+        # A swap is the one edit where saying nothing leaves two people with the wrong idea.
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        service.replace_assignment_worker(assignment.id, edit.spare[0].id)
+
+        mock_sms_service.send_assignment_notice.assert_called_once()
+        assert mock_sms_service.send_assignment_notice.call_args.kwargs["to"] == edit.spare[0].phone
+        mock_sms_service.send_assignment_cancelled.assert_called_once()
+        assert mock_sms_service.send_assignment_cancelled.call_args.kwargs["to"] == edit.on_rota[0].phone
+
+    def test_warns_when_the_cancellation_text_fails(self, service, edit, mock_schedule_repo, mock_sms_service):
+        # The only message in the system with no retry: the row it would be swept from is gone.
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+        mock_sms_service.send_assignment_cancelled.return_value = False
+
+        result = service.replace_assignment_worker(assignment.id, edit.spare[0].id)
+
+        assert any("Let them know another way" in w for w in result.warnings)
+
+    def test_refuses_swapping_in_somebody_already_on_the_rota(self, service, edit, mock_schedule_repo):
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        with pytest.raises(ConflictError, match="already on this rota"):
+            service.replace_assignment_worker(assignment.id, edit.on_rota[1].id)
+        mock_schedule_repo.reassign_assignment.assert_not_called()
+
+    def test_refuses_swapping_a_worker_for_themselves(self, service, edit, mock_schedule_repo):
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        with pytest.raises(ConflictError, match="already holds this duty"):
+            service.replace_assignment_worker(assignment.id, edit.on_rota[0].id)
+
+    def test_does_not_check_the_maximum(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo
+    ):
+        # A swap is size-neutral. Refusing one on a full rota would make the commonest edit
+        # impossible precisely when the rota is correctly staffed.
+        full = EditFixture(
+            (mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo),
+            band=(2, 2),
+            on_rota=2,
+        )
+        assignment = full.assignment_of(full.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        service.replace_assignment_worker(assignment.id, full.spare[0].id)
+        mock_schedule_repo.reassign_assignment.assert_called_once()
+
+    def test_raises_for_an_unknown_assignment(self, service, edit, mock_schedule_repo):
+        mock_schedule_repo.get_assignment_with_schedule.return_value = None
+        with pytest.raises(NotFoundError, match="Assignment"):
+            service.replace_assignment_worker(uuid4(), edit.spare[0].id)
+
+
+class TestRemoveAssignment:
+    def test_removes_the_row_and_texts_the_worker(self, service, edit, mock_schedule_repo, mock_sms_service):
+        assignment = edit.assignment_of(edit.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        service.remove_assignment(assignment.id)
+
+        mock_schedule_repo.delete_assignment.assert_called_once_with(assignment.id)
+        mock_sms_service.send_assignment_cancelled.assert_called_once()
+        assert mock_sms_service.send_assignment_cancelled.call_args.kwargs["when"] == "Sun 02 Aug at 09:00"
+
+    def test_warns_but_still_removes_when_it_drops_below_the_minimum(self, service, edit, mock_schedule_repo):
+        # Never refuses. A head recording that somebody pulled out must be able to, and a rota
+        # that still lists them is worse than a short one that is true.
+        result = service.remove_assignment(self._prime(edit, mock_schedule_repo, edit.on_rota[0]))
+
+        mock_schedule_repo.delete_assignment.assert_called_once()
+        assert any("1 short of the 2" in w for w in result.warnings)
+
+    def test_is_silent_when_the_rota_stays_above_its_minimum(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo
+    ):
+        roomy = EditFixture(
+            (mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo),
+            band=(1, 4),
+            on_rota=2,
+        )
+        assignment = roomy.assignment_of(roomy.on_rota[0])
+        mock_schedule_repo.get_assignment_with_schedule.return_value = assignment
+
+        assert service.remove_assignment(assignment.id).warnings == []
+
+    def test_warns_when_the_cancellation_text_fails(self, service, edit, mock_schedule_repo, mock_sms_service):
+        mock_sms_service.send_assignment_cancelled.return_value = False
+
+        result = service.remove_assignment(self._prime(edit, mock_schedule_repo, edit.on_rota[0]))
+
+        assert any("Let them know another way" in w for w in result.warnings)
+
+    def test_raises_for_an_unknown_assignment(self, service, mock_schedule_repo):
+        mock_schedule_repo.get_assignment_with_schedule.return_value = None
+        with pytest.raises(NotFoundError, match="Assignment"):
+            service.remove_assignment(uuid4())
+
+    @staticmethod
+    def _prime(edit, schedule_repo, worker):
+        assignment = edit.assignment_of(worker)
+        schedule_repo.get_assignment_with_schedule.return_value = assignment
+        return assignment.id
+
+
+class TestScopeOfAGeneratedSchedule:
+    """Which scope produced a rota, reconstructed from the row — it does not record one."""
+
+    def test_a_subteam_id_pins_it_to_the_subteam_scope(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_subteam_repo,
+        mock_department_role_repo,
+    ):
+        department = make_department(band=(1, 4))
+        subteam = make_subteam(department_id=department.id)
+        worker, spare = make_worker(), make_worker(first_name="Spare")
+        schedule = make_schedule(department_id=department.id, subteam_id=subteam.id, min_workers=1, max_workers=4)
+        schedule.schedule_assignments = [
+            make_assignment(schedule_id=schedule.id, worker_id=worker.id, subteam_id=subteam.id)
+        ]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_schedule_repo.create_assignment.return_value = make_assignment(worker_id=spare.id)
+        mock_department_repo.get_by_id.return_value = department
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_subteam_repo.get_with_workers.return_value = [
+            make_subteam_member(subteam=subteam, worker=w) for w in (worker, spare)
+        ]
+        mock_worker_repo.get_by_id.return_value = spare
+        mock_department_role_repo.get_role_for_worker_in_department.return_value = None
+
+        service.add_assignment(schedule.id, spare.id)
+
+        # Resolved through the subteam's own roster, not the department's.
+        mock_subteam_repo.get_with_workers.assert_called_once_with(subteam.id)
+        assert mock_schedule_repo.create_assignment.call_args.args[0]["subteam_id"] == str(subteam.id)
+
+    def test_subteam_stamps_on_a_department_wide_rota_mean_department_all(
+        self,
+        service,
+        mock_schedule_repo,
+        mock_worker_repo,
+        mock_department_repo,
+        mock_subteam_repo,
+        mock_department_role_repo,
+    ):
+        # A DEPARTMENT_ALL rota has no subteam of its own but stamps one on each row, which is
+        # the only thing separating it from a DEPARTMENT_ONLY rota on the row itself.
+        department = make_department(band=(1, 4))
+        subteam = make_subteam(department_id=department.id)
+        member, spare = make_worker(), make_worker(first_name="Spare")
+        schedule = make_schedule(department_id=department.id, subteam_id=None, min_workers=1, max_workers=4)
+        schedule.schedule_assignments = [
+            make_assignment(schedule_id=schedule.id, worker_id=member.id, subteam_id=subteam.id)
+        ]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_schedule_repo.create_assignment.return_value = make_assignment(worker_id=spare.id)
+        mock_department_repo.get_by_id.return_value = department
+        mock_subteam_repo.get_by_department.return_value = [subteam]
+        mock_worker_repo.get_workers_by_department_grouped_by_subteam.return_value = {subteam.id: [member, spare]}
+        mock_worker_repo.get_by_id.return_value = spare
+        mock_department_role_repo.get_role_for_worker_in_department.return_value = None
+
+        service.add_assignment(schedule.id, spare.id)
+
+        mock_worker_repo.get_workers_by_department_grouped_by_subteam.assert_called_once()
+        assert mock_schedule_repo.create_assignment.call_args.args[0]["subteam_id"] == str(subteam.id)

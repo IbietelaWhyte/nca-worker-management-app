@@ -21,6 +21,11 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
 # from the plain inner variant above, which the monthly planner's bulk history preload uses and
 # where the extra join buys nothing.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_AND_DEPARTMENT_INNER = "*, schedules!inner(*, departments(*))"
+# The edit paths (swap, add, remove) need the assignment, the schedule it sits on and the worker
+# who holds it in one read, *before* the row is changed or deleted: the schedule supplies the
+# department to authorize against and the date the SMS quotes, and the worker is who to text.
+# Afterwards there is nothing left to read the removed worker from.
+SELECT_ASSIGNMENT_WITH_SCHEDULE_AND_WORKER = "*, workers(*), schedules(*), subteams(*), department_roles(*)"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_NOTICE = "get_assignments_due_for_notice"
 # The composite primary key of assignment_reminder_sends, and a legal ON CONFLICT arbiter because

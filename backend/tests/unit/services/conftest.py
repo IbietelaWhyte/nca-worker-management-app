@@ -20,6 +20,7 @@ from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.subteams.models import SubteamResponse, SubteamWithWorkersResponse
 from app.schemas.workers.models import WorkerResponse
 from app.service.authentication.service import AuthenticationService
+from app.service.sms.service import SMSService
 
 # ----------------------------------------------------------------
 # Mock repositories
@@ -38,7 +39,15 @@ def mock_department_repo():
 
 @pytest.fixture
 def mock_schedule_repo():
-    return MagicMock(spec=ScheduleRepository)
+    """Nobody is booked anywhere by default, matching the availability and leave fixtures.
+
+    These two return collections that get membership-tested (`worker.id in ...`), so a bare
+    MagicMock fails with a TypeError a long way from the line that caused it.
+    """
+    repo = MagicMock(spec=ScheduleRepository)
+    repo.get_workers_scheduled_on_date.return_value = []
+    repo.get_workers_scheduled_in_range.return_value = {}
+    return repo
 
 
 @pytest.fixture
@@ -72,6 +81,16 @@ def mock_subteam_repo():
 @pytest.fixture
 def mock_department_role_repo():
     return MagicMock(spec=DepartmentRoleRepository)
+
+
+@pytest.fixture
+def mock_sms_service():
+    """Every text succeeds by default — a test about staffing is not a test about Twilio."""
+    service = MagicMock(spec=SMSService)
+    service.send_assignment_notice.return_value = True
+    service.send_assignment_cancelled.return_value = True
+    service.send_reminder.return_value = True
+    return service
 
 
 @pytest.fixture

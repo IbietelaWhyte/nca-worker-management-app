@@ -143,6 +143,37 @@ class ScheduleResponse(Schedule):
 
 
 # ----------------------------------------------------------------
+# Editing a rota after it has been generated
+#
+# A generated rota is almost right and then somebody pulls out. Until now the only
+# repair was to delete the whole schedule and regenerate it, which loses every manual
+# correction on it and re-texts everybody.
+# ----------------------------------------------------------------
+
+
+class AssignmentWorkerRequest(BaseModel):
+    """Who to put on a rota — the body of both the add and the swap."""
+
+    worker_id: UUID
+
+
+class ScheduleEditResult(BaseModel):
+    """The whole schedule after an edit, plus anything the head should know about it.
+
+    Returns the re-read schedule rather than the one row that changed: the caller replaces
+    `schedule` wholesale and every embed comes with it, which sidesteps the "a bare insert
+    return has no `workers` embed" trap entirely.
+
+    `warnings` are things that did not stop the edit. Removing somebody below the minimum is
+    allowed, and so is booking a worker who is already out that day — a head recording what
+    has actually happened must be able to, and refusing leaves the rota lying instead.
+    """
+
+    schedule: ScheduleResponse
+    warnings: list[str] = []
+
+
+# ----------------------------------------------------------------
 # Monthly generation
 #
 # A "month" is not an entity — it is N ordinary schedules that happen to fall in the

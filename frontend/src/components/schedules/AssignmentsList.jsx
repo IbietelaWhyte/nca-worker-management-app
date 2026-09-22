@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { ArrowLeftRight, UserMinus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
     Select,
     SelectContent,
@@ -14,6 +16,8 @@ const NO_ROLE = '__none__'
 export default function AssignmentsList({
     groupedAssignments = [],
     onRoleChange,
+    onSwap,
+    onRemove,
     roles = [],
     canManage = false,
 }) {
@@ -130,6 +134,37 @@ export default function AssignmentsList({
                                                             {assignment.department_roles.name}
                                                         </Badge>
                                                     )
+                                                )}
+
+                                                {/* The cluster Confirm/Decline used to sit in.
+                                                    A worker who cannot make a date now speaks to
+                                                    their head, and this is what the head does
+                                                    about it. */}
+                                                {canManage && onSwap && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => onSwap(assignment)}
+                                                    >
+                                                        <ArrowLeftRight
+                                                            size={14}
+                                                            className="mr-1"
+                                                        />
+                                                        Swap
+                                                    </Button>
+                                                )}
+                                                {canManage && onRemove && (
+                                                    <Button
+                                                        type="button"
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => onRemove(assignment)}
+                                                        className="text-destructive hover:text-destructive"
+                                                    >
+                                                        <UserMinus size={14} className="mr-1" />
+                                                        Remove
+                                                    </Button>
                                                 )}
                                             </div>
                                         </div>

@@ -139,6 +139,39 @@ class TestReminderBody:
         assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
 
 
+def cancellation_body(service, department_name="Ushering") -> str:
+    """Send a cancellation and return the body that reached send_sms."""
+    with patch.object(SMSService, "send_sms", return_value=True) as send:
+        service.send_assignment_cancelled(
+            to="+14165550101",
+            worker_name="Ada",
+            department_name=department_name,
+            when="Sun 02 Aug at 09:00",
+        )
+    return str(send.call_args.args[1])
+
+
+class TestAssignmentCancelledBody:
+    """The message with no retry behind it — worth asserting whole more than any other."""
+
+    def test_it_says_there_is_nothing_to_do(self, service):
+        # The first thing a volunteer wonders is whether they owe a reply. There is no inbound
+        # webhook, so anything question-shaped would go unread.
+        assert cancellation_body(service) == (
+            "Hi Ada, you are no longer scheduled for Sun 02 Aug at 09:00 in Ushering. No action needed."
+        )
+
+    def test_an_unnameable_department_drops_the_framing(self, service):
+        # Rather than a dangling " in ". The same rule _describe_duties follows.
+        assert cancellation_body(service, department_name="") == (
+            "Hi Ada, you are no longer scheduled for Sun 02 Aug at 09:00. No action needed."
+        )
+
+    def test_the_body_stays_inside_gsm_7(self, service):
+        body = cancellation_body(service)
+        assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
+
+
 def prompt_body(service, worker_name="Ada", department_name="Ushering", url=PROMPT_URL) -> str:
     """Send an availability prompt and return the body that reached send_sms."""
     with patch.object(SMSService, "send_sms", return_value=True) as send:

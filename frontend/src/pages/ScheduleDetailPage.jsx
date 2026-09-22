@@ -2,30 +2,58 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useScheduleDetail } from '@/hooks/useScheduleDetail'
 import { useAuth } from '@/context/AuthContext'
 import AssignmentsList from '@/components/schedules/AssignmentsList'
+import WorkerPickerDialog from '@/components/schedules/WorkerPickerDialog'
 import { describeLeadTime } from '@/components/schedules/ReminderLeadTimesField'
 import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Bell } from 'lucide-react'
+import { ArrowLeft, Bell, UserPlus } from 'lucide-react'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
-import { getSubteamsByDepartment } from '@/api/subteams'
+import { getSubteamsByDepartment, getSubteamWithWorkers } from '@/api/subteams'
+import { getDepartmentWithWorkers } from '@/api/departments'
 import { getRolesByDepartment } from '@/api/roles'
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
 
 export default function ScheduleDetailPage() {
     const { id } = useParams()
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead } = useAuth()
-    const { schedule, loading, error, changeAssignmentRole, sendRemindersForSchedule } =
-        useScheduleDetail(id)
+    const {
+        schedule,
+        loading,
+        error,
+        changeAssignmentRole,
+        addWorker,
+        swapWorker,
+        removeWorker,
+        sendRemindersForSchedule,
+    } = useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
     const [showEmptySubteams, setShowEmptySubteams] = useState(true)
     const [allSubteams, setAllSubteams] = useState([])
     const [subteamsLoading, setSubteamsLoading] = useState(false)
     const [departmentRoles, setDepartmentRoles] = useState([])
+    // Everyone who may be put on this rota. The server decides eligibility for real; this is
+    // the pool the picker offers, narrowed to the subteam when the rota has one so a head is
+    // not shown sixty names of whom four are valid.
+    const [roster, setRoster] = useState([])
+    // null | { mode: 'add' } | { mode: 'swap', assignment } — one picker for the whole page.
+    const [picker, setPicker] = useState(null)
+    const [removeTarget, setRemoveTarget] = useState(null)
+    const [editBusy, setEditBusy] = useState(false)
+    const [editError, setEditError] = useState(null)
+    const [editWarnings, setEditWarnings] = useState([])
 
     // Fetch all subteams for the department
     useEffect(() => {
@@ -59,6 +87,29 @@ export default function ScheduleDetailPage() {
         }
         fetchRoles()
     }, [schedule?.department_id])
+
+    // Fetch the roster the picker draws from
+    useEffect(() => {
+        const fetchRoster = async () => {
+            if (!schedule?.department_id) return
+            try {
+                if (schedule.subteam_id) {
+                    const response = await getSubteamWithWorkers(schedule.subteam_id)
+                    setRoster(
+                        (response.data ?? []).map(row => row.worker).filter(w => w?.is_active)
+                    )
+                } else {
+                    const response = await getDepartmentWithWorkers(schedule.department_id)
+                    setRoster((response.data?.workers ?? []).filter(w => w.is_active))
+                }
+            } catch (err) {
+                console.error('Failed to fetch the roster:', err)
+                setRoster([])
+            }
+        }
+        fetchRoster()
+        // Both are primitives, so an edit replacing the schedule object does not refetch.
+    }, [schedule?.department_id, schedule?.subteam_id])
 
     // Group and filter assignments by subteam
     const groupedAssignments = useMemo(() => {
@@ -108,6 +159,47 @@ export default function ScheduleDetailPage() {
         return result
     }, [schedule, showEmptySubteams, allSubteams])
 
+    // Anyone on the rota is not a candidate for it — which also means a swap cannot offer the
+    // person already holding the duty.
+    const candidates = useMemo(() => {
+        const taken = new Set((schedule?.schedule_assignments ?? []).map(a => a.worker_id))
+        return roster.filter(w => !taken.has(w.id))
+    }, [roster, schedule])
+
+    const runEdit = async action => {
+        setEditBusy(true)
+        setEditError(null)
+        try {
+            setEditWarnings(await action())
+            return true
+        } catch (err) {
+            setEditError(err.response?.data?.detail ?? 'That change could not be saved')
+            return false
+        } finally {
+            setEditBusy(false)
+        }
+    }
+
+    const handlePick = async workerId => {
+        const done = await runEdit(() =>
+            picker?.mode === 'swap'
+                ? swapWorker(picker.assignment.id, workerId)
+                : addWorker(workerId)
+        )
+        if (done) setPicker(null)
+    }
+
+    const handleRemove = async () => {
+        const done = await runEdit(() => removeWorker(removeTarget.id))
+        if (done) setRemoveTarget(null)
+    }
+
+    const openPicker = next => {
+        setEditError(null)
+        setEditWarnings([])
+        setPicker(next)
+    }
+
     const handleSendReminders = async schedule => {
         // Worth saying out loud, because it used to be false: a manual send once burned the
         // automatic reminder, and now records nothing, so the ladder still fires as planned.
@@ -154,6 +246,7 @@ export default function ScheduleDetailPage() {
     const totalCount = assignments.length
     const staffing = summarizeStaffing(schedule)
     const reminderLadder = schedule.reminder_days_before ?? []
+    const canManage = isAdmin || isDepartmentHead
 
     return (
         <div className="space-y-6">
@@ -180,7 +273,7 @@ export default function ScheduleDetailPage() {
                     </div>
                 </div>
 
-                {(isAdmin || isDepartmentHead) && (
+                {canManage && (
                     <Button
                         variant="outline"
                         onClick={() => handleSendReminders(schedule)}
@@ -229,20 +322,60 @@ export default function ScheduleDetailPage() {
                 </Alert>
             )}
 
+            {/* What an edit went through with anyway. Never red: none of these stopped it, and
+                a rota can be both short and correct — the head is being told, not blocked. */}
+            {editWarnings.length > 0 && (
+                <Alert variant="warning">
+                    <ul className="space-y-1 text-sm">
+                        {editWarnings.map(warning => (
+                            <li key={warning}>{warning}</li>
+                        ))}
+                    </ul>
+                </Alert>
+            )}
+
+            {/* A refusal from a path with no dialog in front of it (a removal). The picker
+                shows its own, because the dialog covers this. */}
+            {editError && !picker && (
+                <Alert variant="destructive">
+                    <p className="text-sm">{editError}</p>
+                </Alert>
+            )}
+
             {/* Assignments */}
             <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h3 className="font-semibold">Assigned Workers</h3>
-                    <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
-                        <input
-                            type="checkbox"
-                            checked={showEmptySubteams}
-                            onChange={e => setShowEmptySubteams(e.target.checked)}
-                            className="cursor-pointer"
-                        />
-                        Show subteams with no assignments
-                    </Label>
+                    <div className="flex flex-wrap items-center gap-3">
+                        <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
+                            <input
+                                type="checkbox"
+                                checked={showEmptySubteams}
+                                onChange={e => setShowEmptySubteams(e.target.checked)}
+                                className="cursor-pointer"
+                            />
+                            Show subteams with no assignments
+                        </Label>
+                        {canManage && (
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={staffing.full}
+                                onClick={() => openPicker({ mode: 'add' })}
+                            >
+                                <UserPlus size={16} className="mr-2" />
+                                Add worker
+                            </Button>
+                        )}
+                    </div>
                 </div>
+                {/* On screen rather than in a tooltip: there is no hover on a phone, so a
+                    disabled button with no reason beside it is just a broken button. */}
+                {canManage && staffing.full && (
+                    <p className="text-xs text-muted-foreground">
+                        This rota is full at {staffing.max}. Take somebody off to add another.
+                    </p>
+                )}
                 {subteamsLoading ? (
                     <div className="flex items-center justify-center py-8">
                         <p className="text-sm text-muted-foreground">
@@ -253,11 +386,85 @@ export default function ScheduleDetailPage() {
                     <AssignmentsList
                         groupedAssignments={groupedAssignments}
                         onRoleChange={changeAssignmentRole}
+                        onSwap={
+                            canManage
+                                ? assignment => openPicker({ mode: 'swap', assignment })
+                                : null
+                        }
+                        onRemove={
+                            canManage
+                                ? assignment => {
+                                      setEditError(null)
+                                      setEditWarnings([])
+                                      setRemoveTarget(assignment)
+                                  }
+                                : null
+                        }
                         roles={departmentRoles}
-                        canManage={isAdmin || isDepartmentHead}
+                        canManage={canManage}
                     />
                 )}
             </div>
+
+            {/* One picker for the whole page, not one per row. */}
+            <WorkerPickerDialog
+                open={picker !== null}
+                onOpenChange={next => !next && setPicker(null)}
+                title={picker?.mode === 'swap' ? 'Swap this duty' : 'Add a worker'}
+                description={
+                    picker?.mode === 'swap'
+                        ? `${workerName(picker.assignment)} comes off this date and whoever you pick goes on. Both of them get a text.`
+                        : 'Whoever you pick goes on this date and gets a text straight away.'
+                }
+                candidates={candidates}
+                busy={editBusy}
+                error={editError}
+                onPick={handlePick}
+            />
+
+            {/* Its own dialog rather than window.confirm: this sends a text, and every message
+                that costs money gets a button somebody chose to press. */}
+            <Dialog
+                open={removeTarget !== null}
+                onOpenChange={next => !editBusy && !next && setRemoveTarget(null)}
+            >
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>
+                            Take {removeTarget ? workerName(removeTarget) : 'this worker'} off?
+                        </DialogTitle>
+                        <DialogDescription>
+                            They come off this date and get a text saying so. The rota keeps every
+                            other change you have made to it.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {editError && (
+                        <Alert variant="destructive">
+                            <p className="text-sm">{editError}</p>
+                        </Alert>
+                    )}
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            disabled={editBusy}
+                            onClick={() => setRemoveTarget(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" disabled={editBusy} onClick={handleRemove}>
+                            {editBusy ? 'Removing...' : 'Remove and text them'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
+
+/** An assignment's worker as a person reads it, or a neutral fallback if the embed is missing. */
+const workerName = assignment =>
+    assignment?.workers
+        ? `${assignment.workers.first_name} ${assignment.workers.last_name}`
+        : 'this worker'

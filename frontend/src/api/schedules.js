@@ -29,6 +29,18 @@ export const setAssignmentRole = (assignmentId, departmentRoleId) =>
         params: departmentRoleId ? { department_role_id: departmentRoleId } : {},
     })
 
+// Editing a generated rota. All three return { schedule, warnings }: the whole re-read
+// schedule, so the caller replaces its copy wholesale and the embeds come for free, plus
+// anything that did not stop the edit but the head should know about.
+export const addAssignment = (scheduleId, workerId) =>
+    apiClient.post(`/schedules/${scheduleId}/assignments`, { worker_id: workerId })
+
+export const replaceAssignmentWorker = (assignmentId, workerId) =>
+    apiClient.patch(`/schedules/assignments/${assignmentId}/worker`, { worker_id: workerId })
+
+export const removeAssignment = assignmentId =>
+    apiClient.delete(`/schedules/assignments/${assignmentId}`)
+
 export const triggerReminders = () => apiClient.post('/schedules/reminders/trigger')
 
 export const triggerRemindersForSchedule = scheduleId =>

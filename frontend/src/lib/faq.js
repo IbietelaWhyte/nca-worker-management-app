@@ -29,7 +29,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'I am on the rota but I cannot make it.',
-                answer: 'Tell your head of department. They can take you off that date or put somebody else in your place, and they are the only ones who can — nothing happens automatically, so the earlier you say, the easier it is to find cover. If it is a whole stretch of time rather than one date, ask them to book it as leave.',
+                answer: 'Tell your head of department. They can take you off that date or put somebody else in your place, and you will get a text confirming it. They are the only ones who can, and nothing happens automatically, so the earlier you say, the easier it is to find cover. If it is a whole stretch of time rather than one date, ask them to book it as leave.',
             },
             {
                 question: 'Why can I no longer change a date?',
@@ -87,7 +87,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Can I change a rota after it has been generated?',
-                answer: "Yes. Open the schedule to change somebody's role or take them off and pick another worker. There can only be one schedule per department, date and subteam, so adjust the existing one rather than generating a second.",
+                answer: 'Yes. Open the schedule and use Swap to put somebody else in a duty, Remove to take somebody off, or Add worker to put another person on. Everybody affected gets a text, including the person coming off. There can only be one schedule per department, date and subteam, so adjust the existing one rather than generating a second.',
             },
         ],
     },
@@ -99,6 +99,10 @@ export const FAQ_SECTIONS = [
             {
                 question: 'When do workers actually get a text?',
                 answer: 'Once soon after the schedule is created, listing every date they are on, and then once for each reminder you set on the schedule — a week out, three days out, the night before, whichever you choose. Reminders go out in the morning, and a worker with several duties due that day gets one text covering all of them. You can also set no reminders at all if your team works off the printed rota.',
+            },
+            {
+                question: 'The app let me schedule somebody who is unavailable.',
+                answer: 'On purpose. When you add or swap somebody onto a date they marked off, are on leave for, or are already serving elsewhere on, you get a note saying so and the change still goes through — you have usually already spoken to them, and the app is in no position to overrule that. The same goes for taking somebody off and leaving the rota short: you are told, not blocked.',
             },
             {
                 question: 'Somebody is away for a few weeks. What do I do?',
