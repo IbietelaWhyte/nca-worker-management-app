@@ -4,13 +4,20 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.department_roles.models import DepartmentRoleResponse
+from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker
 
 
 class WorkerWithDepartmentRole(Worker):
-    """A department member with their standing role in that department (if any)."""
+    """A department member with their standing role and subteam in that department (if any).
+
+    Both come from the `worker_departments` junction rather than the worker, because both are
+    facts about this membership: the same person can hold a different role in another
+    department. `subteam` is None for a member who is in the department but in no subteam.
+    """
 
     department_role: DepartmentRoleResponse | None = None
+    subteam: SubteamResponse | None = None
 
 
 class Department(BaseModel):

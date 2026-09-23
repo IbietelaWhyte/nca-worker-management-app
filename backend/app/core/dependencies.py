@@ -160,6 +160,15 @@ def get_confirmation_token_repository(client: Client = Depends(get_db)) -> Confi
 # --- Services ---
 
 
+def get_sms_service() -> SMSService:
+    """FastAPI dependency that provides an SMSService instance.
+
+    Returns:
+        SMSService: Service for sending SMS notifications via Twilio.
+    """
+    return SMSService()
+
+
 def get_schedule_service(
     schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
     worker_repo: WorkerRepository = Depends(get_worker_repository),
@@ -168,6 +177,7 @@ def get_schedule_service(
     availability_repo: AvailabilityRepository = Depends(get_availability_repository),
     department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
     leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
+    sms_service: SMSService = Depends(get_sms_service),
 ) -> ScheduleService:
     """FastAPI dependency that provides a ScheduleService instance.
 
@@ -179,6 +189,7 @@ def get_schedule_service(
         availability_repo: AvailabilityRepository dependency.
         department_role_repo: DepartmentRoleRepository dependency for role auto-fill.
         leave_repo: WorkerLeaveRepository dependency, to drop workers who are away.
+        sms_service: SMSService dependency, to text both people affected by a rota edit.
 
     Returns:
         ScheduleService: Service for schedule business logic operations.
@@ -191,16 +202,8 @@ def get_schedule_service(
         availability_repo=availability_repo,
         department_role_repo=department_role_repo,
         leave_repo=leave_repo,
+        sms_service=sms_service,
     )
-
-
-def get_sms_service() -> SMSService:
-    """FastAPI dependency that provides an SMSService instance.
-
-    Returns:
-        SMSService: Service for sending SMS notifications via Twilio.
-    """
-    return SMSService()
 
 
 def get_confirmation_token_service(

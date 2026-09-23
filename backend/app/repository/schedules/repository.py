@@ -386,6 +386,10 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             list[AssignmentResponse]: A list of all created assignment records.
         """
         log = self.logger.bind(method="bulk_create_assignments", count=len(assignments))
+        # PostgREST rejects an empty insert body, and a date whose every worker was filtered out
+        # is an ordinary outcome of planning, not an error worth failing a whole month over.
+        if not assignments:
+            return []
         response = self.client.table(q.ASSIGNMENTS_TABLE).insert(assignments).execute()
         created = [AssignmentResponse.model_validate(row) for row in response.data or []]
         log.info("bulk_assignments_created", created_count=len(created))
@@ -445,6 +449,137 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         assignment = self.get_assignment_by_id(assignment_id)
         log.info("assignment_role_updated")
         return assignment
+
+    def get_assignment_with_schedule(self, assignment_id: UUID) -> AssignmentResponse | None:
+        """
+        Retrieve one assignment together with its schedule and its worker.
+
+        The edit paths need all three before they touch anything: the schedule carries the
+        department the caller is authorized against and the date the SMS quotes, and the worker
+        is who gets texted. Reading them separately would mean three round trips, and on the
+        remove path the second and third would come back empty.
+
+        Args:
+            assignment_id (UUID): The unique identifier of the assignment.
+
+        Returns:
+            AssignmentResponse | None: The assignment with `schedules` and `workers` embedded,
+                                       or None if no assignment has that id.
+        """
+        log = self.logger.bind(method="get_assignment_with_schedule", assignment_id=str(assignment_id))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .select(q.SELECT_ASSIGNMENT_WITH_SCHEDULE_AND_WORKER)
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .maybe_single()
+            .execute()
+        )
+        assignment = AssignmentResponse.model_validate(response.data) if response else None
+        if not assignment:
+            log.warning("assignment_not_found")
+        return assignment
+
+    def reassign_assignment(
+        self,
+        assignment_id: UUID,
+        worker_id: UUID,
+        subteam_id: UUID | None,
+        department_role_id: UUID | None,
+    ) -> AssignmentResponse | None:
+        """
+        Put a different worker into an existing assignment.
+
+        **Clears `notice_sent_at` and deletes the row's reminder-send markers**, in this one
+        method, because the row now names somebody who has been told nothing. A stale
+        `notice_sent_at` keeps the notice sweep from ever reaching them and a stale send marker
+        cancels the reminder that would have; neither errors, and the first anybody hears about
+        it is the empty chair. Done here rather than in a trigger: the backend is the only
+        writer (service-role client, RLS bypassed) and this schema has no triggers.
+
+        Args:
+            assignment_id (UUID): The assignment to hand over.
+            worker_id (UUID): The worker taking it on.
+            subteam_id (UUID | None): The subteam they fill, or None.
+            department_role_id (UUID | None): Their standing role in the department, or None.
+
+        Returns:
+            AssignmentResponse | None: The updated assignment with its embeds re-read, or None
+                                       if no assignment has that id.
+        """
+        log = self.logger.bind(method="reassign_assignment", assignment_id=str(assignment_id), worker_id=str(worker_id))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update(
+                {
+                    q.AssignmentColumns.WORKER_ID: str(worker_id),
+                    q.AssignmentColumns.SUBTEAM_ID: str(subteam_id) if subteam_id else None,
+                    q.AssignmentColumns.DEPARTMENT_ROLE_ID: str(department_role_id) if department_role_id else None,
+                    q.AssignmentColumns.NOTICE_SENT_AT: None,
+                }
+            )
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .execute()
+        )
+        if not response.data:
+            log.warning("assignment_not_found")
+            return None
+
+        self.delete_reminder_sends(assignment_id)
+
+        # A write does not return its embeds, and the caller renders the new worker's name.
+        assignment = self.get_assignment_by_id(assignment_id)
+        log.info("assignment_reassigned")
+        return assignment
+
+    def delete_reminder_sends(self, assignment_id: UUID) -> int:
+        """
+        Forget which of an assignment's reminders have already gone out.
+
+        Only called when the assignment changes hands. The markers record that *a person* was
+        told, not that a row was processed, so they cannot follow the row to somebody else.
+
+        Args:
+            assignment_id (UUID): The assignment whose markers to clear.
+
+        Returns:
+            int: How many markers were deleted.
+        """
+        response = (
+            self.client.table(q.REMINDER_SENDS_TABLE)
+            .delete()
+            .eq(q.ReminderSendColumns.ASSIGNMENT_ID, str(assignment_id))
+            .execute()
+        )
+        deleted = len(response.data or [])
+        if deleted:
+            self.logger.bind(method="delete_reminder_sends", assignment_id=str(assignment_id)).info(
+                "reminder_sends_deleted", deleted=deleted
+            )
+        return deleted
+
+    def delete_assignment(self, assignment_id: UUID) -> bool:
+        """
+        Take one worker off a schedule.
+
+        The row's reminder markers go with it on the foreign key's ON DELETE CASCADE — unlike
+        reassignment, where the row survives and has to be cleared by hand.
+
+        Args:
+            assignment_id (UUID): The assignment to delete.
+
+        Returns:
+            bool: True if a row was deleted, False if no assignment had that id.
+        """
+        log = self.logger.bind(method="delete_assignment", assignment_id=str(assignment_id))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE).delete().eq(q.AssignmentColumns.ID, str(assignment_id)).execute()
+        )
+        deleted = len(response.data or []) > 0
+        if deleted:
+            log.info("assignment_deleted")
+        else:
+            log.warning("assignment_not_found")
+        return deleted
 
     def delete_assignments_for_schedule(self, schedule_id: UUID) -> bool:
         """

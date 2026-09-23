@@ -9,7 +9,7 @@ from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import DayOfWeek
 from app.schemas.subteams.models import SubteamResponse
-from app.schemas.workers.models import WorkerResponse
+from app.schemas.workers.models import Worker, WorkerResponse
 
 # Matches schedules.chk_reminder_days. Five is a cap on someone's phone bill, not on the schema:
 # a mistyped ladder against a forty-person department is forty texts per extra entry.
@@ -140,6 +140,52 @@ class DueReminder(BaseModel):
 
 class ScheduleResponse(Schedule):
     schedule_assignments: list[AssignmentResponse] = []
+
+
+# ----------------------------------------------------------------
+# Editing a rota after it has been generated
+#
+# A generated rota is almost right and then somebody pulls out. Until now the only
+# repair was to delete the whole schedule and regenerate it, which loses every manual
+# correction on it and re-texts everybody.
+# ----------------------------------------------------------------
+
+
+class AssignmentWorkerRequest(BaseModel):
+    """Who to put on a rota — the body of both the add and the swap."""
+
+    worker_id: UUID
+
+
+class AssignableWorker(BaseModel):
+    """Somebody who may be added to a rota, and the subteam they would land in.
+
+    The subteam is the one that will actually be stamped on their assignment, resolved by the
+    same `_resolve_scope_groups` call that does the stamping — not a guess the frontend makes
+    from a membership list. A head picks a person and the rota decides the group, so the group
+    has to be on screen at the moment they pick.
+
+    None means the department-only roster: a member of the department who is in no subteam.
+    """
+
+    worker: Worker
+    subteam: SubteamResponse | None = None
+
+
+class ScheduleEditResult(BaseModel):
+    """The whole schedule after an edit, plus anything the head should know about it.
+
+    Returns the re-read schedule rather than the one row that changed: the caller replaces
+    `schedule` wholesale and every embed comes with it, which sidesteps the "a bare insert
+    return has no `workers` embed" trap entirely.
+
+    `warnings` are things that did not stop the edit. Removing somebody below the minimum is
+    allowed, and so is booking a worker who is already out that day — a head recording what
+    has actually happened must be able to, and refusing leaves the rota lying instead.
+    """
+
+    schedule: ScheduleResponse
+    warnings: list[str] = []
 
 
 # ----------------------------------------------------------------

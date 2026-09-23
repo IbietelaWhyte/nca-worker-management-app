@@ -11,6 +11,11 @@ const alertVariants = cva(
                 default: 'bg-card text-card-foreground',
                 destructive:
                     'bg-card text-destructive *:data-[slot=alert-description]:text-destructive/90 *:[svg]:text-current',
+                // Tinted rather than the badge's solid gold: an alert is a block of prose, and
+                // the brand gold is light enough that body text on a full fill reads washed
+                // out even with dark ink. The border carries the colour, the text stays
+                // foreground — never text-warning, which is gold on white at 1.5:1.
+                warning: 'border-warning bg-warning/15 text-foreground',
             },
         },
         defaultVariants: {

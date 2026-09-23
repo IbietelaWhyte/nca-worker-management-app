@@ -148,6 +148,34 @@ class SMSService:
         self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
 
+    def send_assignment_cancelled(self, to: str, worker_name: str, department_name: str, when: str) -> bool:
+        """Tell a worker they have been taken off a date.
+
+        **The only message in the system with no retry.** The notice and the reminder are both
+        swept from a database row, so a Twilio failure is picked up on the next run; here the
+        assignment is already gone, and there is nothing left to sweep. A failure is reported
+        back to the head as a warning so they can pass the word on themselves.
+
+        "No action needed" is in the body because the first thing a volunteer wonders is
+        whether they owe a reply. There is no inbound webhook, so anything question-shaped
+        would go unread.
+
+        Args:
+            to: Recipient phone number in E.164 format.
+            worker_name: Name of the worker being stood down.
+            department_name: The department the duty was in; "" drops the framing.
+            when: Human-readable date and time, e.g. "Sun 02 Aug at 09:00".
+
+        Returns:
+            bool: True if the message was sent, False if sending failed.
+        """
+        # A department we could not name would render as a dangling " in ", so drop it rather
+        # than half-applying it — the same rule _describe_duties follows.
+        duty = f"{when} in {department_name}" if department_name else when
+        body = f"Hi {worker_name}, you are no longer scheduled for {duty}. No action needed."
+        self.logger.info("sending_assignment_cancelled", to=mask_phone(to))
+        return self.send_sms(to, body)
+
     @staticmethod
     def _describe_duties(duties: list[tuple[str, str]]) -> str:
         """Render a worker's dates as an object phrase, e.g. "Sun 02 Aug at 09:00 in Ushering".

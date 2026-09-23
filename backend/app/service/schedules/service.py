@@ -19,6 +19,7 @@ from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import (
+    AssignableWorker,
     AssignmentResponse,
     DatePlan,
     DatePlanStatus,
@@ -29,7 +30,9 @@ from app.schemas.schedules.models import (
     MonthlyScheduleResult,
     PlannedAssignment,
     PlannedGroup,
+    Schedule,
     ScheduleCreate,
+    ScheduleEditResult,
     ScheduleResponse,
     ScopeType,
     SkippedDate,
@@ -37,6 +40,7 @@ from app.schemas.schedules.models import (
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker, WorkerResponse
 from app.service.schedules.planner import GroupContext, PlanContext, plan_month
+from app.service.sms.service import SMSService
 
 logger = get_logger(__name__)
 
@@ -116,6 +120,43 @@ def _subteam_for_assignment(
     return str(resolved) if resolved else None
 
 
+def _scope_of(schedule: ScheduleResponse) -> ScopeType:
+    """Work out which scope a generated schedule was made with.
+
+    The row records only `subteam_id`, not the `ScopeType` that produced it, and the edit paths
+    need the scope to decide who may be added. A subteam id pins it; otherwise the assignments
+    tell the two department scopes apart, because only DEPARTMENT_ALL stamps a subteam onto the
+    rows of a schedule that has none of its own.
+
+    The one ambiguous case is a department-wide rota whose every pick happened to be a worker in
+    no subteam, which reads back as DEPARTMENT_ONLY. That narrows who may be added rather than
+    widening it, so the failure is a head being told somebody is not eligible — visible and
+    correctable — instead of a Seekers worker silently appearing on the wrong rota.
+
+    Args:
+        schedule: The schedule being edited, with its assignments embedded.
+
+    Returns:
+        ScopeType: The scope this rota was generated under.
+    """
+    if schedule.subteam_id is not None:
+        return ScopeType.SUBTEAM
+    if any(a.subteam_id is not None for a in schedule.schedule_assignments):
+        return ScopeType.DEPARTMENT_ALL
+    return ScopeType.DEPARTMENT_ONLY
+
+
+def _describe_when(schedule: Schedule) -> str:
+    """Render a duty for an SMS, e.g. "Sun 02 Aug at 09:00".
+
+    Deliberately the same string `ReminderService._describe` builds, and deliberately a second
+    copy of one line: the alternative is the schedules service importing the reminder service
+    for a strftime call. Keep them identical — a worker reading a notice and a cancellation
+    about the same date should not have to reconcile two formats.
+    """
+    return f"{schedule.scheduled_date.strftime('%a %d %b')} at {schedule.start_time.strftime('%H:%M')}"
+
+
 def _last_day_of_month(year: int, month: int) -> date:
     return date(year, month, calendar.monthrange(year, month)[1])
 
@@ -145,6 +186,7 @@ class ScheduleService:
         availability_repo: AvailabilityRepository,
         department_role_repo: DepartmentRoleRepository,
         leave_repo: WorkerLeaveRepository,
+        sms_service: SMSService,
     ) -> None:
         self.schedule_repo = schedule_repo
         self.worker_repo = worker_repo
@@ -153,6 +195,10 @@ class ScheduleService:
         self.availability_repo = availability_repo
         self.leave_repo = leave_repo
         self.department_role_repo = department_role_repo
+        # Editing a rota texts both people affected inline, rather than leaving it to the
+        # sweep: the head is standing in front of them, and a cancellation has no row left
+        # for a sweep to find.
+        self.sms_service = sms_service
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="ScheduleService")
@@ -405,6 +451,325 @@ class ScheduleService:
             raise NotFoundError(f"Assignment {assignment_id} not found")
         log.info("assignment_role_updated")
         return updated
+
+    # ----------------------------------------------------------------
+    # Editing a generated rota
+    #
+    # A generated rota is almost right and then somebody pulls out. Until these three
+    # methods the only repair was to delete the schedule and regenerate it, which throws
+    # away every manual correction on it and re-texts the whole team.
+    #
+    # The shared stance: an edit that makes the rota *worse* is still allowed, with a
+    # warning. A head recording what has actually happened must be able to, and refusing
+    # leaves the rota saying something untrue — the same line `worker_leave` already takes,
+    # where clashes are reported rather than enforced.
+    # ----------------------------------------------------------------
+
+    def get_assignable_workers(self, schedule_id: UUID) -> list[AssignableWorker]:
+        """Everyone who may still be added to this rota, each with the subteam they would fill.
+
+        Resolved through `_resolve_scope_groups` — the same call `_eligible_worker` checks
+        against and generation staffs from — so the picker offers exactly the people an add
+        would accept. Working it out on the frontend instead would mean a second copy of
+        `_scope_of` and the department-only rule in JavaScript, which would drift: a
+        DEPARTMENT_ONLY rota excludes everybody who is in a subteam, and a list that shows
+        them anyway is a list of names that 400.
+
+        Anyone already on the rota is left out, so the result doubles as the swap candidates:
+        you cannot swap somebody for a person already serving that date.
+
+        Args:
+            schedule_id: The rota being edited.
+
+        Returns:
+            list[AssignableWorker]: Candidates in group order — subteams by name, then the
+                                    department-only roster.
+
+        Raises:
+            NotFoundError: If the schedule or its department does not exist.
+        """
+        schedule = self._require_schedule(schedule_id)
+        taken = {a.worker_id for a in schedule.schedule_assignments}
+        groups = self._resolve_scope_groups(schedule.department_id, _scope_of(schedule), schedule.subteam_id)
+        return [
+            AssignableWorker(worker=worker, subteam=group.subteam)
+            for group in groups
+            for worker in group.workers
+            if worker.id not in taken
+        ]
+
+    def add_assignment(self, schedule_id: UUID, worker_id: UUID) -> ScheduleEditResult:
+        """Put another worker on a generated rota.
+
+        Their subteam and role come from their standing membership, exactly as generation
+        resolves them — a head picks a person, not a slot, so they cannot accidentally file a
+        Discovery worker under Seekers.
+
+        Args:
+            schedule_id: The rota to add to.
+            worker_id: The worker to add.
+
+        Returns:
+            ScheduleEditResult: The re-read schedule, and anything the head should know.
+
+        Raises:
+            NotFoundError: If the schedule or the worker does not exist.
+            BadRequestError: If the worker is not an active member of the schedule's scope.
+            ConflictError: If they are already on it, or it is already at its maximum.
+        """
+        log = self.logger.bind(method="add_assignment", schedule_id=str(schedule_id), worker_id=str(worker_id))
+        schedule = self._require_schedule(schedule_id)
+
+        if any(a.worker_id == worker_id for a in schedule.schedule_assignments):
+            raise ConflictError("That worker is already on this rota.")
+        # Judged against the band frozen on the row, which is the number every screen shows.
+        # Re-deriving the department's current maximum would refuse an add at a figure nothing
+        # on screen names; a rota planned for four is full at four however the department has
+        # been reconfigured since. A row predating the band has no ceiling to enforce.
+        if schedule.max_workers is not None and len(schedule.schedule_assignments) >= schedule.max_workers:
+            raise ConflictError(
+                f"This rota is already at its maximum of {schedule.max_workers}. "
+                f"Take somebody off before adding another."
+            )
+
+        worker, subteam_id = self._eligible_worker(schedule, worker_id)
+        role = self._resolve_worker_roles([worker_id], schedule.department_id).get(worker_id)
+
+        try:
+            assignment = self.schedule_repo.create_assignment(
+                {
+                    q.AssignmentColumns.SCHEDULE_ID: str(schedule_id),
+                    q.AssignmentColumns.WORKER_ID: str(worker_id),
+                    q.AssignmentColumns.SUBTEAM_ID: str(subteam_id) if subteam_id else None,
+                    q.AssignmentColumns.DEPARTMENT_ROLE_ID: str(role.id) if role else None,
+                }
+            )
+        except APIError as error:
+            # unique (schedule_id, worker_id). The pre-check above catches this in every
+            # ordinary case; this is the backstop for two heads editing the same rota at once.
+            if error.code == UNIQUE_VIOLATION:
+                raise ConflictError("That worker is already on this rota.") from error
+            raise
+
+        warnings = self._clash_warnings(worker, schedule)
+        warnings += self._announce_assignment(assignment.id, worker, schedule)
+        log.info("assignment_added", assignment_id=str(assignment.id), warnings=len(warnings))
+        return ScheduleEditResult(schedule=self._require_schedule(schedule_id), warnings=warnings)
+
+    def replace_assignment_worker(self, assignment_id: UUID, worker_id: UUID) -> ScheduleEditResult:
+        """Swap one worker out of a duty and another in.
+
+        Both people are texted: the one coming off is told they are no longer scheduled, the
+        one going on gets the ordinary "you have been scheduled" notice. A swap is the one edit
+        where saying nothing leaves two people with the wrong idea.
+
+        Args:
+            assignment_id: The duty to hand over.
+            worker_id: The worker taking it on.
+
+        Returns:
+            ScheduleEditResult: The re-read schedule, and anything the head should know.
+
+        Raises:
+            NotFoundError: If the assignment, its schedule, or the incoming worker is missing.
+            BadRequestError: If the incoming worker is not an active member of the scope.
+            ConflictError: If they are already on this rota.
+        """
+        log = self.logger.bind(
+            method="replace_assignment_worker", assignment_id=str(assignment_id), worker_id=str(worker_id)
+        )
+        assignment = self.schedule_repo.get_assignment_with_schedule(assignment_id)
+        if not assignment:
+            log.warning("assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+
+        outgoing = assignment.workers
+        if worker_id == assignment.worker_id:
+            raise ConflictError("That worker already holds this duty.")
+
+        schedule = self._require_schedule(assignment.schedule_id)
+        if any(a.worker_id == worker_id for a in schedule.schedule_assignments):
+            raise ConflictError("That worker is already on this rota.")
+
+        incoming, subteam_id = self._eligible_worker(schedule, worker_id)
+        role = self._resolve_worker_roles([worker_id], schedule.department_id).get(worker_id)
+
+        try:
+            self.schedule_repo.reassign_assignment(assignment_id, worker_id, subteam_id, role.id if role else None)
+        except APIError as error:
+            if error.code == UNIQUE_VIOLATION:
+                raise ConflictError("That worker is already on this rota.") from error
+            raise
+
+        warnings = self._clash_warnings(incoming, schedule)
+        warnings += self._announce_assignment(assignment_id, incoming, schedule)
+        if outgoing:
+            warnings += self._announce_cancellation(outgoing, schedule)
+        log.info("assignment_worker_replaced", warnings=len(warnings))
+        return ScheduleEditResult(schedule=self._require_schedule(schedule.id), warnings=warnings)
+
+    def remove_assignment(self, assignment_id: UUID) -> ScheduleEditResult:
+        """Take a worker off a rota and tell them.
+
+        **Never refuses.** Dropping below the minimum is a warning, not an error: a head
+        recording that somebody has pulled out must be able to, and a rota that still lists
+        them is worse than a short one that is true.
+
+        Args:
+            assignment_id: The duty to remove.
+
+        Returns:
+            ScheduleEditResult: The re-read schedule, and anything the head should know.
+
+        Raises:
+            NotFoundError: If the assignment or its schedule does not exist.
+        """
+        log = self.logger.bind(method="remove_assignment", assignment_id=str(assignment_id))
+        assignment = self.schedule_repo.get_assignment_with_schedule(assignment_id)
+        if not assignment:
+            log.warning("assignment_not_found")
+            raise NotFoundError(f"Assignment {assignment_id} not found")
+
+        schedule = self._require_schedule(assignment.schedule_id)
+        worker = assignment.workers
+
+        self.schedule_repo.delete_assignment(assignment_id)
+
+        warnings: list[str] = []
+        remaining = len([a for a in schedule.schedule_assignments if a.id != assignment_id])
+        if schedule.min_workers is not None and remaining < schedule.min_workers:
+            short = schedule.min_workers - remaining
+            warnings.append(f"This rota is now {short} short of the {schedule.min_workers} it was planned for.")
+        if worker:
+            warnings += self._announce_cancellation(worker, schedule)
+        log.info("assignment_removed", remaining=remaining, warnings=len(warnings))
+        return ScheduleEditResult(schedule=self._require_schedule(schedule.id), warnings=warnings)
+
+    # ----------------------------------------------------------------
+    # Edit helpers
+    # ----------------------------------------------------------------
+
+    def _require_schedule(self, schedule_id: UUID) -> ScheduleResponse:
+        """The schedule with its assignments, or `NotFoundError`.
+
+        Read again after every write: the caller replaces its whole copy of the schedule, and
+        a PostgREST write returns base-table columns with none of the embeds it renders.
+        """
+        schedule = self.schedule_repo.get_with_assignments(schedule_id)
+        if not schedule:
+            raise NotFoundError(f"Schedule {schedule_id} not found")
+        return schedule
+
+    def _eligible_worker(self, schedule: ScheduleResponse, worker_id: UUID) -> tuple[Worker, UUID | None]:
+        """Check a worker may serve on this rota, and say which subteam they would fill.
+
+        Eligibility is resolved through `_resolve_scope_groups` rather than a fresh membership
+        query, so "who may be on this rota" has exactly one definition and an edit can never
+        admit somebody generation would have excluded.
+
+        Args:
+            schedule: The rota being edited.
+            worker_id: The worker being added or swapped in.
+
+        Returns:
+            tuple[Worker, UUID | None]: The worker, and the subteam to stamp on their row.
+
+        Raises:
+            NotFoundError: If no worker has that id.
+            BadRequestError: If they are not an active member of the schedule's scope.
+        """
+        worker_record = self.worker_repo.get_by_id(worker_id)
+        if not worker_record:
+            raise NotFoundError(f"Worker {worker_id} not found")
+
+        scope = _scope_of(schedule)
+        groups = self._resolve_scope_groups(schedule.department_id, scope, schedule.subteam_id)
+        for group in groups:
+            for candidate in group.workers:
+                if candidate.id == worker_id:
+                    return candidate, group.subteam.id if group.subteam else None
+
+        name = f"{worker_record.first_name} {worker_record.last_name}".strip()
+        raise BadRequestError(f"{name} is not an active member of this {_scope_description(scope)}.")
+
+    def _clash_warnings(self, worker: Worker, schedule: ScheduleResponse) -> list[str]:
+        """Everything true of this worker on this date that a head would want to know.
+
+        Reported, never enforced. A head moving somebody onto a date they marked off is
+        usually doing it having already spoken to them, and the app is not in a position to
+        overrule that conversation.
+        """
+        name = f"{worker.first_name} {worker.last_name}".strip()
+        when = schedule.scheduled_date.strftime("%-d %B")
+        warnings: list[str] = []
+
+        blocked = self._build_unavailability_map(
+            [worker.id], [schedule.scheduled_date], schedule.scheduled_date, schedule.scheduled_date
+        )
+        if worker.id in blocked.get(schedule.scheduled_date, set()):
+            # Leave and "cannot serve" are unioned upstream, so this cannot tell them apart.
+            warnings.append(f"{name} is marked unavailable or on leave on {when}.")
+
+        # Safe without excluding this schedule: both callers have already established that the
+        # worker is not on it, so any hit on the date is a different rota.
+        if worker.id in self.schedule_repo.get_workers_scheduled_on_date(schedule.scheduled_date):
+            warnings.append(f"{name} is already on another rota on {when}.")
+        return warnings
+
+    def _announce_assignment(self, assignment_id: UUID, worker: Worker, schedule: ScheduleResponse) -> list[str]:
+        """Text a newly added worker straight away, and mark the notice as sent.
+
+        The sweep would find this row on its own — `notice_sent_at` is NULL on a fresh or
+        reassigned assignment — but only within `notice_interval_minutes`, and the head is
+        standing in front of both people now. On a send failure the marker is deliberately
+        left NULL so the sweep retries; that is why this raises nothing and warns about
+        nothing except the one case retrying cannot fix.
+        """
+        name = f"{worker.first_name} {worker.last_name}".strip()
+        if not worker.phone:
+            return [f"{name} has no phone number, so they have not been told."]
+
+        sent = self.sms_service.send_assignment_notice(
+            to=worker.phone,
+            worker_name=name,
+            duties=[(self._department_name(schedule.department_id), _describe_when(schedule))],
+        )
+        if not sent:
+            self.logger.warning("assignment_notice_failed_will_retry", assignment_id=str(assignment_id))
+            return []
+        self.schedule_repo.mark_notice_sent([assignment_id])
+        return []
+
+    def _announce_cancellation(self, worker: WorkerResponse | Worker, schedule: ScheduleResponse) -> list[str]:
+        """Tell a worker they are off a date.
+
+        **This one has no safety net.** The row is gone, so there is nothing for a sweep to
+        find and retry; a failure here means the worker is never told by the app at all. Hence
+        the warning handed back to the head rather than a log line nobody reads.
+        """
+        name = f"{worker.first_name} {worker.last_name}".strip()
+        if not worker.phone:
+            return [f"{name} has no phone number, so they have not been told."]
+
+        sent = self.sms_service.send_assignment_cancelled(
+            to=worker.phone,
+            worker_name=name,
+            department_name=self._department_name(schedule.department_id),
+            when=_describe_when(schedule),
+        )
+        if not sent:
+            self.logger.error("assignment_cancellation_failed", worker_id=str(worker.id))
+            return [f"Could not text {name}. Let them know another way."]
+        return []
+
+    def _department_name(self, department_id: UUID) -> str:
+        """The department's name for a message, or "" if it cannot be resolved.
+
+        Blank rather than raising: the department is context on the text, not the text itself,
+        and `SMSService` drops the framing when it sees an empty string.
+        """
+        department = self.department_repo.get_by_id(department_id)
+        return department.name if department else ""
 
     def delete_schedule(self, schedule_id: UUID) -> None:
         log = self.logger.bind(method="delete_schedule", schedule_id=str(schedule_id))
