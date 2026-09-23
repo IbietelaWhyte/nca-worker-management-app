@@ -29,6 +29,12 @@ export const setAssignmentRole = (assignmentId, departmentRoleId) =>
         params: departmentRoleId ? { department_role_id: departmentRoleId } : {},
     })
 
+// Who may still be added to a rota, each with the subteam they would land in. Resolved
+// server-side rather than filtered here: a department-only rota excludes everybody who is in
+// a subteam, and working that out in JS would be a second copy of the scope rules.
+export const getAssignableWorkers = scheduleId =>
+    apiClient.get(`/schedules/${scheduleId}/assignable-workers`)
+
 // Editing a generated rota. All three return { schedule, warnings }: the whole re-read
 // schedule, so the caller replaces its copy wholesale and the embeds come for free, plus
 // anything that did not stop the edit but the head should know about.

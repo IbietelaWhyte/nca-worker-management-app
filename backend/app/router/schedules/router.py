@@ -13,6 +13,7 @@ from app.core.dependencies import (
 from app.core.exceptions import AppError, BadRequestError
 from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.schedules.models import (
+    AssignableWorker,
     AssignmentResponse,
     AssignmentWorkerRequest,
     MonthlyScheduleCommitRequest,
@@ -117,6 +118,22 @@ def generate_monthly_schedule(
 # declaration order, so the other way round "assignments" is parsed as a schedule uuid and
 # every removal 422s.
 # ----------------------------------------------------------------
+
+
+@router.get("/{schedule_id}/assignable-workers", response_model=list[AssignableWorker])
+def list_assignable_workers(
+    schedule_id: UUID,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> list[AssignableWorker]:
+    """Who may still be added to this rota, and the subteam each would land in.
+
+    Behind the same gate as the add itself: this is the department's roster minus the people
+    already serving, which is not something a plain worker should be able to enumerate.
+    """
+    worker_service.authorize_create_assignment(token, service.get_schedule(schedule_id).department_id)
+    return service.get_assignable_workers(schedule_id)
 
 
 @router.post(

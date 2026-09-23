@@ -12,8 +12,8 @@ import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell, UserPlus } from 'lucide-react'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
-import { getSubteamsByDepartment, getSubteamWithWorkers } from '@/api/subteams'
-import { getDepartmentWithWorkers } from '@/api/departments'
+import { getSubteamsByDepartment } from '@/api/subteams'
+import { getAssignableWorkers } from '@/api/schedules'
 import { getRolesByDepartment } from '@/api/roles'
 import {
     Dialog,
@@ -44,10 +44,11 @@ export default function ScheduleDetailPage() {
     const [allSubteams, setAllSubteams] = useState([])
     const [subteamsLoading, setSubteamsLoading] = useState(false)
     const [departmentRoles, setDepartmentRoles] = useState([])
-    // Everyone who may be put on this rota. The server decides eligibility for real; this is
-    // the pool the picker offers, narrowed to the subteam when the rota has one so a head is
-    // not shown sixty names of whom four are valid.
-    const [roster, setRoster] = useState([])
+    // Who may still be added, each with the subteam they would land in. Fetched when the
+    // picker opens rather than with the page: it changes with every edit, and nothing else
+    // on screen needs it.
+    const [candidates, setCandidates] = useState([])
+    const [candidatesLoading, setCandidatesLoading] = useState(false)
     // null | { mode: 'add' } | { mode: 'swap', assignment } — one picker for the whole page.
     const [picker, setPicker] = useState(null)
     const [removeTarget, setRemoveTarget] = useState(null)
@@ -87,29 +88,6 @@ export default function ScheduleDetailPage() {
         }
         fetchRoles()
     }, [schedule?.department_id])
-
-    // Fetch the roster the picker draws from
-    useEffect(() => {
-        const fetchRoster = async () => {
-            if (!schedule?.department_id) return
-            try {
-                if (schedule.subteam_id) {
-                    const response = await getSubteamWithWorkers(schedule.subteam_id)
-                    setRoster(
-                        (response.data ?? []).map(row => row.worker).filter(w => w?.is_active)
-                    )
-                } else {
-                    const response = await getDepartmentWithWorkers(schedule.department_id)
-                    setRoster((response.data?.workers ?? []).filter(w => w.is_active))
-                }
-            } catch (err) {
-                console.error('Failed to fetch the roster:', err)
-                setRoster([])
-            }
-        }
-        fetchRoster()
-        // Both are primitives, so an edit replacing the schedule object does not refetch.
-    }, [schedule?.department_id, schedule?.subteam_id])
 
     // Group and filter assignments by subteam
     const groupedAssignments = useMemo(() => {
@@ -159,13 +137,6 @@ export default function ScheduleDetailPage() {
         return result
     }, [schedule, showEmptySubteams, allSubteams])
 
-    // Anyone on the rota is not a candidate for it — which also means a swap cannot offer the
-    // person already holding the duty.
-    const candidates = useMemo(() => {
-        const taken = new Set((schedule?.schedule_assignments ?? []).map(a => a.worker_id))
-        return roster.filter(w => !taken.has(w.id))
-    }, [roster, schedule])
-
     const runEdit = async action => {
         setEditBusy(true)
         setEditError(null)
@@ -194,10 +165,22 @@ export default function ScheduleDetailPage() {
         if (done) setRemoveTarget(null)
     }
 
-    const openPicker = next => {
+    const openPicker = async next => {
         setEditError(null)
         setEditWarnings([])
         setPicker(next)
+        // Always refetched: an add or a removal changes who is still eligible, and a stale
+        // list would offer somebody who is already serving.
+        setCandidatesLoading(true)
+        try {
+            const response = await getAssignableWorkers(id)
+            setCandidates(response.data ?? [])
+        } catch (err) {
+            console.error('Failed to fetch assignable workers:', err)
+            setCandidates([])
+        } finally {
+            setCandidatesLoading(false)
+        }
     }
 
     const handleSendReminders = async schedule => {
@@ -417,6 +400,7 @@ export default function ScheduleDetailPage() {
                         : 'Whoever you pick goes on this date and gets a text straight away.'
                 }
                 candidates={candidates}
+                loading={candidatesLoading}
                 busy={editBusy}
                 error={editError}
                 onPick={handlePick}

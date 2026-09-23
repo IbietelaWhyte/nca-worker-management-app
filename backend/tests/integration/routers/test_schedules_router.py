@@ -4,6 +4,7 @@ from uuid import uuid4
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from app.schemas.schedules.models import (
+    AssignableWorker,
     DatePlan,
     DatePlanStatus,
     MonthlySchedulePreview,
@@ -12,7 +13,7 @@ from app.schemas.schedules.models import (
     SkippedDate,
 )
 from tests.integration.routers.conftest import make_client
-from tests.unit.services.conftest import make_assignment, make_schedule
+from tests.unit.services.conftest import make_assignment, make_schedule, make_subteam, make_worker
 
 
 class TestListSchedulesByDepartment:
@@ -436,6 +437,57 @@ class TestGenerateMonthlySchedule:
 def _edit_result(schedule=None, warnings=None) -> ScheduleEditResult:
     """What every edit endpoint returns: the whole re-read schedule, plus any warnings."""
     return ScheduleEditResult(schedule=schedule or make_schedule(), warnings=warnings or [])
+
+
+class TestListAssignableWorkers:
+    def test_returns_candidates_with_their_subteam(self, mock_schedule_service, mock_worker_service):
+        subteam = make_subteam(name="Seekers")
+        worker = make_worker(first_name="Ada", last_name="Lovelace")
+        mock_schedule_service.get_schedule.return_value = make_schedule()
+        mock_schedule_service.get_assignable_workers.return_value = [AssignableWorker(worker=worker, subteam=subteam)]
+        client = make_client(
+            role=UserRole.HOD, schedule_service=mock_schedule_service, worker_service=mock_worker_service
+        )
+
+        response = client.get(f"/api/v1/schedules/{uuid4()}/assignable-workers")
+        assert response.status_code == 200
+        body = response.json()
+        assert body[0]["worker"]["first_name"] == "Ada"
+        assert body[0]["subteam"]["name"] == "Seekers"
+
+    def test_a_department_only_candidate_has_no_subteam(self, mock_schedule_service, mock_worker_service):
+        mock_schedule_service.get_schedule.return_value = make_schedule()
+        mock_schedule_service.get_assignable_workers.return_value = [
+            AssignableWorker(worker=make_worker(), subteam=None)
+        ]
+        client = make_client(
+            role=UserRole.HOD, schedule_service=mock_schedule_service, worker_service=mock_worker_service
+        )
+
+        response = client.get(f"/api/v1/schedules/{uuid4()}/assignable-workers")
+        assert response.status_code == 200
+        assert response.json()[0]["subteam"] is None
+
+    def test_returns_403_for_worker_role(self, mock_schedule_service, mock_worker_service):
+        # A department's roster minus whoever is serving is not something a plain worker
+        # should be able to enumerate.
+        client = make_client(
+            role=UserRole.WORKER, schedule_service=mock_schedule_service, worker_service=mock_worker_service
+        )
+        response = client.get(f"/api/v1/schedules/{uuid4()}/assignable-workers")
+        assert response.status_code == 403
+        mock_schedule_service.get_assignable_workers.assert_not_called()
+
+    def test_returns_403_when_the_head_does_not_manage_the_department(self, mock_schedule_service, mock_worker_service):
+        mock_schedule_service.get_schedule.return_value = make_schedule()
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, schedule_service=mock_schedule_service, worker_service=mock_worker_service
+        )
+
+        response = client.get(f"/api/v1/schedules/{uuid4()}/assignable-workers")
+        assert response.status_code == 403
+        mock_schedule_service.get_assignable_workers.assert_not_called()
 
 
 class TestAddAssignment:

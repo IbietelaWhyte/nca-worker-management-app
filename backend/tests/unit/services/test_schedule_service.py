@@ -1128,6 +1128,67 @@ def edit(mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_depart
     return EditFixture((mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo))
 
 
+class TestGetAssignableWorkers:
+    """Who the picker offers. Resolved server-side so eligibility keeps one definition."""
+
+    def test_offers_the_roster_minus_whoever_is_already_on(self, service, edit):
+        assignable = service.get_assignable_workers(edit.schedule.id)
+
+        assert [a.worker.id for a in assignable] == [w.id for w in edit.spare]
+
+    def test_a_department_only_rota_excludes_everybody_in_a_subteam(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo
+    ):
+        # The reason this is a server call at all. A DEPARTMENT_ONLY rota staffs from the
+        # workers in no subteam, so listing the whole department would offer names that 400.
+        department = make_department(band=(1, 4))
+        spare = make_worker(first_name="Spare")
+        schedule = make_schedule(department_id=department.id, subteam_id=None, min_workers=1, max_workers=4)
+        schedule.schedule_assignments = [make_assignment(schedule_id=schedule.id, subteam_id=None)]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_department_repo.get_by_id.return_value = department
+        mock_worker_repo.get_department_only_workers.return_value = [spare]
+
+        assignable = service.get_assignable_workers(schedule.id)
+
+        # get_department_only_workers, not the whole department.
+        mock_worker_repo.get_department_only_workers.assert_called_once_with(department.id)
+        assert [a.worker.id for a in assignable] == [spare.id]
+        assert assignable[0].subteam is None
+
+    def test_names_the_subteam_each_candidate_would_land_in(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_subteam_repo
+    ):
+        # The subteam shown is the one that will actually be stamped, because both come from
+        # the same _resolve_scope_groups call.
+        department = make_department(band=(1, 4))
+        seekers = make_subteam(department_id=department.id, name="Seekers")
+        discovery = make_subteam(department_id=department.id, name="Discovery")
+        ada, grace = make_worker(first_name="Ada"), make_worker(first_name="Grace")
+        schedule = make_schedule(department_id=department.id, subteam_id=None, min_workers=1, max_workers=4)
+        schedule.schedule_assignments = [make_assignment(schedule_id=schedule.id, subteam_id=seekers.id)]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_department_repo.get_by_id.return_value = department
+        mock_subteam_repo.get_by_department.return_value = [seekers, discovery]
+        mock_worker_repo.get_workers_by_department_grouped_by_subteam.return_value = {
+            seekers.id: [ada],
+            discovery.id: [grace],
+        }
+
+        assignable = service.get_assignable_workers(schedule.id)
+
+        # Group order: subteams by name, so Discovery before Seekers.
+        assert [(a.worker.first_name, a.subteam.name) for a in assignable] == [
+            ("Grace", "Discovery"),
+            ("Ada", "Seekers"),
+        ]
+
+    def test_raises_for_an_unknown_schedule(self, service, mock_schedule_repo):
+        mock_schedule_repo.get_with_assignments.return_value = None
+        with pytest.raises(NotFoundError, match="Schedule"):
+            service.get_assignable_workers(uuid4())
+
+
 class TestAddAssignment:
     def test_adds_a_worker_and_stamps_their_role(self, service, edit, mock_schedule_repo, mock_department_role_repo):
         role = make_department_role(department_id=edit.department.id)

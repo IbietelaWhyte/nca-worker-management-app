@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
     Dialog,
@@ -31,7 +32,12 @@ import {
  * @param {(open: boolean) => void} props.onOpenChange
  * @param {string} props.title
  * @param {string} props.description - What picking somebody will do, including who gets texted.
- * @param {Array<{id: string, first_name: string, last_name: string, email?: string}>} props.candidates
+ * @param {Array<{worker: {id: string, first_name: string, last_name: string, email?: string},
+ *   subteam: {id: string, name: string}|null}>} props.candidates - As the server resolved them.
+ *   `subteam` is the group this person would actually land in, not a guess: it comes from the
+ *   same call that stamps it. A head picks a person and the rota decides the group, so the
+ *   group has to be on screen at the moment they pick.
+ * @param {boolean} props.loading - True while the candidate list is being fetched.
  * @param {boolean} props.busy - True while a pick is in flight; the list locks rather than closing.
  * @param {string|null} props.error - Why the last pick was refused. Shown here rather than on
  *   the page behind, which the dialog covers.
@@ -43,6 +49,7 @@ export default function WorkerPickerDialog({
     title,
     description,
     candidates = [],
+    loading = false,
     busy = false,
     error = null,
     onPick,
@@ -52,8 +59,12 @@ export default function WorkerPickerDialog({
     const matches = useMemo(() => {
         const needle = query.trim().toLowerCase()
         if (!needle) return candidates
-        return candidates.filter(c =>
-            `${c.first_name} ${c.last_name} ${c.email ?? ''}`.toLowerCase().includes(needle)
+        // Subteam is searchable too: on a whole-department rota "seekers" is the fastest way
+        // to narrow sixty people to the group you are actually short in.
+        return candidates.filter(({ worker, subteam }) =>
+            `${worker.first_name} ${worker.last_name} ${worker.email ?? ''} ${subteam?.name ?? ''}`
+                .toLowerCase()
+                .includes(needle)
         )
     }, [candidates, query])
 
@@ -91,7 +102,11 @@ export default function WorkerPickerDialog({
                     </Alert>
                 )}
 
-                {candidates.length === 0 ? (
+                {loading ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                        Loading the roster...
+                    </p>
+                ) : candidates.length === 0 ? (
                     <Alert>
                         <p className="text-sm">Everybody on this roster is already on the rota.</p>
                     </Alert>
@@ -101,7 +116,7 @@ export default function WorkerPickerDialog({
                     </p>
                 ) : (
                     <ul className="max-h-72 space-y-1 overflow-y-auto">
-                        {matches.map(worker => (
+                        {matches.map(({ worker, subteam }) => (
                             <li key={worker.id}>
                                 <button
                                     type="button"
@@ -113,7 +128,7 @@ export default function WorkerPickerDialog({
                                         {worker.first_name[0]}
                                         {worker.last_name[0]}
                                     </span>
-                                    <span className="min-w-0">
+                                    <span className="min-w-0 flex-1">
                                         <span className="block truncate text-sm font-medium">
                                             {worker.first_name} {worker.last_name}
                                         </span>
@@ -123,6 +138,12 @@ export default function WorkerPickerDialog({
                                             </span>
                                         )}
                                     </span>
+                                    {/* Where they land. Outside the truncating column so a long
+                                        email cannot squeeze it out — this is the fact the head
+                                        is choosing on. */}
+                                    <Badge variant="secondary" className="shrink-0">
+                                        {subteam?.name ?? 'No subteam'}
+                                    </Badge>
                                 </button>
                             </li>
                         ))}

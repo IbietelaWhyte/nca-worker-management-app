@@ -9,7 +9,7 @@ from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import DayOfWeek
 from app.schemas.subteams.models import SubteamResponse
-from app.schemas.workers.models import WorkerResponse
+from app.schemas.workers.models import Worker, WorkerResponse
 
 # Matches schedules.chk_reminder_days. Five is a cap on someone's phone bill, not on the schema:
 # a mistyped ladder against a forty-person department is forty texts per extra entry.
@@ -155,6 +155,21 @@ class AssignmentWorkerRequest(BaseModel):
     """Who to put on a rota — the body of both the add and the swap."""
 
     worker_id: UUID
+
+
+class AssignableWorker(BaseModel):
+    """Somebody who may be added to a rota, and the subteam they would land in.
+
+    The subteam is the one that will actually be stamped on their assignment, resolved by the
+    same `_resolve_scope_groups` call that does the stamping — not a guess the frontend makes
+    from a membership list. A head picks a person and the rota decides the group, so the group
+    has to be on screen at the moment they pick.
+
+    None means the department-only roster: a member of the department who is in no subteam.
+    """
+
+    worker: Worker
+    subteam: SubteamResponse | None = None
 
 
 class ScheduleEditResult(BaseModel):

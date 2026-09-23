@@ -1300,7 +1300,9 @@ export default function DepartmentDetailPage() {
                             Add Member to {selectedSubteam?.name ?? 'Subteam'}
                         </DialogTitle>
                         <p className="text-sm text-muted-foreground mt-2">
-                            Only showing members of {department?.name ?? 'this department'}
+                            Only showing members of {department?.name ?? 'this department'}.
+                            Somebody already in another subteam moves across — a worker belongs to
+                            one subteam per department.
                         </p>
                     </DialogHeader>
                     {(() => {
@@ -1326,23 +1328,35 @@ export default function DepartmentDetailPage() {
                                 {availableSubteamWorkers.map(worker => (
                                     <div
                                         key={worker.id}
-                                        className="flex items-center justify-between p-3 border rounded-md hover:bg-accent transition-colors"
+                                        className="flex items-center justify-between gap-3 p-3 border rounded-md hover:bg-accent transition-colors"
                                     >
-                                        <div>
+                                        <div className="min-w-0">
                                             <p className="text-sm font-medium">
                                                 {worker.first_name} {worker.last_name}
                                             </p>
-                                            <p className="text-xs text-muted-foreground">
+                                            <p className="truncate text-xs text-muted-foreground">
                                                 {worker.email}
                                             </p>
                                         </div>
-                                        <Button
-                                            size="sm"
-                                            disabled={subteamMemberActionLoading === worker.id}
-                                            onClick={() => handleAddSubteamMember(worker.id)}
-                                        >
-                                            Add
-                                        </Button>
+                                        <div className="flex shrink-0 items-center gap-2">
+                                            {/* Gold, because adding them is a move rather than
+                                                an addition and the head should see it coming.
+                                                Not destructive — it is reversible and routine. */}
+                                            {worker.subteam ? (
+                                                <Badge variant="warning">
+                                                    In {worker.subteam.name}
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="secondary">No subteam</Badge>
+                                            )}
+                                            <Button
+                                                size="sm"
+                                                disabled={subteamMemberActionLoading === worker.id}
+                                                onClick={() => handleAddSubteamMember(worker.id)}
+                                            >
+                                                {worker.subteam ? 'Move' : 'Add'}
+                                            </Button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>

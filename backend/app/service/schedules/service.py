@@ -19,6 +19,7 @@ from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.schedules.models import (
+    AssignableWorker,
     AssignmentResponse,
     DatePlan,
     DatePlanStatus,
@@ -463,6 +464,39 @@ class ScheduleService:
     # leaves the rota saying something untrue — the same line `worker_leave` already takes,
     # where clashes are reported rather than enforced.
     # ----------------------------------------------------------------
+
+    def get_assignable_workers(self, schedule_id: UUID) -> list[AssignableWorker]:
+        """Everyone who may still be added to this rota, each with the subteam they would fill.
+
+        Resolved through `_resolve_scope_groups` — the same call `_eligible_worker` checks
+        against and generation staffs from — so the picker offers exactly the people an add
+        would accept. Working it out on the frontend instead would mean a second copy of
+        `_scope_of` and the department-only rule in JavaScript, which would drift: a
+        DEPARTMENT_ONLY rota excludes everybody who is in a subteam, and a list that shows
+        them anyway is a list of names that 400.
+
+        Anyone already on the rota is left out, so the result doubles as the swap candidates:
+        you cannot swap somebody for a person already serving that date.
+
+        Args:
+            schedule_id: The rota being edited.
+
+        Returns:
+            list[AssignableWorker]: Candidates in group order — subteams by name, then the
+                                    department-only roster.
+
+        Raises:
+            NotFoundError: If the schedule or its department does not exist.
+        """
+        schedule = self._require_schedule(schedule_id)
+        taken = {a.worker_id for a in schedule.schedule_assignments}
+        groups = self._resolve_scope_groups(schedule.department_id, _scope_of(schedule), schedule.subteam_id)
+        return [
+            AssignableWorker(worker=worker, subteam=group.subteam)
+            for group in groups
+            for worker in group.workers
+            if worker.id not in taken
+        ]
 
     def add_assignment(self, schedule_id: UUID, worker_id: UUID) -> ScheduleEditResult:
         """Put another worker on a generated rota.
