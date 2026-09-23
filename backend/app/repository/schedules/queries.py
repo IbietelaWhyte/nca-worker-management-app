@@ -46,6 +46,8 @@ class Columns:
     REMINDER_DAYS_BEFORE = "reminder_days_before"
     MIN_WORKERS = "min_workers"
     MAX_WORKERS = "max_workers"
+    SPECIAL_SERVICE_ID = "special_service_id"
+    SPECIAL_SERVICE_NAME = "special_service_name"
     CREATED_BY = "created_by"
     CREATED_AT = "created_at"
 

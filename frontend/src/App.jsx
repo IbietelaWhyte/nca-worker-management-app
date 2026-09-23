@@ -15,6 +15,7 @@ const DepartmentDetailPage = lazy(() => import('@/pages/DepartmentDetailPage'))
 const SchedulesPage = lazy(() => import('@/pages/SchedulesPage'))
 const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
+const SpecialServicesPage = lazy(() => import('@/pages/SpecialServicesPage'))
 const AccountPage = lazy(() => import('@/pages/AccountPage'))
 const HelpPage = lazy(() => import('@/pages/HelpPage'))
 const AvailabilityLinkPage = lazy(() => import('@/pages/AvailabilityLinkPage'))
@@ -112,6 +113,17 @@ function App() {
                         element={
                             <ProtectedLayout>
                                 <ScheduleDetailPage />
+                            </ProtectedLayout>
+                        }
+                    />
+                    {/* ProtectedRoute has no role prop, so the page renders its own
+                        "administrators only" panel rather than bouncing a head who
+                        follows a link here. */}
+                    <Route
+                        path="/special-services"
+                        element={
+                            <ProtectedLayout>
+                                <SpecialServicesPage />
                             </ProtectedLayout>
                         }
                     />

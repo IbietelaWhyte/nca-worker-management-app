@@ -23,6 +23,7 @@ from app.router import (
     departments,
     feedback,
     schedules,
+    special_services,
     subteams,
     worker_leave,
     workers,
@@ -125,6 +126,7 @@ app.include_router(account.router, prefix="/api/v1")
 app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(worker_leave.router, prefix="/api/v1")
+app.include_router(special_services.router, prefix="/api/v1")
 
 
 @app.exception_handler(AppError)

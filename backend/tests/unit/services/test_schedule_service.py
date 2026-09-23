@@ -36,6 +36,7 @@ def service(
     mock_department_role_repo,
     mock_leave_repo,
     mock_sms_service,
+    mock_special_service_service,
 ):
     # Default: workers have no standing role unless a test overrides this.
     mock_department_role_repo.get_role_for_worker_in_department.return_value = None
@@ -48,6 +49,7 @@ def service(
         department_role_repo=mock_department_role_repo,
         leave_repo=mock_leave_repo,
         sms_service=mock_sms_service,
+        special_service_service=mock_special_service_service,
     )
 
 
@@ -1494,3 +1496,109 @@ class TestScopeOfAGeneratedSchedule:
 
         mock_worker_repo.get_workers_by_department_grouped_by_subteam.assert_called_once()
         assert mock_schedule_repo.create_assignment.call_args.args[0]["subteam_id"] == str(subteam.id)
+
+
+class TestSpecialServiceStamping:
+    """A rota records what it served, and records it from the rules rather than the client."""
+
+    def test_a_single_date_is_stamped_with_the_special_name(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_special_service_service
+    ):
+        mock_special_service_service.get_special_dates.return_value = {date(2026, 3, 15): "Jesus is Lord Service"}
+        mock_department_repo.get_by_id.return_value = make_department(band=1)
+        mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = make_schedule()
+
+        service.generate_schedule(make_generate_request(scheduled_date=date(2026, 3, 15)), created_by="a@b.com")
+
+        assert mock_schedule_repo.create.call_args.args[0]["special_service_name"] == "Jesus is Lord Service"
+
+    def test_an_ordinary_date_is_stamped_with_nothing(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo
+    ):
+        mock_department_repo.get_by_id.return_value = make_department(band=1)
+        mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = make_schedule()
+
+        service.generate_schedule(make_generate_request(), created_by="a@b.com")
+
+        assert mock_schedule_repo.create.call_args.args[0]["special_service_name"] is None
+
+    def test_the_preview_badges_the_special_dates(
+        self, service, mock_worker_repo, mock_department_repo, mock_special_service_service
+    ):
+        mock_special_service_service.get_special_dates.return_value = {date(2026, 3, 1): "Communion"}
+        mock_department_repo.get_by_id.return_value = make_department(band=1)
+        mock_worker_repo.get_department_only_workers.return_value = [make_worker()]
+
+        preview = service.preview_monthly_schedule(make_month_preview_request())
+
+        first = next(d for d in preview.dates if d.scheduled_date == date(2026, 3, 1))
+        assert first.is_special is True
+        assert first.special_service_name == "Communion"
+        assert all(not d.is_special for d in preview.dates if d.scheduled_date != date(2026, 3, 1))
+
+    def test_the_commit_re_resolves_rather_than_trusting_the_client(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_special_service_service
+    ):
+        # DateSelection carries no special field on purpose. Nothing the browser sends can
+        # mislabel a date, or hide that it was special and so quietly skip the tally.
+        mock_special_service_service.get_special_dates.return_value = {date(2026, 3, 1): "Communion"}
+        worker = make_worker()
+        mock_department_repo.get_by_id.return_value = make_department(band=1)
+        mock_worker_repo.get_department_only_workers.return_value = [worker]
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_schedule_repo.get_by_department.return_value = []
+        mock_schedule_repo.bulk_create_schedules.return_value = [
+            make_schedule(scheduled_date=date(2026, 3, 1)),
+            make_schedule(scheduled_date=date(2026, 3, 8)),
+        ]
+        # The commit re-reads each created schedule to return it with its assignments.
+        mock_schedule_repo.get_with_assignments.side_effect = lambda sid: make_schedule(id=sid)
+
+        service.commit_monthly_schedule(
+            make_month_commit_request(
+                dates=[
+                    DateSelection(scheduled_date=date(2026, 3, 1), worker_ids=[worker.id]),
+                    DateSelection(scheduled_date=date(2026, 3, 8), worker_ids=[worker.id]),
+                ]
+            ),
+            created_by="a@b.com",
+        )
+
+        rows = mock_schedule_repo.bulk_create_schedules.call_args.args[0]
+        stamped = {row["scheduled_date"]: row["special_service_name"] for row in rows}
+        assert stamped == {"2026-03-01": "Communion", "2026-03-08": None}
+
+    def test_the_tally_is_read_off_the_snapshot_not_a_join(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_special_service_service
+    ):
+        # `special_service_name is not None` is the whole test, and it costs no extra query:
+        # the history fetch already embeds the schedule.
+        ada, grace = make_worker(first_name="Ada"), make_worker(first_name="Grace")
+        special_date = date(2026, 3, 1)
+        mock_special_service_service.get_special_dates.return_value = {special_date: "Communion"}
+        mock_department_repo.get_by_id.return_value = make_department(band=1)
+        mock_worker_repo.get_department_only_workers.return_value = [ada, grace]
+        # Grace has already served two special dates; Ada none. Ada should lead.
+        mock_schedule_repo.get_assignment_history_for_workers.return_value = [
+            make_assignment(
+                worker_id=grace.id,
+                schedules=make_schedule(scheduled_date=date(2026, 1, 4), special_service_name="Communion"),
+            ),
+            make_assignment(
+                worker_id=grace.id,
+                schedules=make_schedule(scheduled_date=date(2026, 2, 1), special_service_name="Communion"),
+            ),
+        ]
+
+        preview = service.preview_monthly_schedule(
+            make_month_preview_request(year=2026, month=3, days_of_week=[DayOfWeek.SUNDAY])
+        )
+
+        first = next(d for d in preview.dates if d.scheduled_date == special_date)
+        assert [a.worker.id for a in plan_assignments(first)] == [ada.id]

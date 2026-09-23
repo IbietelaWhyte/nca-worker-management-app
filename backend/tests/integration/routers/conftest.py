@@ -15,6 +15,7 @@ from app.core.dependencies import (
     get_feedback_service,
     get_reminder_service,
     get_schedule_service,
+    get_special_service_service,
     get_subteam_service,
     get_worker_leave_service,
     get_worker_service,
@@ -30,6 +31,7 @@ from app.service.departments.service import DepartmentService
 from app.service.feedback.service import FeedbackService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
+from app.service.special_services.service import SpecialServiceService
 from app.service.subteams.service import SubteamService
 from app.service.worker_leave.service import WorkerLeaveService
 from app.service.workers.service import WorkerService
@@ -52,6 +54,11 @@ def mock_department_service():
 @pytest.fixture
 def mock_schedule_service():
     return MagicMock(spec=ScheduleService)
+
+
+@pytest.fixture
+def mock_special_service_service():
+    return MagicMock(spec=SpecialServiceService)
 
 
 @pytest.fixture
@@ -114,6 +121,7 @@ def make_client(
     feedback_service=None,
     confirmation_token_service=None,
     worker_leave_service=None,
+    special_service_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
@@ -141,6 +149,8 @@ def make_client(
         app.dependency_overrides[get_confirmation_token_service] = lambda: confirmation_token_service
     if worker_leave_service:
         app.dependency_overrides[get_worker_leave_service] = lambda: worker_leave_service
+    if special_service_service:
+        app.dependency_overrides[get_special_service_service] = lambda: special_service_service
 
     return TestClient(app)
 

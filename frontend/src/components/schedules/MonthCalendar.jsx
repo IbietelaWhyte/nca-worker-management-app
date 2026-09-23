@@ -57,6 +57,11 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
                         const dateStr = format(day, 'yyyy-MM-dd')
                         const daySchedules = byDate[dateStr] ?? []
                         const inMonth = isSameMonth(day, month)
+                        // Off the schedules themselves rather than a second request: the name
+                        // is snapshotted onto every rota generated for the date.
+                        const specialName = daySchedules.find(
+                            s => s.special_service_name
+                        )?.special_service_name
 
                         return (
                             <div
@@ -70,12 +75,23 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
                                     className={cn(
                                         'text-xs mb-1 flex items-center justify-center w-6 h-6 rounded-full',
                                         !inMonth && 'text-muted-foreground/50',
+                                        // A ring rather than a fill, so it survives the
+                                        // today chip taking the fill on the same day.
+                                        specialName && 'ring-2 ring-warning',
                                         isSameDay(day, today) &&
                                             'bg-primary text-primary-foreground font-semibold'
                                     )}
                                 >
                                     {format(day, 'd')}
                                 </div>
+                                {specialName && (
+                                    <p
+                                        className="mb-1 truncate text-[10px] font-medium text-muted-foreground"
+                                        title={specialName}
+                                    >
+                                        {specialName}
+                                    </p>
+                                )}
 
                                 <div className="space-y-1">
                                     {daySchedules.map(schedule => {

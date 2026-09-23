@@ -44,15 +44,19 @@ const namesFor = assignments => assignments.slice().sort(bySurname).map(workerNa
  *
  * @param {Array} schedules - ScheduleResponse[] for the month, assignments embedded.
  * @param {Array} subteams - The department's subteams, so unstaffed groups still get a row.
- * @returns {Array} [{ date, label, rows: [{ key, label, names, indented, highlighted }] }]
+ * @returns {Array} [{ date, label, specialName, rows: [{ key, label, names, indented, highlighted }] }]
  */
 export function buildRota(schedules, subteams) {
     const assignmentsByDate = new Map()
+    const specialByDate = new Map()
     for (const schedule of schedules ?? []) {
         const forDate = assignmentsByDate.get(schedule.scheduled_date) ?? []
         // A worker with no embedded record can't be named, so it can't be printed.
         forDate.push(...(schedule.schedule_assignments ?? []).filter(a => a.workers))
         assignmentsByDate.set(schedule.scheduled_date, forDate)
+        if (schedule.special_service_name) {
+            specialByDate.set(schedule.scheduled_date, schedule.special_service_name)
+        }
     }
 
     const groups = new Map()
@@ -115,6 +119,13 @@ export function buildRota(schedules, subteams) {
             }
         }
 
-        return { date, label: format(parseISO(date), 'dd-MMM-yy'), rows }
+        return {
+            date,
+            label: format(parseISO(date), 'dd-MMM-yy'),
+            // Read off the schedule's own snapshot, so an exported rota keeps naming the
+            // service after the rule behind it is renamed or deleted.
+            specialName: specialByDate.get(date) ?? null,
+            rows,
+        }
     })
 }

@@ -56,10 +56,21 @@ export default function MonthPreviewTable({ preview, selection, onSwap }) {
                                         'EEE, MMM d'
                                     )}
                                 </p>
-                                <Badge variant={config.variant}>
-                                    <Icon size={12} className="mr-1" />
-                                    {config.label}
-                                </Badge>
+                                <div className="flex shrink-0 items-center gap-2">
+                                    {/* Gold, never red: a date can be both special and
+                                        understaffed, and these say different things. This is
+                                        the highest-value place for it — here is where a head
+                                        decides which dates to keep. */}
+                                    {datePlan.is_special && (
+                                        <Badge variant="warning">
+                                            {datePlan.special_service_name ?? 'Special'}
+                                        </Badge>
+                                    )}
+                                    <Badge variant={config.variant}>
+                                        <Icon size={12} className="mr-1" />
+                                        {config.label}
+                                    </Badge>
+                                </div>
                             </div>
 
                             {datePlan.message && (

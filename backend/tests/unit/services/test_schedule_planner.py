@@ -3,7 +3,8 @@
 `plan_month` does no I/O, so these need no mocks — every input is constructed directly.
 """
 
-from datetime import date
+from collections import Counter
+from datetime import date, timedelta
 
 from app.schemas.schedules.models import DatePlanStatus
 from app.service.schedules.planner import GroupContext, PlanContext, plan_month
@@ -430,3 +431,113 @@ class TestStaffingBand:
             for worker_id in selected(plan):
                 counts[worker_id] += 1
         assert set(counts.values()) == {2}
+
+
+class TestSpecialServices:
+    """A special date rotates on its own tally, so the big services hand round."""
+
+    def test_a_special_date_orders_by_the_special_tally(self):
+        # The single clearest statement of the feature. Ada has served three ordinary
+        # turns and no special ones; Grace has served none this month but two specials.
+        # On an ordinary date Grace leads (fewer turns this month). On a special date Ada
+        # leads, because the tally that matters is the one the date rotates on.
+        ada, grace = make_workers(2)
+        ordinary_date, special_date = date(2026, 3, 1), date(2026, 3, 8)
+        counts = {
+            "month_count": {ada.id: 3, grace.id: 0},
+            "special_count": {ada.id: 0, grace.id: 2},
+        }
+
+        ordinary = plan_month([ordinary_date], one_group([ada, grace], 1, **counts))[0]
+        assert selected(ordinary) == [grace.id]
+
+        special = plan_month([special_date], one_group([ada, grace], 1, special_dates={special_date}, **counts))[0]
+        assert selected(special) == [ada.id]
+
+    def test_the_ordinary_count_still_breaks_a_tie_on_a_special_date(self):
+        # The other tally is the tie-break rather than being discarded: between two people
+        # who have each served two specials, the one with fewer ordinary turns goes on.
+        # Without this a special date would ignore the month's balance entirely.
+        busy, quiet = make_workers(2)
+        special_date = date(2026, 3, 1)
+        ctx = one_group(
+            [busy, quiet],
+            1,
+            special_dates={special_date},
+            month_count={busy.id: 3, quiet.id: 0},
+            special_count={busy.id: 2, quiet.id: 2},
+        )
+
+        assert selected(plan_month([special_date], ctx)[0]) == [quiet.id]
+
+    def test_a_special_pick_increments_both_tallies(self):
+        # A big service is still a turn. If it only cost a special count, whoever drew the
+        # special date would get a free extra Sunday on top of their month's share.
+        workers = make_workers(2)
+        special_date, next_date = date(2026, 3, 1), date(2026, 3, 8)
+        ctx = one_group(workers, 1, special_dates={special_date})
+
+        plans = plan_month([special_date, next_date], ctx)
+
+        # The worker who took the special date does not also take the ordinary one.
+        assert selected(plans[0]) != selected(plans[1])
+
+    def test_twelve_first_sundays_spread_evenly_over_three_workers(self):
+        # A year of communion Sundays. Without a separate tally the same name leads every
+        # time, because to an ordinary sort one Sunday looks exactly like the next.
+        workers = make_workers(3)
+        first_sundays = [
+            date(2026, month, 1) + timedelta(days=(6 - date(2026, month, 1).weekday()) % 7) for month in range(1, 13)
+        ]
+        ctx = one_group(workers, 1, special_dates=set(first_sundays))
+
+        plans = plan_month(first_sundays, ctx)
+
+        served = [wid for plan in plans for wid in selected(plan)]
+        assert len(served) == 12
+        assert sorted(Counter(served).values()) == [4, 4, 4]
+
+    def test_an_ordinary_month_is_unchanged_by_the_feature(self):
+        # No special dates configured means the planner behaves exactly as it did before,
+        # which is what lets all thirty-two existing tests stand unmodified.
+        workers = make_workers(8)
+
+        assert plan_month(SUNDAYS, one_group(workers, 2)) == plan_month(
+            SUNDAYS, one_group(workers, 2, special_dates=set(), special_count={})
+        )
+
+    def test_the_date_carries_its_own_specialness_out(self):
+        # The preview badges it and the commit stamps the schedule from this, rather than
+        # re-resolving the rules and risking a different answer.
+        workers = make_workers(4)
+        ctx = one_group(workers, 1, special_dates={SUNDAYS[1]})
+
+        plans = plan_month(SUNDAYS, ctx)
+
+        assert [p.is_special for p in plans] == [False, True, False, False]
+
+    def test_eligibility_is_untouched(self):
+        # A special date is staffed from exactly the same roster. Somebody unavailable is
+        # still unavailable; the tally changes the order, never who is in the running.
+        ada, grace = make_workers(2)
+        special_date = date(2026, 3, 1)
+        ctx = one_group(
+            [ada, grace],
+            1,
+            special_dates={special_date},
+            unavailable={special_date: {ada.id}},
+            special_count={ada.id: 0, grace.id: 5},
+        )
+
+        # Ada leads the special tally by a mile and is still not picked.
+        assert selected(plan_month([special_date], ctx)[0]) == [grace.id]
+
+    def test_a_skipped_existing_date_still_reports_being_special(self):
+        # The preview lists it with a badge even though nothing was planned for it.
+        workers = make_workers(2)
+        ctx = one_group(workers, 1, special_dates={SUNDAYS[0]}, existing_dates={SUNDAYS[0]})
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        assert plan.status == DatePlanStatus.SKIPPED_EXISTING
+        assert plan.is_special is True

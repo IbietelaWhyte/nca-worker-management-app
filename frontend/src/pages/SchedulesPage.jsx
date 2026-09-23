@@ -277,7 +277,16 @@ export default function SchedulesPage() {
                                                                 }
                                                             >
                                                                 <TableCell className="font-medium">
-                                                                    {schedule.title}
+                                                                    <span className="flex flex-wrap items-center gap-2">
+                                                                        {schedule.title}
+                                                                        {schedule.special_service_name && (
+                                                                            <Badge variant="warning">
+                                                                                {
+                                                                                    schedule.special_service_name
+                                                                                }
+                                                                            </Badge>
+                                                                        )}
+                                                                    </span>
                                                                 </TableCell>
                                                                 <TableCell>
                                                                     {format(
@@ -380,6 +389,16 @@ export default function SchedulesPage() {
                                                                 <p className="truncate font-medium">
                                                                     {schedule.title}
                                                                 </p>
+                                                                {schedule.special_service_name && (
+                                                                    <Badge
+                                                                        variant="warning"
+                                                                        className="mt-1"
+                                                                    >
+                                                                        {
+                                                                            schedule.special_service_name
+                                                                        }
+                                                                    </Badge>
+                                                                )}
                                                                 <p className="text-sm text-muted-foreground">
                                                                     {format(
                                                                         new Date(

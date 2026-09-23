@@ -16,6 +16,11 @@ Two things shape the design:
 - **A group has a range, not a quota.** `max_workers` is how many to take when the
   people are there; `min_workers` is the only figure that judges the outcome. A group
   that fields three against a band of 2-4 is planned, not short.
+- **A special date rotates on its own tally.** Some Sundays are bigger than others, and
+  to an ordinary least-served-first sort one Sunday looks exactly like the next — so the
+  same few names land on every big service. `special_count` is a second counter, and on
+  a special date it leads the ordering while the ordinary count becomes the tie-break.
+  Eligibility is untouched: a special date is staffed from exactly the same roster.
 """
 
 from dataclasses import dataclass, field
@@ -60,6 +65,10 @@ class PlanContext:
         unavailable: Date -> workers who declared themselves unavailable then.
         already_scheduled: Date -> workers already booked anywhere in the org that day.
         existing_dates: Dates that already carry a schedule for this department/scope.
+        special_dates: Dates the church treats as bigger than an ordinary service.
+        special_count: Worker -> special services already served, **all time**, not
+            windowed to the planned month. A special date happens perhaps fifteen times
+            a year, so a within-month count would be 0 for everybody and order nothing.
     """
 
     groups: list[GroupContext]
@@ -68,6 +77,8 @@ class PlanContext:
     unavailable: dict[date, set[UUID]] = field(default_factory=dict)
     already_scheduled: dict[date, set[UUID]] = field(default_factory=dict)
     existing_dates: set[date] = field(default_factory=set)
+    special_dates: set[date] = field(default_factory=set)
+    special_count: dict[UUID, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,6 +102,9 @@ class DatePlanResult:
     status: DatePlanStatus
     groups: list[GroupPlanResult] = field(default_factory=list)
     message: str | None = None
+    # Whether this date rotated on the special tally. Carried out so the preview can badge
+    # it and the commit can stamp the schedule without re-resolving the rules.
+    is_special: bool = False
 
 
 def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
@@ -110,18 +124,22 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
     """
     # Work on copies so callers can re-plan from the same context (e.g. preview twice).
     month_count = dict(ctx.month_count)
+    special_count = dict(ctx.special_count)
     last_assigned = dict(ctx.last_assigned)
     already_scheduled = {d: set(ids) for d, ids in ctx.already_scheduled.items()}
 
     results: list[DatePlanResult] = []
 
     for scheduled_date in sorted(dates):
+        is_special = scheduled_date in ctx.special_dates
+
         if scheduled_date in ctx.existing_dates:
             results.append(
                 DatePlanResult(
                     scheduled_date=scheduled_date,
                     status=DatePlanStatus.SKIPPED_EXISTING,
                     message="A schedule already exists for this date.",
+                    is_special=is_special,
                 )
             )
             continue
@@ -130,10 +148,13 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
         booked = already_scheduled.setdefault(scheduled_date, set())
 
         group_results = [
-            _plan_group(group, scheduled_date, unavailable, booked, month_count, last_assigned) for group in ctx.groups
+            _plan_group(
+                group, scheduled_date, is_special, unavailable, booked, month_count, special_count, last_assigned
+            )
+            for group in ctx.groups
         ]
 
-        results.append(_aggregate(scheduled_date, group_results))
+        results.append(_aggregate(scheduled_date, group_results, is_special))
 
     return results
 
@@ -141,9 +162,11 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
 def _plan_group(
     group: GroupContext,
     scheduled_date: date,
+    is_special: bool,
     unavailable: set[UUID],
     booked: set[UUID],
     month_count: dict[UUID, int],
+    special_count: dict[UUID, int],
     last_assigned: dict[UUID, date],
 ) -> GroupPlanResult:
     """Staff one group on one date, mutating the running fairness and booking state."""
@@ -158,7 +181,7 @@ def _plan_group(
             message=_no_workers_message(group.workers, unavailable, booked),
         )
 
-    free.sort(key=lambda w: _fairness_key(w, month_count, last_assigned))
+    free.sort(key=lambda w: _fairness_key(w, is_special, month_count, special_count, last_assigned))
 
     # Fill to the ceiling when the people are there. The floor never limits the take —
     # it only judges the result afterwards.
@@ -169,6 +192,10 @@ def _plan_group(
     # see them. This is the entire balancing mechanism.
     for worker in selected:
         month_count[worker.id] = month_count.get(worker.id, 0) + 1
+        if is_special:
+            # Both counters. A big service is still a turn, so it has to cost an ordinary
+            # one too — otherwise whoever draws the special date gets a free extra Sunday.
+            special_count[worker.id] = special_count.get(worker.id, 0) + 1
         last_assigned[worker.id] = scheduled_date
         booked.add(worker.id)
 
@@ -207,7 +234,7 @@ def _staffing_message(filled: int, group: GroupContext) -> str | None:
     return None
 
 
-def _aggregate(scheduled_date: date, groups: list[GroupPlanResult]) -> DatePlanResult:
+def _aggregate(scheduled_date: date, groups: list[GroupPlanResult], is_special: bool = False) -> DatePlanResult:
     """Roll group outcomes up into the date's own status.
 
     A date is only PLANNED when every group reached its minimum; it is SKIPPED_NO_WORKERS
@@ -219,6 +246,7 @@ def _aggregate(scheduled_date: date, groups: list[GroupPlanResult]) -> DatePlanR
             status=DatePlanStatus.SKIPPED_NO_WORKERS,
             groups=groups,
             message="No workers available for this date.",
+            is_special=is_special,
         )
 
     short = [g for g in groups if g.status != DatePlanStatus.PLANNED]
@@ -232,25 +260,43 @@ def _aggregate(scheduled_date: date, groups: list[GroupPlanResult]) -> DatePlanR
             status=DatePlanStatus.UNDERSTAFFED,
             groups=groups,
             message=f"{filled} of {needed} slots filled.",
+            is_special=is_special,
         )
 
-    return DatePlanResult(scheduled_date=scheduled_date, status=DatePlanStatus.PLANNED, groups=groups)
+    return DatePlanResult(
+        scheduled_date=scheduled_date, status=DatePlanStatus.PLANNED, groups=groups, is_special=is_special
+    )
 
 
 def _fairness_key(
     worker: Worker,
+    is_special: bool,
     month_count: dict[UUID, int],
+    special_count: dict[UUID, int],
     last_assigned: dict[UUID, date],
-) -> tuple[int, date, str]:
-    """Least-served first.
+) -> tuple[int, int, date, str]:
+    """Least-served first, against whichever tally this date is rotating on.
 
-    Count comes first: it is what guarantees nobody serves twice in the month until
-    everyone has served once. `last_assigned` then breaks ties using history from
-    outside the planned month (`date.min` for a worker never assigned in scope, so they
-    lead), and the worker id makes the ordering deterministic for a stable preview.
+    On an ordinary date the month count leads, which is what guarantees nobody serves
+    twice in the month until everyone has served once. On a special date the all-time
+    special count leads instead, so the big services hand round rather than landing on
+    whoever happens to be least busy that month.
+
+    **The other tally is the tie-break, not discarded.** Between two people who have each
+    served two special services, the one with fewer ordinary turns goes on — otherwise a
+    special date would ignore the month's balance entirely and could give somebody a
+    fourth Sunday while a colleague has had none.
+
+    `last_assigned` then breaks a remaining tie using history from outside the planned
+    month (`date.min` for a worker never assigned in scope, so they lead), and the worker
+    id makes the ordering deterministic for a stable preview.
     """
+    ordinary = month_count.get(worker.id, 0)
+    special = special_count.get(worker.id, 0)
+    primary, secondary = (special, ordinary) if is_special else (ordinary, special)
     return (
-        month_count.get(worker.id, 0),
+        primary,
+        secondary,
         last_assigned.get(worker.id, date.min),
         str(worker.id),
     )
