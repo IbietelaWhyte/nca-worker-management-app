@@ -1,9 +1,30 @@
+import os
+from pathlib import Path
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# APP_ENV chooses the credentials file, and is therefore the one setting that cannot live in
+# one. It comes from the shell — direnv's .envrc holds nothing else — and defaults to
+# development, so a fresh clone runs against the local stack with no setup and production has
+# to be asked for.
+#
+# Anything that is not exactly "production" is development, matching the strict equality
+# is_production uses. CI sets APP_ENV=test and so reads the development file, which is
+# harmless: real environment variables take precedence over a dotenv file, and CI passes all
+# eight required ones. A missing file is not an error either, so nothing breaks where neither
+# exists.
+#
+# Resolved from this module's own path rather than the process CWD. `env_file=".env"` only
+# worked because the backend is always started from backend/; running pytest from the repo
+# root silently read no file at all and fell through to whatever the shell happened to hold.
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+_ENV_NAME = "production" if os.getenv("APP_ENV") == "production" else "development"
+_ENV_FILE = _BACKEND_ROOT / f".env.{_ENV_NAME}"
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
     # Supabase
     supabase_url: str
@@ -17,7 +38,9 @@ class Settings(BaseSettings):
     twilio_from_number: str
 
     # App
-    app_env: str = "development"
+    # Defaulted from the same resolution that picked the file above, so the two cannot drift:
+    # a .env.production that forgets to set APP_ENV still reports production.
+    app_env: str = _ENV_NAME
     secret_key: str
     allowed_origins: list[str] = ["http://localhost:5173", "http://localhost:3000"]
     # Base URL for the links embedded in SMS. The default suits local development only —
