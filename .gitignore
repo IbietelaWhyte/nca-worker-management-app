@@ -9,9 +9,22 @@ wheels/
 # Virtual environments
 .venv
 
-# Environment variable files
+# Environment variable files.
+#
+# APP_ENV picks which .env.<name> the backend reads, and the two halves land on opposite
+# sides of this line on purpose. Local credentials are Supabase's published demo keys —
+# the same on every machine, and worthless off it — so committing them means a fresh
+# clone runs with no setup at all. Everything else is a real secret.
+#
+# These patterns are deny-then-allow, so a new .env.staging is ignored by default: a name
+# nobody thought about here fails closed.
 .env
+.env.*
+!.env.development
+!.env.example
+!.env.*.example
 .envrc
+!.envrc.template
 
 # Node modules
 node_modules/

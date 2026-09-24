@@ -19,7 +19,8 @@ All common workflows go through `just` (run from repo root):
 ```sh
 just install          # backend deps via `uv sync --all-extras`
 just install-frontend # frontend deps via npm install
-just dev              # backend dev server (uvicorn --reload on :8000)
+just db-start         # local Supabase stack (idempotent); db-stop, db-reset, db-env beside it
+just dev              # backend dev server (uvicorn --reload on :8000); starts the local DB first
 just dev-frontend     # frontend dev server (vite on :5173)
 just test             # backend pytest
 just test-cov         # pytest with coverage
@@ -37,7 +38,15 @@ cd backend && uv run pytest tests/unit/services/test_schedule_service.py
 cd backend && uv run pytest tests/unit/services/test_schedule_service.py::test_name
 ```
 
-Backend config comes from env vars (`Settings` in `core/config.py`, `env_file=".env"`). There is no committed `backend/.env`; the repo uses **direnv** — `.envrc` (gitignored) exports everything. If the backend fails at import with a pydantic validation error, the environment isn't loaded.
+**`APP_ENV` picks the credentials file, and is the only setting that cannot live in one.** `Settings` (`core/config.py`) resolves `backend/.env.$APP_ENV` at import, where anything other than `production` means `development` — the same strict equality `is_production` uses. It comes from the shell, so `.envrc` (gitignored) holds that one line and nothing else; unset means development, so production has to be asked for. The path is resolved from the module's own location rather than the CWD: `env_file=".env"` only worked because the backend is always started from `backend/`, and pytest from the repo root silently read no file at all.
+
+**Local credential files are committed, production ones are not.** `backend/.env.development` and `frontend/.env.development` hold Supabase's published demo keys — the same on every machine, worthless off it — so a fresh clone runs `just dev` with no setup and `just test` needs no direnv. `.gitignore` is deny-then-allow (`.env.*` then `!.env.development`), so a future `.env.staging` fails closed. Real environment variables still beat both files, which is how Railway and Vercel configure their deployments and why CI is unaffected.
+
+**The frontend half needs no wiring at all.** `npm run dev` is Vite's `development` mode and `npm run build` is `production`, so `frontend/.env.$mode` is picked without a flag — which is why no justfile recipe sets an environment variable. **Both halves must agree**: the SPA signs in against its own `VITE_SUPABASE_URL` and the backend verifies that token against the same project's JWKS, so a mismatched pair 401s everything.
+
+`supabase/seed.sql` gives a local stack the one thing the migrations cannot: an account to sign in as (`test_user@test.com` / `TestUserPassword123!`, admin). It runs on `db reset` and never on `db push`. A hand-written `auth.users` row has four traps, all documented in `docs/local-development.md` — the sharpest being that `confirmation_token`, `recovery_token`, `email_change` and `email_change_token_new` have no default and GoTrue scans them into plain Go strings, so a NULL fails every sign-in with `Database error querying schema`.
+
+See `docs/local-development.md` for the whole setup.
 
 `FRONTEND_URL` is the one setting a deployment must not forget: it is the base of every link sent by SMS, and its default is `http://localhost:5173`, so leaving it unset ships dead links to real phones with no error anywhere. `Settings._check_frontend_url` refuses to start on a localhost URL when `APP_ENV=production` — which only helps if the deployment sets `APP_ENV` too.
 
