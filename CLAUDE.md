@@ -19,8 +19,11 @@ All common workflows go through `just` (run from repo root):
 ```sh
 just install          # backend deps via `uv sync --all-extras`
 just install-frontend # frontend deps via npm install
-just dev              # backend dev server (uvicorn --reload on :8000)
+just db-start         # local Supabase stack (idempotent); db-stop, db-reset, db-env beside it
+just dev              # backend dev server (uvicorn --reload on :8000); starts the local DB first
 just dev-frontend     # frontend dev server (vite on :5173)
+just dev-local        # backend against the LOCAL database, overriding .envrc
+just dev-frontend-local  # frontend against the local stack — the other half of dev-local
 just test             # backend pytest
 just test-cov         # pytest with coverage
 just lint             # ruff check --fix (backend) + eslint (frontend)
@@ -38,6 +41,10 @@ cd backend && uv run pytest tests/unit/services/test_schedule_service.py::test_n
 ```
 
 Backend config comes from env vars (`Settings` in `core/config.py`, `env_file=".env"`). There is no committed `backend/.env`; the repo uses **direnv** — `.envrc` (gitignored) exports everything. If the backend fails at import with a pydantic validation error, the environment isn't loaded.
+
+**`APP_ENV` does not choose a database.** It feeds `Settings.is_production` and nothing else, and that gates exactly one check — `_check_frontend_url`. Which database the backend talks to is decided entirely by `SUPABASE_URL` and the three keys beside it, so `APP_ENV=development` against a hosted `SUPABASE_URL` is a local process on production data. `just dev-local` exports the four from the running local stack; it is paired with `just dev-frontend-local` because the frontend signs in against its own `VITE_SUPABASE_URL`, and moving only the backend leaves it verifying a token minted by a different Supabase — every request 401s.
+
+Note that a local stack has **no login accounts**. `20260303184000_seed_data.sql` seeds twelve workers and their roles, but no `auth.users` rows and every `auth_user_id` is NULL, so there is nothing to sign in as until one is created.
 
 `FRONTEND_URL` is the one setting a deployment must not forget: it is the base of every link sent by SMS, and its default is `http://localhost:5173`, so leaving it unset ships dead links to real phones with no error anywhere. `Settings._check_frontend_url` refuses to start on a localhost URL when `APP_ENV=production` — which only helps if the deployment sets `APP_ENV` too.
 
