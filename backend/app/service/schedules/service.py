@@ -39,7 +39,7 @@ from app.schemas.schedules.models import (
 )
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker, WorkerResponse
-from app.service.schedules.planner import GroupContext, PlanContext, plan_month
+from app.service.schedules.planner import ORDINARY, GroupContext, PlanContext, plan_month
 from app.service.sms.service import SMSService
 from app.service.special_services.service import SpecialServiceService
 
@@ -175,6 +175,39 @@ def _dates_in_month(year: int, month: int, days_of_week: list[DayOfWeek]) -> lis
         for day in range(1, last_day + 1)
         if ((candidate := date(year, month, day)).weekday() + 1) % 7 in wanted
     ]
+
+
+def _streaks_from(rosters: dict[str, dict[date, set[UUID]]], worker_ids: list[UUID]) -> dict[tuple[UUID, str], int]:
+    """How many of each kind's latest consecutive services each worker served.
+
+    Walks each kind's dates newest first and counts until the worker misses one, which is
+    the state `plan_month` then carries forward. Read off the history already in hand
+    rather than stored: a run is only ever the tail of what the rota already says, and a
+    column would be one more thing for an edited assignment to leave stale.
+
+    Seeding this matters more than it looks. A month is planned in its own call, so without
+    it every month would start believing nobody had served anything recently, and the
+    spacing would reset at each January — exactly where a monthly special's run continues.
+
+    Args:
+        rosters: kind -> date -> the workers who served it.
+        worker_ids: The workers to compute runs for.
+
+    Returns:
+        dict[tuple[UUID, str], int]: (worker, kind) -> run length. Absent means zero.
+    """
+    streaks: dict[tuple[UUID, str], int] = {}
+    for kind, by_date in rosters.items():
+        newest_first = sorted(by_date, reverse=True)
+        for worker_id in worker_ids:
+            run = 0
+            for served_date in newest_first:
+                if worker_id not in by_date[served_date]:
+                    break
+                run += 1
+            if run:
+                streaks[(worker_id, kind)] = run
+    return streaks
 
 
 class ScheduleService:
@@ -1142,7 +1175,11 @@ class ScheduleService:
 
         last_assigned: dict[UUID, date] = {}
         month_count: dict[UUID, int] = {}
-        special_count: dict[UUID, int] = {}
+        total_count: dict[UUID, int] = {}
+        special_count: dict[tuple[UUID, str], int] = {}
+        last_served: dict[tuple[UUID, str], date] = {}
+        # kind -> date -> who served it, which is what the streaks are read back off.
+        rosters: dict[str, dict[date, set[UUID]]] = {}
         for assignment in history:
             schedule = assignment.schedules
             if schedule is None or schedule.scheduled_date is None:
@@ -1151,26 +1188,37 @@ class ScheduleService:
                 continue
             worker_id = assignment.worker_id
             assigned_date = schedule.scheduled_date
+            # The snapshotted name is the whole test for "was this special", and doubles as
+            # the kind the planner balances and spaces within. All of this costs no extra
+            # query — the history fetch above already embeds the schedule.
+            kind = schedule.special_service_name or ORDINARY
             if assigned_date > last_assigned.get(worker_id, date.min):
                 last_assigned[worker_id] = assigned_date
+            if assigned_date > last_served.get((worker_id, kind), date.min):
+                last_served[(worker_id, kind)] = assigned_date
+            total_count[worker_id] = total_count.get(worker_id, 0) + 1
             if month_start <= assigned_date <= month_end:
                 month_count[worker_id] = month_count.get(worker_id, 0) + 1
-            # All-time, deliberately unwindowed: a special date falls perhaps fifteen times a
-            # year, so a within-month count would be 0 for everybody and order nothing. It
-            # costs no extra query — the history fetch above already embeds the schedule, and
-            # the snapshotted name is the whole test.
-            if schedule.special_service_name is not None:
-                special_count[worker_id] = special_count.get(worker_id, 0) + 1
+            # Per named service and deliberately unwindowed: a given special falls perhaps a
+            # dozen times a year, so a within-month count would be 0 for everybody and order
+            # nothing, and one tally shared across every special pays a run of Thanksgivings
+            # off against somebody else's Christmas.
+            if kind != ORDINARY:
+                special_count[(worker_id, kind)] = special_count.get((worker_id, kind), 0) + 1
+            rosters.setdefault(kind, {}).setdefault(assigned_date, set()).add(worker_id)
 
         return PlanContext(
             groups=plan_groups,
             last_assigned=last_assigned,
             month_count=month_count,
+            total_count=total_count,
             unavailable=unavailable,
             already_scheduled=already_scheduled,
             existing_dates=existing_dates,
-            special_dates=set(special_dates or {}),
+            special_dates=dict(special_dates or {}),
             special_count=special_count,
+            last_served=last_served,
+            streak=_streaks_from(rosters, worker_ids),
         )
 
     def _build_unavailability_map(

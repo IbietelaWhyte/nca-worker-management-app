@@ -16,11 +16,24 @@ Two things shape the design:
 - **A group has a range, not a quota.** `max_workers` is how many to take when the
   people are there; `min_workers` is the only figure that judges the outcome. A group
   that fields three against a band of 2-4 is planned, not short.
-- **A special date rotates on its own tally.** Some Sundays are bigger than others, and
-  to an ordinary least-served-first sort one Sunday looks exactly like the next — so the
-  same few names land on every big service. `special_count` is a second counter, and on
-  a special date it leads the ordering while the ordinary count becomes the tie-break.
-  Eligibility is untouched: a special date is staffed from exactly the same roster.
+- **Every date belongs to a *kind*, and fairness is measured within a kind.** The ordinary
+  Sundays are one kind; each named special service is its own. To a single least-served-first
+  sort one Sunday looks exactly like the next, so the same few names land on every big
+  service — and a single tally lumping all specials together is barely better, because it
+  happily pays somebody's six Thanksgivings off against somebody else's three Christmas
+  services and calls that level. A count and a recency are kept per kind instead.
+- **A run of consecutive turns at one kind pushes you behind everyone on a shorter run.**
+  The counts alone say how *many* turns each person gets, never how they are spaced, so a
+  roster can come out perfectly balanced with one person on four Thanksgivings in a row
+  and then nothing for three months. The streak is a sort term and not a filter, so it
+  reorders the queue without ever refusing to staff a date: where there are more slots than
+  fresh people, the shortest runs come back up. Eligibility is untouched.
+
+  It counts *consecutive* turns rather than just flagging the last one, because flagging
+  cannot tell somebody on their second service running from somebody on their fifth. Where
+  a group is small enough that somebody must repeat — four slots filled from seven people
+  means at least one every time — that distinction is the whole difference between the
+  repeat rotating and one person absorbing all of them.
 """
 
 from dataclasses import dataclass, field
@@ -29,6 +42,10 @@ from uuid import UUID
 
 from app.schemas.schedules.models import DatePlanStatus
 from app.schemas.workers.models import Worker
+
+# The kind of an ordinary service. A special date's kind is its name, so the two live in
+# one keyspace and neither the tallies nor the streaks need to branch on which it is.
+ORDINARY = ""
 
 
 @dataclass
@@ -55,30 +72,65 @@ class GroupContext:
 class PlanContext:
     """Everything `plan_month` needs, preloaded.
 
-    `last_assigned` and `month_count` are keyed by worker and shared across groups; a
-    worker belongs to at most one group, so there is no interference.
+    The tallies are keyed by worker and shared across groups; a worker belongs to at most
+    one group, so there is no interference.
 
     Attributes:
         groups: The rosters to staff, each with its own quota.
-        last_assigned: Worker -> most recent scheduled_date in scope, `date.min` if never.
+        last_assigned: Worker -> most recent scheduled_date in scope, of any kind,
+            `date.min` if never.
         month_count: Worker -> assignments already held in scope within the planned month.
+            Deliberately windowed: it is what guarantees nobody serves twice in a month
+            before everybody has served once.
+        total_count: Worker -> assignments held in scope **all time**. The tie-break under
+            both load terms, and the only one that survives a month boundary — without it
+            the remainder of a month that does not divide evenly is forgotten every time
+            `month_count` resets, and the drift compounds into whole services over a year.
         unavailable: Date -> workers who declared themselves unavailable then.
         already_scheduled: Date -> workers already booked anywhere in the org that day.
         existing_dates: Dates that already carry a schedule for this department/scope.
-        special_dates: Dates the church treats as bigger than an ordinary service.
-        special_count: Worker -> special services already served, **all time**, not
-            windowed to the planned month. A special date happens perhaps fifteen times
-            a year, so a within-month count would be 0 for everybody and order nothing.
+        special_dates: Date -> the name of the special service falling on it. The name is
+            the kind, so two rules sharing a date share a tally only if they share a name.
+        special_count: (worker, special service name) -> turns served at **that** service,
+            all time. Not windowed to the month: a given special falls perhaps a dozen
+            times a year, so a within-month count would be 0 for everybody and order
+            nothing — which is exactly what used to happen to the ordinary tie-break on
+            any first-Sunday rule, the commonest shape there is.
+        last_served: (worker, kind) -> most recent date served of that kind, `date.min` if
+            never. The spacing tie-break behind the streak.
+        streak: (worker, kind) -> how many of that kind's most recent consecutive
+            occurrences the worker served, counting back from the latest one and stopping
+            at the first they missed. 0 means they sat the last one out, which is the
+            front of the queue.
     """
 
     groups: list[GroupContext]
     last_assigned: dict[UUID, date] = field(default_factory=dict)
     month_count: dict[UUID, int] = field(default_factory=dict)
+    total_count: dict[UUID, int] = field(default_factory=dict)
     unavailable: dict[date, set[UUID]] = field(default_factory=dict)
     already_scheduled: dict[date, set[UUID]] = field(default_factory=dict)
     existing_dates: set[date] = field(default_factory=set)
-    special_dates: set[date] = field(default_factory=set)
-    special_count: dict[UUID, int] = field(default_factory=dict)
+    special_dates: dict[date, str] = field(default_factory=dict)
+    special_count: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    last_served: dict[tuple[UUID, str], date] = field(default_factory=dict)
+    streak: dict[tuple[UUID, str], int] = field(default_factory=dict)
+
+
+@dataclass
+class _Tallies:
+    """The running fairness state, carried date to date within one `plan_month` call.
+
+    Bundled rather than passed as six parallel dictionaries: every one of them is read by
+    the sort key and written by the pick, so they only ever travel together.
+    """
+
+    month_count: dict[UUID, int]
+    total_count: dict[UUID, int]
+    special_count: dict[tuple[UUID, str], int]
+    last_served: dict[tuple[UUID, str], date]
+    last_assigned: dict[UUID, date]
+    streak: dict[tuple[UUID, str], int]
 
 
 @dataclass
@@ -123,15 +175,21 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
         One result per date, in ascending date order.
     """
     # Work on copies so callers can re-plan from the same context (e.g. preview twice).
-    month_count = dict(ctx.month_count)
-    special_count = dict(ctx.special_count)
-    last_assigned = dict(ctx.last_assigned)
+    tallies = _Tallies(
+        month_count=dict(ctx.month_count),
+        total_count=dict(ctx.total_count),
+        special_count=dict(ctx.special_count),
+        last_served=dict(ctx.last_served),
+        last_assigned=dict(ctx.last_assigned),
+        streak=dict(ctx.streak),
+    )
     already_scheduled = {d: set(ids) for d, ids in ctx.already_scheduled.items()}
 
     results: list[DatePlanResult] = []
 
     for scheduled_date in sorted(dates):
-        is_special = scheduled_date in ctx.special_dates
+        kind = ctx.special_dates.get(scheduled_date, ORDINARY)
+        is_special = kind != ORDINARY
 
         if scheduled_date in ctx.existing_dates:
             results.append(
@@ -147,12 +205,7 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
         unavailable = ctx.unavailable.get(scheduled_date, set())
         booked = already_scheduled.setdefault(scheduled_date, set())
 
-        group_results = [
-            _plan_group(
-                group, scheduled_date, is_special, unavailable, booked, month_count, special_count, last_assigned
-            )
-            for group in ctx.groups
-        ]
+        group_results = [_plan_group(group, scheduled_date, kind, unavailable, booked, tallies) for group in ctx.groups]
 
         results.append(_aggregate(scheduled_date, group_results, is_special))
 
@@ -162,12 +215,10 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
 def _plan_group(
     group: GroupContext,
     scheduled_date: date,
-    is_special: bool,
+    kind: str,
     unavailable: set[UUID],
     booked: set[UUID],
-    month_count: dict[UUID, int],
-    special_count: dict[UUID, int],
-    last_assigned: dict[UUID, date],
+    tallies: _Tallies,
 ) -> GroupPlanResult:
     """Staff one group on one date, mutating the running fairness and booking state."""
     free = [w for w in group.workers if w.id not in unavailable and w.id not in booked]
@@ -181,22 +232,34 @@ def _plan_group(
             message=_no_workers_message(group.workers, unavailable, booked),
         )
 
-    free.sort(key=lambda w: _fairness_key(w, is_special, month_count, special_count, last_assigned))
+    free.sort(key=lambda w: _fairness_key(w, kind, tallies))
 
     # Fill to the ceiling when the people are there. The floor never limits the take —
     # it only judges the result afterwards.
     selected = free[: group.max_workers]
     alternates = free[group.max_workers :]
 
+    # The streak is the one tally that moves for everybody, not just the picked: sitting a
+    # service out is precisely what ends a run, and a worker left out because they were
+    # unavailable has still not served it. Done before the picks below extend theirs.
+    chosen = {w.id for w in selected}
+    for worker in group.workers:
+        if worker.id not in chosen:
+            tallies.streak.pop((worker.id, kind), None)
+
     # Carry this group's picks forward so later dates — and later groups on this date —
     # see them. This is the entire balancing mechanism.
     for worker in selected:
-        month_count[worker.id] = month_count.get(worker.id, 0) + 1
-        if is_special:
-            # Both counters. A big service is still a turn, so it has to cost an ordinary
-            # one too — otherwise whoever draws the special date gets a free extra Sunday.
-            special_count[worker.id] = special_count.get(worker.id, 0) + 1
-        last_assigned[worker.id] = scheduled_date
+        tallies.streak[(worker.id, kind)] = tallies.streak.get((worker.id, kind), 0) + 1
+        tallies.month_count[worker.id] = tallies.month_count.get(worker.id, 0) + 1
+        tallies.total_count[worker.id] = tallies.total_count.get(worker.id, 0) + 1
+        if kind != ORDINARY:
+            # Every counter, not just this service's. A big service is still a turn, so it
+            # has to cost an ordinary one too — otherwise whoever draws the special date
+            # gets a free extra Sunday.
+            tallies.special_count[(worker.id, kind)] = tallies.special_count.get((worker.id, kind), 0) + 1
+        tallies.last_served[(worker.id, kind)] = scheduled_date
+        tallies.last_assigned[worker.id] = scheduled_date
         booked.add(worker.id)
 
     return GroupPlanResult(
@@ -270,34 +333,49 @@ def _aggregate(scheduled_date: date, groups: list[GroupPlanResult], is_special: 
 
 def _fairness_key(
     worker: Worker,
-    is_special: bool,
-    month_count: dict[UUID, int],
-    special_count: dict[UUID, int],
-    last_assigned: dict[UUID, date],
-) -> tuple[int, int, date, str]:
-    """Least-served first, against whichever tally this date is rotating on.
+    kind: str,
+    tallies: _Tallies,
+) -> tuple[int, int, int, date, date, str]:
+    """Shortest run first, then least-served, then longest-waiting — within this kind of date.
 
-    On an ordinary date the month count leads, which is what guarantees nobody serves
-    twice in the month until everyone has served once. On a special date the all-time
-    special count leads instead, so the big services hand round rather than landing on
-    whoever happens to be least busy that month.
+    Six terms, each earning its place:
 
-    **The other tally is the tie-break, not discarded.** Between two people who have each
-    served two special services, the one with fewer ordinary turns goes on — otherwise a
-    special date would ignore the month's balance entirely and could give somebody a
-    fourth Sunday while a colleague has had none.
+    1. **How many of this kind they have served in a row.** Spacing, and the only term that
+       is about *when* rather than *how many*. A balanced rota is not automatically a humane
+       one: counts alone are equally happy with four Thanksgivings in a row followed by
+       three months off. Anyone who sat the last one out leads at 0, and above that a
+       shorter run outranks a longer one, so a monthly special hands round instead of
+       settling on whoever is otherwise quietest — and somebody who served the last one
+       gets to attend the next as a worshipper. It is a sort and not a filter, so where
+       fewer people are fresh than the group needs the rest come straight back up and the
+       date is still staffed.
+    2. **The load for this kind.** On an ordinary date that is the month count, which is
+       what guarantees nobody serves twice in a month before everybody has served once. On
+       a special date it is the all-time count for *that named service*, so Thanksgiving
+       balances against Thanksgiving. A single tally across all specials cannot do this: it
+       reads six Thanksgivings and no Christmas as level with the reverse, and settles for
+       somebody serving one big service every year and another never.
+    3. **Turns overall, all time.** The tie-break under both, and the only term that
+       outlives a month boundary. A month of four Sundays over seven people is sixteen
+       slots and a remainder of two; without this the remainder is forgotten each time the
+       month count resets, and a year of remainders is whole services of difference.
+    4. **Longest since this kind**, so the queue behind the streak is still ordered by who
+       has waited longest for *this* service rather than for any service.
+    5. **Longest since anything**, which spaces across kinds — a special one week should
+       not be followed by an ordinary the next while somebody else has had neither.
+    6. The worker id, so a preview is stable and a re-plan of identical input is identical.
 
-    `last_assigned` then breaks a remaining tie using history from outside the planned
-    month (`date.min` for a worker never assigned in scope, so they lead), and the worker
-    id makes the ordering deterministic for a stable preview.
+    `date.min` stands in for "never", which puts a worker new to the rota at the front.
     """
-    ordinary = month_count.get(worker.id, 0)
-    special = special_count.get(worker.id, 0)
-    primary, secondary = (special, ordinary) if is_special else (ordinary, special)
+    load = (
+        tallies.month_count.get(worker.id, 0) if kind == ORDINARY else tallies.special_count.get((worker.id, kind), 0)
+    )
     return (
-        primary,
-        secondary,
-        last_assigned.get(worker.id, date.min),
+        tallies.streak.get((worker.id, kind), 0),
+        load,
+        tallies.total_count.get(worker.id, 0),
+        tallies.last_served.get((worker.id, kind), date.min),
+        tallies.last_assigned.get(worker.id, date.min),
         str(worker.id),
     )
 
