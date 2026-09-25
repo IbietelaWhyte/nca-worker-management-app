@@ -240,7 +240,14 @@ export default function ScheduleDetailPage() {
                         <ArrowLeft size={16} className="mr-2" /> Back
                     </Button>
                     <div>
-                        <h2 className="text-2xl font-bold">{schedule.title}</h2>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="text-2xl font-bold">{schedule.title}</h2>
+                            {/* The snapshot, not a lookup: it keeps reading correctly after
+                                the rule is renamed or deleted. */}
+                            {schedule.special_service_name && (
+                                <Badge variant="warning">{schedule.special_service_name}</Badge>
+                            )}
+                        </div>
                         <p className="text-muted-foreground text-sm mt-1">
                             {format(new Date(schedule.scheduled_date + 'T00:00:00'), 'PPPP')}
                             {' · '}

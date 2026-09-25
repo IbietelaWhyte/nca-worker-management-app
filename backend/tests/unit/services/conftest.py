@@ -21,6 +21,7 @@ from app.schemas.subteams.models import SubteamResponse, SubteamWithWorkersRespo
 from app.schemas.workers.models import WorkerResponse
 from app.service.authentication.service import AuthenticationService
 from app.service.sms.service import SMSService
+from app.service.special_services.service import SpecialServiceService
 
 # ----------------------------------------------------------------
 # Mock repositories
@@ -90,6 +91,19 @@ def mock_sms_service():
     service.send_assignment_notice.return_value = True
     service.send_assignment_cancelled.return_value = True
     service.send_reminder.return_value = True
+    return service
+
+
+@pytest.fixture
+def mock_special_service_service():
+    """No special dates by default, so every existing test plans an ordinary month.
+
+    The explicit `{}` matters: a bare MagicMock return value is not iterable, and
+    `set(...)` over it raises a TypeError deep inside _build_plan_context rather than
+    anywhere near the test that forgot to configure it.
+    """
+    service = MagicMock(spec=SpecialServiceService)
+    service.get_special_dates.return_value = {}
     return service
 
 

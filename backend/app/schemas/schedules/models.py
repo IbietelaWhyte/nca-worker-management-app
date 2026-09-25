@@ -66,6 +66,12 @@ class Schedule(BaseModel):
     # assignment count rather than rendering "0 needed".
     min_workers: int | None = None
     max_workers: int | None = None
+    # Which special service this rota served, if any. The name is a snapshot, not a join:
+    # the export is a shared artefact that must keep saying "Jesus is Lord Service" after a
+    # rename, and `special_service_name is not None` is the single "was this special" test
+    # the fairness tally reads back. The id is ON DELETE SET NULL, hence optional.
+    special_service_id: UUID | None = None
+    special_service_name: str | None = None
     notes: str | None = None
     # Nullable because schedules_created_by_fkey is ON DELETE SET NULL: removing the worker who
     # created a schedule leaves the schedule standing without a creator. Typed non-optional, this
@@ -278,6 +284,10 @@ class DatePlan(BaseModel):
     status: DatePlanStatus
     groups: list[PlannedGroup] = []
     message: str | None = None
+    # Resolved once for the whole window and carried through the planner, so the badge on
+    # the preview and the name stamped at commit cannot disagree.
+    is_special: bool = False
+    special_service_name: str | None = None
 
 
 class MonthlySchedulePreview(BaseModel):

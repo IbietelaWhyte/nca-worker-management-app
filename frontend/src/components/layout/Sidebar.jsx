@@ -1,17 +1,28 @@
 import { NavLink } from 'react-router-dom'
-import { LayoutDashboard, Users, Building2, Calendar, Clock, CircleHelp } from 'lucide-react'
+import {
+    LayoutDashboard,
+    Users,
+    Building2,
+    Calendar,
+    CalendarHeart,
+    Clock,
+    CircleHelp,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
 
 // manageOnly items are only shown to admins and department heads; the pages
 // themselves are management-oriented and backend reads are scoped accordingly.
+// adminOnly is narrower still: special services are church-wide, so a head editing one
+// would change which dates every other department rotates specially.
 const navItems = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/workers', icon: Users, label: 'Workers', manageOnly: true },
     { to: '/departments', icon: Building2, label: 'Departments', manageOnly: true },
     { to: '/availability', icon: Clock, label: 'Availability' },
     { to: '/schedules', icon: Calendar, label: 'Schedules', manageOnly: true },
+    { to: '/special-services', icon: CalendarHeart, label: 'Special services', adminOnly: true },
 ]
 
 // Shared by both the nav list and the Help link at the foot, so the two cannot drift apart.
@@ -34,7 +45,9 @@ const linkClasses = ({ isActive }) =>
 export function SidebarNav({ onNavigate }) {
     const { isAdmin, isDepartmentHead } = useAuth()
     const canManage = isAdmin || isDepartmentHead
-    const visibleItems = navItems.filter(item => !item.manageOnly || canManage)
+    const visibleItems = navItems.filter(
+        item => (!item.manageOnly || canManage) && (!item.adminOnly || isAdmin)
+    )
 
     return (
         <>

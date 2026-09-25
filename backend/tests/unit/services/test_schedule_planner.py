@@ -3,7 +3,8 @@
 `plan_month` does no I/O, so these need no mocks — every input is constructed directly.
 """
 
-from datetime import date
+from collections import Counter
+from datetime import date, timedelta
 
 from app.schemas.schedules.models import DatePlanStatus
 from app.service.schedules.planner import GroupContext, PlanContext, plan_month
@@ -11,6 +12,21 @@ from tests.unit.services.conftest import make_worker
 
 # Four consecutive Sundays in March 2026.
 SUNDAYS = [date(2026, 3, 1), date(2026, 3, 8), date(2026, 3, 15), date(2026, 3, 22)]
+
+# The first Sunday of each month of 2026 — a year of a monthly special, and the shape that
+# exposes spacing, since the counts alone cannot tell a hand-round from a run.
+FIRST_SUNDAYS = [
+    date(2026, month, 1) + timedelta(days=(6 - date(2026, month, 1).weekday()) % 7) for month in range(1, 13)
+]
+
+# A date's "kind" is the name of the special falling on it, so named services tally apart.
+THANKSGIVING = "Thanksgiving Service"
+CHRISTMAS = "Christmas Service"
+
+
+def thanksgiving(*dates) -> dict:
+    """`special_dates` for one or more dates of the same named service."""
+    return {d: THANKSGIVING for d in dates}
 
 
 def make_workers(count: int):
@@ -430,3 +446,245 @@ class TestStaffingBand:
             for worker_id in selected(plan):
                 counts[worker_id] += 1
         assert set(counts.values()) == {2}
+
+
+class TestSpecialServices:
+    """A special date rotates on its own tally, so the big services hand round."""
+
+    def test_a_special_date_orders_by_the_special_tally(self):
+        # The single clearest statement of the feature. Ada has served three ordinary
+        # turns and no special ones; Grace has served none this month but two specials.
+        # On an ordinary date Grace leads (fewer turns this month). On a special date Ada
+        # leads, because the tally that matters is the one the date rotates on.
+        ada, grace = make_workers(2)
+        ordinary_date, special_date = date(2026, 3, 1), date(2026, 3, 8)
+        counts = {
+            "month_count": {ada.id: 3, grace.id: 0},
+            "special_count": {(grace.id, THANKSGIVING): 2},
+        }
+
+        ordinary = plan_month([ordinary_date], one_group([ada, grace], 1, **counts))[0]
+        assert selected(ordinary) == [grace.id]
+
+        special = plan_month(
+            [special_date], one_group([ada, grace], 1, special_dates=thanksgiving(special_date), **counts)
+        )[0]
+        assert selected(special) == [ada.id]
+
+    def test_each_named_service_keeps_its_own_tally(self):
+        # The heart of it. Ada has served five Thanksgivings and no Christmas services;
+        # Grace the reverse. A single tally across all specials calls that level and picks
+        # on some unrelated tie-break, which is how somebody ends up on every Thanksgiving
+        # for a year while a colleague has never seen one.
+        ada, grace = make_workers(2)
+        thanksgiving_date, christmas_date = date(2026, 3, 1), date(2026, 3, 8)
+        ctx = one_group(
+            [ada, grace],
+            1,
+            special_dates={thanksgiving_date: THANKSGIVING, christmas_date: CHRISTMAS},
+            special_count={(ada.id, THANKSGIVING): 5, (grace.id, CHRISTMAS): 5},
+        )
+
+        plans = plan_month([thanksgiving_date, christmas_date], ctx)
+
+        # Each service goes to whoever has served fewer of *that* service.
+        assert selected(plans[0]) == [grace.id]
+        assert selected(plans[1]) == [ada.id]
+
+    def test_overall_turns_break_a_tie_on_a_special_date(self):
+        # Between two people who have each served two Thanksgivings, the one with fewer
+        # turns overall goes on, so a special date cannot ignore the wider balance.
+        #
+        # This deliberately uses the all-time count rather than the month's. A rule like
+        # "first Sunday" always resolves to the earliest date in its month, so at the point
+        # it is planned the month count is still zero for everybody and orders nothing —
+        # the tie-break it used to use could never fire for the commonest shape of rule.
+        busy, quiet = make_workers(2)
+        special_date = date(2026, 3, 1)
+        ctx = one_group(
+            [busy, quiet],
+            1,
+            special_dates=thanksgiving(special_date),
+            total_count={busy.id: 9, quiet.id: 2},
+            special_count={(busy.id, THANKSGIVING): 2, (quiet.id, THANKSGIVING): 2},
+        )
+
+        assert selected(plan_month([special_date], ctx)[0]) == [quiet.id]
+
+    def test_a_special_pick_increments_both_tallies(self):
+        # A big service is still a turn. If it only cost a special count, whoever drew the
+        # special date would get a free extra Sunday on top of their month's share.
+        workers = make_workers(2)
+        special_date, next_date = date(2026, 3, 1), date(2026, 3, 8)
+        ctx = one_group(workers, 1, special_dates=thanksgiving(special_date))
+
+        plans = plan_month([special_date, next_date], ctx)
+
+        # The worker who took the special date does not also take the ordinary one.
+        assert selected(plans[0]) != selected(plans[1])
+
+    def test_twelve_first_sundays_spread_evenly_over_three_workers(self):
+        # A year of communion Sundays. Without a separate tally the same name leads every
+        # time, because to an ordinary sort one Sunday looks exactly like the next.
+        workers = make_workers(3)
+        ctx = one_group(workers, 1, special_dates={d: THANKSGIVING for d in FIRST_SUNDAYS})
+
+        plans = plan_month(FIRST_SUNDAYS, ctx)
+
+        served = [wid for plan in plans for wid in selected(plan)]
+        assert len(served) == 12
+        assert sorted(Counter(served).values()) == [4, 4, 4]
+
+    def test_an_ordinary_month_is_unchanged_by_the_feature(self):
+        # No special dates configured means the planner behaves exactly as it did before,
+        # which is what lets all thirty-two existing tests stand unmodified.
+        workers = make_workers(8)
+
+        assert plan_month(SUNDAYS, one_group(workers, 2)) == plan_month(
+            SUNDAYS, one_group(workers, 2, special_dates={}, special_count={})
+        )
+
+    def test_the_date_carries_its_own_specialness_out(self):
+        # The preview badges it and the commit stamps the schedule from this, rather than
+        # re-resolving the rules and risking a different answer.
+        workers = make_workers(4)
+        ctx = one_group(workers, 1, special_dates=thanksgiving(SUNDAYS[1]))
+
+        plans = plan_month(SUNDAYS, ctx)
+
+        assert [p.is_special for p in plans] == [False, True, False, False]
+
+    def test_eligibility_is_untouched(self):
+        # A special date is staffed from exactly the same roster. Somebody unavailable is
+        # still unavailable; the tally changes the order, never who is in the running.
+        ada, grace = make_workers(2)
+        special_date = date(2026, 3, 1)
+        ctx = one_group(
+            [ada, grace],
+            1,
+            special_dates=thanksgiving(special_date),
+            unavailable={special_date: {ada.id}},
+            special_count={(grace.id, THANKSGIVING): 5},
+        )
+
+        # Ada leads the special tally by a mile and is still not picked.
+        assert selected(plan_month([special_date], ctx)[0]) == [grace.id]
+
+    def test_a_skipped_existing_date_still_reports_being_special(self):
+        # The preview lists it with a badge even though nothing was planned for it.
+        workers = make_workers(2)
+        ctx = one_group(workers, 1, special_dates=thanksgiving(SUNDAYS[0]), existing_dates={SUNDAYS[0]})
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        assert plan.status == DatePlanStatus.SKIPPED_EXISTING
+        assert plan.is_special is True
+
+
+class TestSpacing:
+    """Turns are spaced, not just counted. A balanced rota is not automatically a humane one."""
+
+    def test_nobody_serves_two_specials_running_while_somebody_is_fresh(self):
+        # Four people, one slot, a year of monthly Thanksgivings. Everyone gets three, and
+        # nobody is ever on two in a row.
+        workers = make_workers(4)
+        ctx = one_group(workers, 1, special_dates={d: THANKSGIVING for d in FIRST_SUNDAYS})
+
+        served = [selected(plan)[0] for plan in plan_month(FIRST_SUNDAYS, ctx)]
+
+        assert sorted(Counter(served).values()) == [3, 3, 3, 3]
+        assert all(a != b for a, b in zip(served, served[1:]))
+
+    def test_the_unavoidable_repeat_rotates_rather_than_landing_on_one_person(self):
+        # Four slots from seven people means at least one person serves every consecutive
+        # pair — there is no arrangement where nobody repeats. What must not happen is the
+        # same person absorbing every repeat, which is what a tally with no spacing term
+        # does: it hands the extra slot to whoever is quietest overall, every single time.
+        workers = make_workers(7)
+        ctx = one_group(workers, 4, special_dates={d: THANKSGIVING for d in FIRST_SUNDAYS})
+
+        rosters = [set(selected(plan)) for plan in plan_month(FIRST_SUNDAYS, ctx)]
+
+        longest = Counter()
+        for worker in workers:
+            run = 0
+            for roster in rosters:
+                run = run + 1 if worker.id in roster else 0
+                longest[worker.id] = max(longest[worker.id], run)
+        # Two in a row is forced; three is a failure of rotation.
+        assert max(longest.values()) == 2
+
+    def test_a_run_is_only_broken_by_actually_sitting_one_out(self):
+        # The streak has to move for people who were not picked, or it never resets and the
+        # term stops ordering anything after the first round.
+        workers = make_workers(3)
+        dates = FIRST_SUNDAYS[:4]
+        ctx = one_group(workers, 1, special_dates={d: THANKSGIVING for d in dates})
+
+        served = [selected(plan)[0] for plan in plan_month(dates, ctx)]
+
+        # Everyone serves once before anyone serves twice, and the fourth date necessarily
+        # returns to whoever went first — their run had been reset by sitting out two.
+        assert len(set(served[:3])) == 3
+        assert served[3] == served[0]
+
+    def test_being_unavailable_counts_as_sitting_it_out(self):
+        # Somebody passed over because they were away has not served it, so their run ends
+        # exactly as if they had been rested. Otherwise a fortnight of leave would leave
+        # them stuck behind a run they never actually had.
+        ada, grace = make_workers(2)
+        first, second = FIRST_SUNDAYS[0], FIRST_SUNDAYS[1]
+        ctx = one_group(
+            [ada, grace],
+            1,
+            special_dates={first: THANKSGIVING, second: THANKSGIVING},
+            streak={(ada.id, THANKSGIVING): 3},
+            unavailable={first: {ada.id}},
+        )
+
+        plans = plan_month([first, second], ctx)
+
+        assert selected(plans[0]) == [grace.id]
+        # Ada's run ended when she missed the first, so she leads the second.
+        assert selected(plans[1]) == [ada.id]
+
+    def test_a_run_at_one_service_does_not_hold_somebody_back_from_another(self):
+        # Runs are per kind. Three Thanksgivings running says nothing about whether
+        # somebody should be on the ordinary Sunday that follows.
+        ada, grace = make_workers(2)
+        ordinary_date = date(2026, 3, 8)
+        ctx = one_group(
+            [ada, grace],
+            1,
+            streak={(ada.id, THANKSGIVING): 3},
+            total_count={ada.id: 0, grace.id: 4},
+        )
+
+        assert selected(plan_month([ordinary_date], ctx)[0]) == [ada.id]
+
+    def test_ordinary_turns_are_spaced_too(self):
+        # The same term covers ordinary Sundays: two people, one slot, nobody twice running.
+        workers = make_workers(2)
+        ctx = one_group(workers, 1)
+
+        served = [selected(plan)[0] for plan in plan_month(SUNDAYS, ctx)]
+
+        assert all(a != b for a, b in zip(served, served[1:]))
+
+    def test_the_month_boundary_does_not_reset_the_balance(self):
+        # month_count restarts at each month, so a month whose slots do not divide evenly
+        # leaves a remainder that is forgotten unless something outlives the reset. Here
+        # three people share two slots: whoever got the extra turn last month must not get
+        # it again while somebody else has had none.
+        first, second, third = make_workers(3)
+        march = [date(2026, 3, 1), date(2026, 3, 8)]
+        ctx = one_group(
+            [first, second, third],
+            2,
+            # Last month: two turns each for the first two, one for the third.
+            total_count={first.id: 2, second.id: 2, third.id: 1},
+        )
+
+        plans = plan_month(march, ctx)
+
+        assert third.id in selected(plans[0])

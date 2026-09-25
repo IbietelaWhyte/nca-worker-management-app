@@ -19,6 +19,10 @@ const PAPER = '#ffffff'
 const HEADER_BG = '#662E91'
 const HEADER_INK = '#ffffff'
 const HIGHLIGHT = '#F8EDCB'
+// The brand gold itself, where HIGHLIGHT above is a pale tint of it. Deliberately the more
+// saturated of the two so a special date reads apart from the helper rows on the same page.
+// Mirrors --warning by hand, like its five siblings — change them together.
+const SPECIAL_BG = '#ECCE68'
 
 const cell = {
     border: `1px solid ${BORDER}`,
@@ -149,9 +153,25 @@ export default function RotaExportDialog({
                                                             ...cell,
                                                             fontWeight: 700,
                                                             whiteSpace: 'nowrap',
+                                                            background: block.specialName
+                                                                ? SPECIAL_BG
+                                                                : undefined,
                                                         }}
                                                     >
                                                         {block.label}
+                                                        {block.specialName && (
+                                                            // Dark ink on gold: white on it
+                                                            // is 1.54:1.
+                                                            <div
+                                                                style={{
+                                                                    fontWeight: 400,
+                                                                    fontSize: 11,
+                                                                    color: INK,
+                                                                }}
+                                                            >
+                                                                {block.specialName}
+                                                            </div>
+                                                        )}
                                                     </td>
                                                 )}
                                                 <td

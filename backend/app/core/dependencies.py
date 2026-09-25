@@ -13,6 +13,7 @@ from app.repository.confirmation_tokens.repository import ConfirmationTokenRepos
 from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
+from app.repository.special_services.repository import SpecialServiceRepository
 from app.repository.subteams.repository import SubteamRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
@@ -27,6 +28,7 @@ from app.service.feedback.service import FeedbackService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.sms.service import SMSService
+from app.service.special_services.service import SpecialServiceService
 from app.service.subteams.service import SubteamService
 from app.service.worker_leave.service import WorkerLeaveService
 from app.service.workers.service import WorkerService
@@ -157,7 +159,35 @@ def get_confirmation_token_repository(client: Client = Depends(get_db)) -> Confi
     return ConfirmationTokenRepository(client)
 
 
+def get_special_service_repository(client: Client = Depends(get_db)) -> SpecialServiceRepository:
+    """FastAPI dependency that provides a SpecialServiceRepository instance.
+
+    Args:
+        client: Supabase client from get_db dependency.
+
+    Returns:
+        SpecialServiceRepository: Repository for special service data access.
+    """
+    return SpecialServiceRepository(client)
+
+
 # --- Services ---
+
+
+def get_special_service_service(
+    special_service_repo: SpecialServiceRepository = Depends(get_special_service_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+) -> SpecialServiceService:
+    """FastAPI dependency that provides a SpecialServiceService instance.
+
+    Args:
+        special_service_repo: SpecialServiceRepository dependency.
+        worker_repo: WorkerRepository dependency, to resolve the creating admin.
+
+    Returns:
+        SpecialServiceService: Service for special service business logic.
+    """
+    return SpecialServiceService(special_service_repo=special_service_repo, worker_repo=worker_repo)
 
 
 def get_sms_service() -> SMSService:
@@ -178,6 +208,7 @@ def get_schedule_service(
     department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
     leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
     sms_service: SMSService = Depends(get_sms_service),
+    special_service_service: SpecialServiceService = Depends(get_special_service_service),
 ) -> ScheduleService:
     """FastAPI dependency that provides a ScheduleService instance.
 
@@ -190,6 +221,7 @@ def get_schedule_service(
         department_role_repo: DepartmentRoleRepository dependency for role auto-fill.
         leave_repo: WorkerLeaveRepository dependency, to drop workers who are away.
         sms_service: SMSService dependency, to text both people affected by a rota edit.
+        special_service_service: SpecialServiceService dependency, for which dates are special.
 
     Returns:
         ScheduleService: Service for schedule business logic operations.
@@ -203,6 +235,7 @@ def get_schedule_service(
         department_role_repo=department_role_repo,
         leave_repo=leave_repo,
         sms_service=sms_service,
+        special_service_service=special_service_service,
     )
 
 

@@ -86,6 +86,10 @@ export const FAQ_SECTIONS = [
                 answer: 'Either too few people were left once unavailability and same-day clashes were taken out, or a schedule already exists for that department and date. The preview gives the reason beside each date.',
             },
             {
+                question: 'Some Sundays are bigger than others. Does the rota know?',
+                answer: 'Yes, if an administrator has set them up under Special services — a monthly pattern such as the first Sunday, or a named one-off date. Workers take turns on those separately from ordinary Sundays, so the same few people do not end up on every big service. It does not change who is eligible: a special date is staffed from exactly the same team.',
+            },
+            {
                 question: 'Can I change a rota after it has been generated?',
                 answer: 'Yes. Open the schedule and use Swap to put somebody else in a duty, Remove to take somebody off, or Add worker to put another person on. Everybody affected gets a text, including the person coming off. There can only be one schedule per department, date and subteam, so adjust the existing one rather than generating a second.',
             },
