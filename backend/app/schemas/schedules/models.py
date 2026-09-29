@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, Field, model_validator
 
+from app.schemas.attendance.models import RollCallCount
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import DayOfWeek
@@ -56,6 +57,12 @@ class Schedule(BaseModel):
     scheduled_date: date
     start_time: time
     end_time: time
+    # Null means the roll call was never taken, which is not the same as everybody being absent:
+    # nothing is recorded for this rota at all. One register per service, not per subteam - one
+    # person stands at the door and closes it once. Nullable because `roll_call_closed_by` is
+    # ON DELETE SET NULL, so a null there is a designed state rather than an anomaly.
+    roll_call_closed_at: datetime | None = None
+    roll_call_closed_by: UUID | None = None
     # A ladder, not a number: {7, 3, 1} is a week out, three days out and the night before. Read
     # straight from a smallint[] column, so no normalization here — the write paths validate.
     reminder_days_before: list[int]
@@ -116,6 +123,17 @@ class AssignmentResponse(BaseModel):
     # "the 7-day one went out, the 3-day one has not" is set membership, which one timestamp
     # cannot hold. Those live in assignment_reminder_sends, a row per (assignment, lead time).
     notice_sent_at: datetime | None = None
+    # Attendance. Three states from two timestamps, and neither one set is NOT absence - it is a
+    # duty nobody took a roll call for. Only `close_roll_call` writes `marked_absent_at`, which is
+    # what makes "a roll call nobody closed records nothing" true by construction rather than by a
+    # predicate somebody can forget. `is_late` and `excused` are stamped at the time for the same
+    # reason `special_service_name` is: a setting changed in June must not rewrite March.
+    checked_in_at: datetime | None = None
+    checked_in_by: UUID | None = None
+    marked_absent_at: datetime | None = None
+    minutes_late: int | None = None
+    is_late: bool = False
+    excused: bool = False
     workers: WorkerResponse | None = None  # Nested worker object from joined query
     subteams: SubteamResponse | None = None  # Nested subteam object from joined query
     department_roles: DepartmentRoleResponse | None = None  # Nested role object from joined query
@@ -191,6 +209,20 @@ class ScheduleEditResult(BaseModel):
     """
 
     schedule: ScheduleResponse
+    warnings: list[str] = []
+
+
+class RollCallResult(BaseModel):
+    """The whole rota after a roll-call action, plus the tally the operator is watching.
+
+    Same shape and same reason as `ScheduleEditResult`: the caller replaces its copy of the
+    schedule wholesale, so the subteam grouping and every embed stay right without a second
+    request. `counts` is what the screen renders at the top - "9 of 13 here" - and comes back
+    with the schedule so the two cannot disagree.
+    """
+
+    schedule: ScheduleResponse
+    counts: RollCallCount
     warnings: list[str] = []
 
 

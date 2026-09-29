@@ -489,12 +489,17 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         """
         Put a different worker into an existing assignment.
 
-        **Clears `notice_sent_at` and deletes the row's reminder-send markers**, in this one
-        method, because the row now names somebody who has been told nothing. A stale
-        `notice_sent_at` keeps the notice sweep from ever reaching them and a stale send marker
-        cancels the reminder that would have; neither errors, and the first anybody hears about
-        it is the empty chair. Done here rather than in a trigger: the backend is the only
-        writer (service-role client, RLS bypassed) and this schema has no triggers.
+        **Clears `notice_sent_at`, the attendance record, and the row's reminder-send markers**,
+        in this one method, because the row now names somebody who has been told nothing and was
+        never there. A stale `notice_sent_at` keeps the notice sweep from ever reaching them and a
+        stale send marker cancels the reminder that would have; neither errors, and the first
+        anybody hears about it is the empty chair.
+
+        The attendance columns are the sharper of the two. Carried over, they would assert that
+        the **new** worker was present at - or absent from - a service they were never on, and
+        that assertion is what the absence report shows their head. Done here rather than in a
+        trigger: the backend is the only writer (service-role client, RLS bypassed) and this
+        schema has no triggers.
 
         Args:
             assignment_id (UUID): The assignment to hand over.
@@ -515,6 +520,14 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
                     q.AssignmentColumns.SUBTEAM_ID: str(subteam_id) if subteam_id else None,
                     q.AssignmentColumns.DEPARTMENT_ROLE_ID: str(department_role_id) if department_role_id else None,
                     q.AssignmentColumns.NOTICE_SENT_AT: None,
+                    # The whole attendance record, not just the check-in: an absence stamped
+                    # against the previous holder must not follow the seat to its new one.
+                    q.AssignmentColumns.CHECKED_IN_AT: None,
+                    q.AssignmentColumns.CHECKED_IN_BY: None,
+                    q.AssignmentColumns.MARKED_ABSENT_AT: None,
+                    q.AssignmentColumns.MINUTES_LATE: None,
+                    q.AssignmentColumns.IS_LATE: False,
+                    q.AssignmentColumns.EXCUSED: False,
                 }
             )
             .eq(q.AssignmentColumns.ID, str(assignment_id))
@@ -530,6 +543,246 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         assignment = self.get_assignment_by_id(assignment_id)
         log.info("assignment_reassigned")
         return assignment
+
+    # ------------------------------------------------------------------
+    # Attendance
+    #
+    # Three states from two timestamps: neither set is "not recorded", checked_in_at is present,
+    # marked_absent_at is absent. Only close_roll_call writes the second, which is what makes
+    # "a roll call nobody closed records nothing" true by construction. Every write re-reads,
+    # because a PostgREST UPDATE returns base columns only and the caller renders the embeds.
+    # ------------------------------------------------------------------
+
+    def set_check_in(
+        self,
+        assignment_id: UUID,
+        checked_in_at: datetime,
+        minutes_late: int | None,
+        is_late: bool,
+        checked_in_by: UUID | None,
+    ) -> AssignmentResponse | None:
+        """Mark one worker present, clearing any absence already stamped against them.
+
+        Clearing `marked_absent_at` in the same statement is what lets somebody who turns up
+        after the roll call was closed simply be tapped in - the commonest correction there is -
+        without the head having to reopen the whole register first. The two columns are mutually
+        exclusive by check constraint, so they have to move together anyway.
+
+        Args:
+            assignment_id (UUID): The duty being marked.
+            checked_in_at (datetime): When they were seen. Timezone-aware.
+            minutes_late (int | None): Minutes after the start, or None if judged on another day.
+            is_late (bool): Whether that beat the grace period in force at the tap.
+            checked_in_by (UUID | None): The operator's worker id, if they have one.
+
+        Returns:
+            AssignmentResponse | None: The updated assignment with its embeds re-read, or None
+                                       if no assignment has that id.
+        """
+        log = self.logger.bind(method="set_check_in", assignment_id=str(assignment_id), is_late=is_late)
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update(
+                {
+                    q.AssignmentColumns.CHECKED_IN_AT: checked_in_at.isoformat(),
+                    q.AssignmentColumns.CHECKED_IN_BY: str(checked_in_by) if checked_in_by else None,
+                    q.AssignmentColumns.MINUTES_LATE: minutes_late,
+                    q.AssignmentColumns.IS_LATE: is_late,
+                    q.AssignmentColumns.MARKED_ABSENT_AT: None,
+                    q.AssignmentColumns.EXCUSED: False,
+                }
+            )
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .execute()
+        )
+        if not response.data:
+            log.warning("assignment_not_found")
+            return None
+        log.info("attendance_checked_in", minutes_late=minutes_late)
+        return self.get_assignment_by_id(assignment_id)
+
+    def clear_check_in(self, assignment_id: UUID, absent_at: datetime | None) -> AssignmentResponse | None:
+        """Undo a check-in, back to absent if the roll call is closed and to nothing if it is not.
+
+        `absent_at` carries that decision rather than the method re-reading the schedule to make
+        it: a closed register must not develop a hole where a row says neither present nor absent,
+        and an open one must not gain an absence nobody closed.
+
+        Args:
+            assignment_id (UUID): The duty being un-marked.
+            absent_at (datetime | None): Stamp absence at this moment, or None to leave no record.
+
+        Returns:
+            AssignmentResponse | None: The updated assignment, or None if no assignment has that id.
+        """
+        log = self.logger.bind(method="clear_check_in", assignment_id=str(assignment_id))
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update(
+                {
+                    q.AssignmentColumns.CHECKED_IN_AT: None,
+                    q.AssignmentColumns.CHECKED_IN_BY: None,
+                    q.AssignmentColumns.MINUTES_LATE: None,
+                    q.AssignmentColumns.IS_LATE: False,
+                    q.AssignmentColumns.MARKED_ABSENT_AT: absent_at.isoformat() if absent_at else None,
+                }
+            )
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .execute()
+        )
+        if not response.data:
+            log.warning("assignment_not_found")
+            return None
+        log.info("attendance_check_in_cleared", left_absent=absent_at is not None)
+        return self.get_assignment_by_id(assignment_id)
+
+    def mark_absent(self, assignment_ids: list[UUID], absent_at: datetime, excused: bool) -> int:
+        """Stamp a batch of duties absent in one statement.
+
+        One statement per batch rather than a loop, for the same reason `mark_notice_sent` marks a
+        whole batch at once: a crash mid-loop would leave a register half closed, with some rows
+        absent and some recording nothing, and no way to tell which half.
+
+        Args:
+            assignment_ids (list[UUID]): The duties nobody turned up for.
+            absent_at (datetime): When the roll call was closed.
+            excused (bool): Whether these absences are excused (a batch of workers on leave).
+
+        Returns:
+            int: How many rows were stamped. Zero for an empty list, without a round-trip.
+        """
+        log = self.logger.bind(method="mark_absent", count=len(assignment_ids), excused=excused)
+        if not assignment_ids:
+            return 0
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update(
+                {
+                    q.AssignmentColumns.MARKED_ABSENT_AT: absent_at.isoformat(),
+                    q.AssignmentColumns.EXCUSED: excused,
+                }
+            )
+            .in_(q.AssignmentColumns.ID, [str(i) for i in assignment_ids])
+            .execute()
+        )
+        marked = len(response.data or [])
+        log.info("attendance_marked_absent", marked=marked)
+        return marked
+
+    def clear_absences(self, assignment_ids: list[UUID]) -> int:
+        """Erase the absences on a batch of duties, leaving check-ins alone.
+
+        Reopening a register undoes what closing it invented; it does not undo what somebody
+        observed. Takes ids rather than a schedule id because PostgREST cannot filter a DELETE or
+        UPDATE through a join, and the caller is already holding the schedule's assignments.
+
+        Args:
+            assignment_ids (list[UUID]): The duties to clear.
+
+        Returns:
+            int: How many rows were cleared.
+        """
+        log = self.logger.bind(method="clear_absences", count=len(assignment_ids))
+        if not assignment_ids:
+            return 0
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update(
+                {
+                    q.AssignmentColumns.MARKED_ABSENT_AT: None,
+                    q.AssignmentColumns.EXCUSED: False,
+                }
+            )
+            .in_(q.AssignmentColumns.ID, [str(i) for i in assignment_ids])
+            .execute()
+        )
+        cleared = len(response.data or [])
+        log.info("attendance_absences_cleared", cleared=cleared)
+        return cleared
+
+    def set_excused(self, assignment_id: UUID, excused: bool) -> AssignmentResponse | None:
+        """Mark an absence as not counting, or put it back.
+
+        Args:
+            assignment_id (UUID): The absence to excuse.
+            excused (bool): Whether it should count against the worker.
+
+        Returns:
+            AssignmentResponse | None: The updated assignment, or None if no assignment has that id.
+        """
+        log = self.logger.bind(method="set_excused", assignment_id=str(assignment_id), excused=excused)
+        response = (
+            self.client.table(q.ASSIGNMENTS_TABLE)
+            .update({q.AssignmentColumns.EXCUSED: excused})
+            .eq(q.AssignmentColumns.ID, str(assignment_id))
+            .execute()
+        )
+        if not response.data:
+            log.warning("assignment_not_found")
+            return None
+        log.info("attendance_excused_set")
+        return self.get_assignment_by_id(assignment_id)
+
+    def set_roll_call_closed(
+        self, schedule_id: UUID, closed_at: datetime | None, closed_by: UUID | None
+    ) -> ScheduleResponse | None:
+        """Close the register, or reopen it by passing None.
+
+        Args:
+            schedule_id (UUID): The rota whose roll call it is.
+            closed_at (datetime | None): When it was closed, or None to reopen.
+            closed_by (UUID | None): The operator's worker id, if they have one.
+
+        Returns:
+            ScheduleResponse | None: The re-read schedule with its assignments, or None if no
+                                     schedule has that id.
+        """
+        log = self.logger.bind(method="set_roll_call_closed", schedule_id=str(schedule_id))
+        response = (
+            self.client.table(q.TABLE)
+            .update(
+                {
+                    q.Columns.ROLL_CALL_CLOSED_AT: closed_at.isoformat() if closed_at else None,
+                    q.Columns.ROLL_CALL_CLOSED_BY: str(closed_by) if (closed_at and closed_by) else None,
+                }
+            )
+            .eq(q.Columns.ID, str(schedule_id))
+            .execute()
+        )
+        if not response.data:
+            log.warning("schedule_not_found")
+            return None
+        log.info("roll_call_closed" if closed_at else "roll_call_reopened")
+        return self.get_with_assignments(schedule_id)
+
+    def get_for_attendance_report(self, department_id: UUID, from_date: date, to_date: date) -> list[ScheduleResponse]:
+        """Every rota a department ran in a window, with who was on it and what was recorded.
+
+        Rooted at schedules rather than assignments because the report counts **services** as well
+        as people: a month whose roll call was taken twice out of twelve has to be able to say so,
+        and an assignment-rooted read cannot see the rotas that carry no attendance at all.
+
+        Args:
+            department_id (UUID): The department to report on.
+            from_date (date): First day of the window, inclusive.
+            to_date (date): Last day, inclusive.
+
+        Returns:
+            list[ScheduleResponse]: The rotas, ascending by date.
+        """
+        log = self.logger.bind(method="get_for_attendance_report", department_id=str(department_id))
+        response = (
+            self.client.table(q.TABLE)
+            .select(q.SELECT_FOR_ATTENDANCE_REPORT)
+            .eq(q.Columns.DEPARTMENT_ID, str(department_id))
+            .gte(q.Columns.SCHEDULED_DATE, from_date.isoformat())
+            .lte(q.Columns.SCHEDULED_DATE, to_date.isoformat())
+            .order(q.Columns.SCHEDULED_DATE)
+            .execute()
+        )
+        schedules = self._to_model_list(response.data or [])
+        log.debug("fetched_attendance_report_rows", count=len(schedules))
+        return schedules
 
     def delete_reminder_sends(self, assignment_id: UUID) -> int:
         """

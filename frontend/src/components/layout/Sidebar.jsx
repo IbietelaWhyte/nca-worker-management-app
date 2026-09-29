@@ -7,6 +7,7 @@ import {
     CalendarHeart,
     Clock,
     CircleHelp,
+    ClipboardCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
@@ -22,6 +23,7 @@ const navItems = [
     { to: '/departments', icon: Building2, label: 'Departments', manageOnly: true },
     { to: '/availability', icon: Clock, label: 'Availability' },
     { to: '/schedules', icon: Calendar, label: 'Schedules', manageOnly: true },
+    { to: '/attendance', icon: ClipboardCheck, label: 'Attendance', manageOnly: true },
     { to: '/special-services', icon: CalendarHeart, label: 'Special services', adminOnly: true },
 ]
 

@@ -18,6 +18,7 @@ from app.repository.subteams.repository import SubteamRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.service.account.service import AccountService
+from app.service.attendance.service import AttendanceService
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.availability_prompts.service import AvailabilityPromptService
@@ -389,6 +390,28 @@ def get_worker_leave_service(
         leave_repo=leave_repo,
         worker_repo=worker_repo,
         schedule_repo=schedule_repo,
+    )
+
+
+def get_attendance_service(
+    schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
+    leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
+    worker_repo: WorkerRepository = Depends(get_worker_repository),
+) -> AttendanceService:
+    """FastAPI dependency that provides an AttendanceService instance.
+
+    Args:
+        schedule_repo: ScheduleRepository dependency — it owns both tables attendance lives on.
+        leave_repo: WorkerLeaveRepository dependency, to excuse absences for workers on leave.
+        worker_repo: WorkerRepository dependency, to record who took the roll call.
+
+    Returns:
+        AttendanceService: Service for recording who turned up and reporting who did not.
+    """
+    return AttendanceService(
+        schedule_repo=schedule_repo,
+        leave_repo=leave_repo,
+        worker_repo=worker_repo,
     )
 
 

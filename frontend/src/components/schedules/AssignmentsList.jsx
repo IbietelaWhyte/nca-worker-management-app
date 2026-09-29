@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { ArrowLeftRight, UserMinus } from 'lucide-react'
+import { ArrowLeftRight, Check, UserMinus } from 'lucide-react'
+import AttendanceBadge from '@/components/schedules/AttendanceBadge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { isHere } from '@/lib/attendance'
 import {
     Select,
     SelectContent,
@@ -18,6 +20,8 @@ export default function AssignmentsList({
     onRoleChange,
     onSwap,
     onRemove,
+    onMarkHere,
+    attendanceBusyId = null,
     roles = [],
     canManage = false,
 }) {
@@ -139,8 +143,45 @@ export default function AssignmentsList({
                                                 {/* The cluster Confirm/Decline used to sit in.
                                                     A worker who cannot make a date now speaks to
                                                     their head, and this is what the head does
-                                                    about it. */}
-                                                {canManage && onSwap && (
+                                                    about it — and, once the service has happened,
+                                                    records about it.
+
+                                                    Roll call is a mode rather than an extra
+                                                    column: this cluster already holds a role
+                                                    select, Swap and Remove, and five controls
+                                                    will not fit 375px or be aimed at reliably.
+                                                    While taking the register you are not editing
+                                                    the rota, so the editing controls stand down
+                                                    and the tap target takes their place. */}
+                                                {onMarkHere ? (
+                                                    <Button
+                                                        type="button"
+                                                        variant={
+                                                            isHere(assignment)
+                                                                ? 'default'
+                                                                : 'outline'
+                                                        }
+                                                        /* No Button size reaches 44px — sm is
+                                                           h-9 and default h-10 — and a roll call
+                                                           is forty taps on a phone, so they have
+                                                           to land. min-h-11 is the idiom the
+                                                           sidebar already uses for this. */
+                                                        className="min-h-11 min-w-28"
+                                                        disabled={
+                                                            attendanceBusyId === assignment.id
+                                                        }
+                                                        onClick={() => onMarkHere(assignment)}
+                                                    >
+                                                        {isHere(assignment) && (
+                                                            <Check size={16} className="mr-1" />
+                                                        )}
+                                                        {isHere(assignment) ? 'Here' : 'Mark here'}
+                                                    </Button>
+                                                ) : (
+                                                    <AttendanceBadge assignment={assignment} />
+                                                )}
+
+                                                {canManage && !onMarkHere && onSwap && (
                                                     <Button
                                                         type="button"
                                                         variant="outline"
@@ -154,7 +195,7 @@ export default function AssignmentsList({
                                                         Swap
                                                     </Button>
                                                 )}
-                                                {canManage && onRemove && (
+                                                {canManage && !onMarkHere && onRemove && (
                                                     <Button
                                                         type="button"
                                                         variant="ghost"

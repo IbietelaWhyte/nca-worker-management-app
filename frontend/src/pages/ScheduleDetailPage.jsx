@@ -9,7 +9,9 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Bell, UserPlus } from 'lucide-react'
+import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, UserPlus } from 'lucide-react'
+import { isHere, tally } from '@/lib/attendance'
+import FinishRollCallDialog from '@/components/schedules/FinishRollCallDialog'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
 import { getSubteamsByDepartment } from '@/api/subteams'
@@ -36,6 +38,10 @@ export default function ScheduleDetailPage() {
         addWorker,
         swapWorker,
         removeWorker,
+        markHere,
+        undoHere,
+        finishRollCall,
+        reopenRollCall,
         sendRemindersForSchedule,
     } = useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
@@ -52,6 +58,12 @@ export default function ScheduleDetailPage() {
     // null | { mode: 'add' } | { mode: 'swap', assignment } — one picker for the whole page.
     const [picker, setPicker] = useState(null)
     const [removeTarget, setRemoveTarget] = useState(null)
+    // Roll call is a mode the page is in, not a per-row control — see the comment in
+    // AssignmentsList. `attendanceBusyId` stops a double-fire on one row while its write is in
+    // flight, which matters because the taps are optimistic.
+    const [rollCall, setRollCall] = useState(false)
+    const [attendanceBusyId, setAttendanceBusyId] = useState(null)
+    const [finishOpen, setFinishOpen] = useState(false)
     const [editBusy, setEditBusy] = useState(false)
     const [editError, setEditError] = useState(null)
     const [editWarnings, setEditWarnings] = useState([])
@@ -230,6 +242,38 @@ export default function ScheduleDetailPage() {
     const staffing = summarizeStaffing(schedule)
     const reminderLadder = schedule.reminder_days_before ?? []
     const canManage = isAdmin || isDepartmentHead
+    const counts = tally(assignments)
+    const rollCallClosed = Boolean(schedule.roll_call_closed_at)
+    // Only from the service date onward. Marking somebody present for a rota three weeks out is
+    // nonsense, and since most rotas on screen are future ones a permanently disabled button
+    // would be clutter on the common case — so it is absent rather than disabled.
+    const serviceHasHappened = schedule.scheduled_date <= format(new Date(), 'yyyy-MM-dd')
+    const untapped = assignments.filter(a => !isHere(a))
+
+    const handleMarkHere = async assignment => {
+        setAttendanceBusyId(assignment.id)
+        setEditError(null)
+        try {
+            setEditWarnings(
+                isHere(assignment) ? await undoHere(assignment.id) : await markHere(assignment.id)
+            )
+        } catch (err) {
+            setEditError(err.response?.data?.detail ?? 'That could not be recorded')
+        } finally {
+            setAttendanceBusyId(null)
+        }
+    }
+
+    const handleFinish = async () => {
+        if (await runEdit(finishRollCall)) {
+            setFinishOpen(false)
+            setRollCall(false)
+        }
+    }
+
+    const handleReopen = async () => {
+        if (await runEdit(reopenRollCall)) setRollCall(true)
+    }
 
     return (
         <div className="space-y-6">
@@ -263,16 +307,30 @@ export default function ScheduleDetailPage() {
                     </div>
                 </div>
 
-                {canManage && (
-                    <Button
-                        variant="outline"
-                        onClick={() => handleSendReminders(schedule)}
-                        disabled={reminderLoading}
-                    >
-                        <Bell size={16} className="mr-2" />
-                        {reminderLoading ? 'Sending...' : 'Send Reminders'}
-                    </Button>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                    {canManage && serviceHasHappened && !rollCall && !rollCallClosed && (
+                        <Button onClick={() => setRollCall(true)}>
+                            <ClipboardCheck size={16} className="mr-2" />
+                            Take roll call
+                        </Button>
+                    )}
+                    {canManage && rollCallClosed && (
+                        <Button variant="outline" onClick={handleReopen} disabled={editBusy}>
+                            <RotateCcw size={16} className="mr-2" />
+                            Reopen roll call
+                        </Button>
+                    )}
+                    {canManage && (
+                        <Button
+                            variant="outline"
+                            onClick={() => handleSendReminders(schedule)}
+                            disabled={reminderLoading}
+                        >
+                            <Bell size={16} className="mr-2" />
+                            {reminderLoading ? 'Sending...' : 'Send Reminders'}
+                        </Button>
+                    )}
+                </div>
             </div>
 
             {/* Stats bar */}
@@ -287,6 +345,20 @@ export default function ScheduleDetailPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">Wanted</p>
                 </div>
+                {(rollCall || rollCallClosed || counts.present > 0) && (
+                    <>
+                        <div className="text-center">
+                            <p className="text-2xl font-bold">{counts.present}</p>
+                            <p className="text-xs text-muted-foreground">Here</p>
+                        </div>
+                        {counts.absent > 0 && (
+                            <div className="text-center">
+                                <p className="text-2xl font-bold">{counts.absent}</p>
+                                <p className="text-xs text-muted-foreground">Absent</p>
+                            </div>
+                        )}
+                    </>
+                )}
                 <div className="ml-auto">
                     {staffing.understaffed ? (
                         <Badge variant="destructive">{staffing.short} short</Badge>
@@ -335,29 +407,51 @@ export default function ScheduleDetailPage() {
             {/* Assignments */}
             <div className="space-y-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <h3 className="font-semibold">Assigned Workers</h3>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
-                            <input
-                                type="checkbox"
-                                checked={showEmptySubteams}
-                                onChange={e => setShowEmptySubteams(e.target.checked)}
-                                className="cursor-pointer"
-                            />
-                            Show subteams with no assignments
-                        </Label>
-                        {canManage && (
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={staffing.full}
-                                onClick={() => openPicker({ mode: 'add' })}
-                            >
-                                <UserPlus size={16} className="mr-2" />
-                                Add worker
-                            </Button>
+                    <div>
+                        <h3 className="font-semibold">
+                            {rollCall
+                                ? `${counts.present} of ${counts.assigned} here`
+                                : 'Assigned Workers'}
+                        </h3>
+                        {rollCall && untapped.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                                {untapped.length} not tapped yet
+                            </p>
                         )}
                     </div>
+                    {rollCall ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button variant="outline" onClick={() => setRollCall(false)}>
+                                Stop without finishing
+                            </Button>
+                            <Button onClick={() => setFinishOpen(true)} disabled={editBusy}>
+                                Finish roll call
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="flex flex-wrap items-center gap-3">
+                            <Label className="flex items-center gap-2 cursor-pointer text-sm font-normal">
+                                <input
+                                    type="checkbox"
+                                    checked={showEmptySubteams}
+                                    onChange={e => setShowEmptySubteams(e.target.checked)}
+                                    className="cursor-pointer"
+                                />
+                                Show subteams with no assignments
+                            </Label>
+                            {canManage && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={staffing.full}
+                                    onClick={() => openPicker({ mode: 'add' })}
+                                >
+                                    <UserPlus size={16} className="mr-2" />
+                                    Add worker
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </div>
                 {/* On screen rather than in a tooltip: there is no hover on a phone, so a
                     disabled button with no reason beside it is just a broken button. */}
@@ -376,13 +470,15 @@ export default function ScheduleDetailPage() {
                     <AssignmentsList
                         groupedAssignments={groupedAssignments}
                         onRoleChange={changeAssignmentRole}
+                        onMarkHere={canManage && rollCall ? handleMarkHere : null}
+                        attendanceBusyId={attendanceBusyId}
                         onSwap={
-                            canManage
+                            canManage && !rollCall
                                 ? assignment => openPicker({ mode: 'swap', assignment })
                                 : null
                         }
                         onRemove={
-                            canManage
+                            canManage && !rollCall
                                 ? assignment => {
                                       setEditError(null)
                                       setEditWarnings([])
@@ -394,7 +490,26 @@ export default function ScheduleDetailPage() {
                         canManage={canManage}
                     />
                 )}
+                {/* Again at the end of the list rather than a sticky footer: position:sticky
+                    bottom sits under mobile browser chrome, the same trap min-h-screen has, and
+                    a long roster must not make the way out hard to find. */}
+                {rollCall && assignments.length > 6 && (
+                    <div className="flex justify-end">
+                        <Button onClick={() => setFinishOpen(true)} disabled={editBusy}>
+                            Finish roll call
+                        </Button>
+                    </div>
+                )}
             </div>
+
+            <FinishRollCallDialog
+                open={finishOpen}
+                untapped={untapped}
+                busy={editBusy}
+                error={editError}
+                onCancel={() => setFinishOpen(false)}
+                onConfirm={handleFinish}
+            />
 
             {/* One picker for the whole page, not one per row. */}
             <WorkerPickerDialog

@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -103,6 +104,50 @@ class Settings(BaseSettings):
     # two messages — a month's rota is generated weeks before its reminders fire, and the same
     # token backs both — so it is measured in days, not hours.
     confirmation_token_ttl_days: int = Field(default=45, ge=1)
+
+    # Attendance (see service/attendance/). An operator marks the people who turned up and then
+    # closes the roll call once; everyone left untapped is stamped absent at that moment, and a
+    # roll call nobody closes records nothing at all. The grace period is the slack between a
+    # service's start_time and the point an arrival counts as late - ten minutes is about how long
+    # it takes a car park to empty, and zero is legitimate for a department that means 09:00. The
+    # judgement is stamped onto the row at the tap, so raising this later cannot quietly un-late a
+    # report a head has already acted on; the ceiling exists because a grace longer than two hours
+    # outlasts most services and would make lateness unrecordable.
+    attendance_grace_minutes: int = Field(default=10, ge=0, le=120)
+
+    # The repeat-absentee window. Ninety days is roughly a quarter, about twelve Sundays, so the
+    # default pair reads as "missed two of their turns this quarter" - a conversation rather than
+    # an accusation. The floor stops a window so short that one bad fortnight names somebody; the
+    # ceiling stops one so long it drags in people who have since left. A threshold of zero would
+    # name every worker who has ever served, hence the floor of one.
+    attendance_window_days: int = Field(default=90, ge=7, le=730)
+    attendance_repeat_threshold: int = Field(default=2, ge=1, le=50)
+
+    # The church's own clock (see service/attendance/rules.py). Every date and time in this schema
+    # is zone-less - scheduled_date is a date and start_time a bare time - so "is 09:05 late for a
+    # 09:00 service" can only be answered against a named zone. A server running in UTC comparing
+    # now() against a 09:00 Toronto service would make the entire rota four hours late. Validated
+    # below so a typo fails to boot rather than at the first check-in.
+    #
+    # Note the same latent problem exists in reminder_hour, whose APScheduler cron runs on the
+    # system zone. That is pre-existing and untouched here; this setting is where it should be
+    # fixed when somebody does.
+    church_timezone: str = "America/Toronto"
+
+    @model_validator(mode="after")
+    def _check_church_timezone(self) -> "Settings":
+        """Fail fast on an unknown IANA zone rather than at the first check-in.
+
+        Raises:
+            ValueError: If church_timezone is not a zone this system knows.
+        """
+        try:
+            ZoneInfo(self.church_timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"church_timezone must be an IANA zone name such as America/Toronto (got {self.church_timezone!r})"
+            ) from exc
+        return self
 
     @model_validator(mode="after")
     def _check_pool_sizes(self) -> "Settings":

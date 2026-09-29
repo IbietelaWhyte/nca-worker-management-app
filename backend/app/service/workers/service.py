@@ -931,6 +931,31 @@ class WorkerService:
         if department_id not in self.get_managed_department_ids(actor.id):
             raise PermissionDeniedError("You can only assign workers to departments you manage")
 
+    def authorize_record_attendance(self, token: TokenPayload, department_id: UUID) -> None:
+        """Ensure the requesting user may record attendance for the given department.
+
+        The same rule as `authorize_create_assignment` with its own message, because a head who
+        tried to take a roll call and is told "you can only assign workers to departments you
+        manage" has to work out what that has to do with what they did.
+
+        **A plain worker never passes this**, which is the feature's hardest requirement: there
+        is no self-service check-in, no token-backed page, and no path by which the subject of a
+        record writes it. The `HODUser` dependency on every route refuses them first; this is the
+        narrowing that stops a head of one department recording against another.
+
+        Args:
+            token: The verified token payload of the requesting user.
+            department_id: The department whose rota is being marked.
+
+        Raises:
+            PermissionDeniedError: If a non-admin does not manage the department.
+        """
+        if token.role == UserRole.ADMIN:
+            return
+        actor = self.get_worker_for_token(token)
+        if department_id not in self.get_managed_department_ids(actor.id):
+            raise PermissionDeniedError("You can only record attendance for departments you manage")
+
     def list_visible_workers(
         self,
         token: TokenPayload,

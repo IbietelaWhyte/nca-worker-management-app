@@ -17,6 +17,7 @@ from app.core.supabase import get_supabase
 from app.repository.schedules.repository import ScheduleRepository
 from app.router import (
     account,
+    attendance,
     authentication,
     availabilities,
     department_roles,
@@ -127,6 +128,7 @@ app.include_router(authentication.router, prefix="/api/v1")
 app.include_router(feedback.router, prefix="/api/v1")
 app.include_router(worker_leave.router, prefix="/api/v1")
 app.include_router(special_services.router, prefix="/api/v1")
+app.include_router(attendance.router, prefix="/api/v1")
 
 
 @app.exception_handler(AppError)

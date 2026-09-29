@@ -1,4 +1,5 @@
 from app.router.account import router as account
+from app.router.attendance import router as attendance
 from app.router.authentication import router as authentication
 from app.router.availabilities import router as availabilities
 from app.router.department_roles import router as department_roles
@@ -12,6 +13,7 @@ from app.router.workers import router as workers
 
 __all__ = [
     "account",
+    "attendance",
     "workers",
     "departments",
     "department_roles",
