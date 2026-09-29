@@ -548,8 +548,8 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
     # Attendance
     #
     # Three states from two timestamps: neither set is "not recorded", checked_in_at is present,
-    # marked_absent_at is absent. Only close_roll_call writes the second, which is what makes
-    # "a roll call nobody closed records nothing" true by construction. Every write re-reads,
+    # marked_absent_at is absent. Only close_attendance writes the second, which is what makes
+    # "attendance nobody closed records nothing" true by construction. Every write re-reads,
     # because a PostgREST UPDATE returns base columns only and the caller renders the embeds.
     # ------------------------------------------------------------------
 
@@ -564,8 +564,8 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         """Mark one worker present, clearing any absence already stamped against them.
 
         Clearing `marked_absent_at` in the same statement is what lets somebody who turns up
-        after the roll call was closed simply be tapped in - the commonest correction there is -
-        without the head having to reopen the whole register first. The two columns are mutually
+        after attendance was closed simply be tapped in - the commonest correction there is -
+        without the head having to reopen the whole thing first. The two columns are mutually
         exclusive by check constraint, so they have to move together anyway.
 
         Args:
@@ -602,10 +602,10 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         return self.get_assignment_by_id(assignment_id)
 
     def clear_check_in(self, assignment_id: UUID, absent_at: datetime | None) -> AssignmentResponse | None:
-        """Undo a check-in, back to absent if the roll call is closed and to nothing if it is not.
+        """Undo a check-in, back to absent if attendance is closed and to nothing if it is not.
 
         `absent_at` carries that decision rather than the method re-reading the schedule to make
-        it: a closed register must not develop a hole where a row says neither present nor absent,
+        it: closed attendance must not develop a hole where a row says neither present nor absent,
         and an open one must not gain an absence nobody closed.
 
         Args:
@@ -640,12 +640,12 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         """Stamp a batch of duties absent in one statement.
 
         One statement per batch rather than a loop, for the same reason `mark_notice_sent` marks a
-        whole batch at once: a crash mid-loop would leave a register half closed, with some rows
+        whole batch at once: a crash mid-loop would leave attendance half closed, with some rows
         absent and some recording nothing, and no way to tell which half.
 
         Args:
             assignment_ids (list[UUID]): The duties nobody turned up for.
-            absent_at (datetime): When the roll call was closed.
+            absent_at (datetime): When attendance was closed.
             excused (bool): Whether these absences are excused (a batch of workers on leave).
 
         Returns:
@@ -672,7 +672,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
     def clear_absences(self, assignment_ids: list[UUID]) -> int:
         """Erase the absences on a batch of duties, leaving check-ins alone.
 
-        Reopening a register undoes what closing it invented; it does not undo what somebody
+        Reopening attendance undoes what closing it invented; it does not undo what somebody
         observed. Takes ids rather than a schedule id because PostgREST cannot filter a DELETE or
         UPDATE through a join, and the caller is already holding the schedule's assignments.
 
@@ -723,13 +723,13 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log.info("attendance_excused_set")
         return self.get_assignment_by_id(assignment_id)
 
-    def set_roll_call_closed(
+    def set_attendance_closed(
         self, schedule_id: UUID, closed_at: datetime | None, closed_by: UUID | None
     ) -> ScheduleResponse | None:
-        """Close the register, or reopen it by passing None.
+        """Close attendance, or reopen it by passing None.
 
         Args:
-            schedule_id (UUID): The rota whose roll call it is.
+            schedule_id (UUID): The rota whose attendance it is.
             closed_at (datetime | None): When it was closed, or None to reopen.
             closed_by (UUID | None): The operator's worker id, if they have one.
 
@@ -737,13 +737,13 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             ScheduleResponse | None: The re-read schedule with its assignments, or None if no
                                      schedule has that id.
         """
-        log = self.logger.bind(method="set_roll_call_closed", schedule_id=str(schedule_id))
+        log = self.logger.bind(method="set_attendance_closed", schedule_id=str(schedule_id))
         response = (
             self.client.table(q.TABLE)
             .update(
                 {
-                    q.Columns.ROLL_CALL_CLOSED_AT: closed_at.isoformat() if closed_at else None,
-                    q.Columns.ROLL_CALL_CLOSED_BY: str(closed_by) if (closed_at and closed_by) else None,
+                    q.Columns.ATTENDANCE_CLOSED_AT: closed_at.isoformat() if closed_at else None,
+                    q.Columns.ATTENDANCE_CLOSED_BY: str(closed_by) if (closed_at and closed_by) else None,
                 }
             )
             .eq(q.Columns.ID, str(schedule_id))
@@ -752,14 +752,14 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         if not response.data:
             log.warning("schedule_not_found")
             return None
-        log.info("roll_call_closed" if closed_at else "roll_call_reopened")
+        log.info("attendance_closed" if closed_at else "attendance_reopened")
         return self.get_with_assignments(schedule_id)
 
     def get_for_attendance_report(self, department_id: UUID, from_date: date, to_date: date) -> list[ScheduleResponse]:
         """Every rota a department ran in a window, with who was on it and what was recorded.
 
         Rooted at schedules rather than assignments because the report counts **services** as well
-        as people: a month whose roll call was taken twice out of twelve has to be able to say so,
+        as people: a month whose attendance was taken twice out of twelve has to be able to say so,
         and an assignment-rooted read cannot see the rotas that carry no attendance at all.
 
         Args:

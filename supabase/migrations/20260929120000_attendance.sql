@@ -1,5 +1,5 @@
 -- ============================================================
--- Migration: Attendance / roll call
+-- Migration: Attendance / attendance
 --
 -- A rota says who was asked. Nothing has ever said who came. Heads know their repeat
 -- absentees by memory, which means they know the loud ones and not the quiet ones, and a
@@ -15,15 +15,15 @@
 -- answers". This is a fact, and it is recorded by the operator, never by the worker.
 --
 -- ABSENCE IS STAMPED AT CLOSURE, NEVER DERIVED, and this is the load-bearing decision.
--- The cheaper design is checked_in_at alone, with absence derived as "the roll call closed
+-- The cheaper design is checked_in_at alone, with absence derived as "attendance closed
 -- and this one is null". It is wrong, because add_assignment and replace_assignment_worker
--- are supported edits: a head who closes Sunday's roll call and on Tuesday adds the person
--- who actually served would create a row with no check-in against a closed roll call, and
+-- are supported edits: a head who closes Sunday's attendance and on Tuesday adds the person
+-- who actually served would create a row with no check-in against a closed attendance, and
 -- that person would be recorded absent from a service they attended. Deriving moves the
 -- "false absence" hazard from forgetting to editing, where it is silent and lands on
 -- exactly the wrong person.
 --
--- So closing the roll call is an event that stamps marked_absent_at, and it is the only
+-- So closing attendance is an event that stamps marked_absent_at, and it is the only
 -- writer of it. A rota nobody closed has no absences by construction rather than by a
 -- predicate a later query can forget, and a row added after closure reads "not recorded"
 -- rather than acquiring an absence nobody observed.
@@ -91,8 +91,8 @@ comment on column public.schedule_assignments.checked_in_at is
     'When the operator marked this worker present. Null alone is NOT absence - see '
     'marked_absent_at. A worker can never write this: there is no self-service path, by design.';
 comment on column public.schedule_assignments.marked_absent_at is
-    'When closing the roll call recorded this worker as not having turned up. Written only by '
-    'close_roll_call and cleared only by reopening it, which is what makes "a roll call nobody '
+    'When closing attendance recorded this worker as not having turned up. Written only by '
+    'close_attendance and cleared only by reopening it, which is what makes "attendance nobody '
     'closed records nothing" true by construction rather than by a predicate.';
 comment on column public.schedule_assignments.minutes_late is
     'Minutes after the service start_time, or null when the check-in did not happen on the '
@@ -104,7 +104,7 @@ comment on column public.schedule_assignments.excused is
     'This absence does not count against the worker. Stamped at closure from worker_leave, and '
     'settable by a head afterwards. Excluded from the absence tally, kept in the duty count.';
 
--- The roll-call screen and the absence report both ask "who has been checked in", and the
+-- The attendance screen and the absence report both ask "who has been checked in", and the
 -- report scans a department's month. Partial because the interesting rows are the minority
 -- early on, matching idx_assignments_notice.
 create index idx_assignments_checked_in
@@ -116,10 +116,10 @@ create index idx_assignments_absent
     where marked_absent_at is not null;
 
 -- ------------------------------------------------------------
--- 2. Closing the roll call is a fact about the schedule
+-- 2. Closing attendance is a fact about the schedule
 -- ------------------------------------------------------------
 
--- Two columns rather than a roll_calls table: there is exactly one roll call per rota and
+-- Two columns rather than an attendance_sessions table: there is exactly one per rota and
 -- it has no fields beyond when and who, so a 1:1 table would be a join on every schedule
 -- read for two scalars. A nullable timestamp as the marker is the idiom notice_sent_at and
 -- availability_prompts.last_sent_on already use, and ScheduleResponse already carries the
@@ -130,14 +130,14 @@ create index idx_assignments_absent
 -- everybody. Putting the marker on a finer grain would mean a service could be half
 -- recorded with no way to say so.
 alter table public.schedules
-    add column roll_call_closed_at timestamptz,
-    add column roll_call_closed_by uuid references public.workers(id) on delete set null,
-    add constraint chk_roll_call_closed_by check (
-        roll_call_closed_by is null or roll_call_closed_at is not null
+    add column attendance_closed_at timestamptz,
+    add column attendance_closed_by uuid references public.workers(id) on delete set null,
+    add constraint chk_attendance_closed_by check (
+        attendance_closed_by is null or attendance_closed_at is not null
     );
 
-comment on column public.schedules.roll_call_closed_at is
-    'When the operator finished marking who turned up. Null means the roll call was never taken, '
+comment on column public.schedules.attendance_closed_at is
+    'When the operator finished marking who turned up. Null means attendance was never taken, '
     'which is NOT the same as everybody being absent - nothing is recorded for this rota at all, '
     'deliberately, because forgetting must never manufacture absences.';
 
@@ -155,11 +155,11 @@ create index idx_schedules_dept_date on public.schedules (department_id, schedul
 -- write their own was already dropped by 20260918090000, whose comment reads "Nothing
 -- replaces it: an assignment is edited by a head." Do not recreate anything shaped like it.
 --
--- Closing a roll call is an UPDATE on schedules, and an assistant HOD may do it. The
+-- Closing attendance is an UPDATE on schedules, and an assistant HOD may do it. The
 -- existing manage policy only knows is_hod(), which reads departments.hod_id alone - so RLS
 -- has been narrower than the app since assistant HODs were added, invisible until now
 -- because the backend uses the service-role client and bypasses RLS entirely. Closing that
--- gap here for the role that will be taking most roll calls, since CLAUDE.md asks the two
+-- gap here for the role that will be taking most attendances, since CLAUDE.md asks the two
 -- be kept in step.
 -- ------------------------------------------------------------
 

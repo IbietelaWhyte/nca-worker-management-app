@@ -73,7 +73,7 @@ class TestMarkAbsent:
 
     def test_a_batch_is_one_statement(self):
         """One statement rather than a loop, for the same reason mark_notice_sent batches: a
-        crash mid-loop would leave a register half closed with no way to tell which half."""
+        crash mid-loop would leave attendance half closed with no way to tell which half."""
         client = MagicMock()
         client.table.return_value.update.return_value.in_.return_value.execute.return_value.data = [{}, {}]
         repo = ScheduleRepository(client)

@@ -33,9 +33,9 @@ SELECT_ASSIGNMENTS_WITH_SCHEDULE_AND_DEPARTMENT_INNER = "*, schedules!inner(*, d
 # department to authorize against and the date the SMS quotes, and the worker is who to text.
 # Afterwards there is nothing left to read the removed worker from.
 SELECT_ASSIGNMENT_WITH_SCHEDULE_AND_WORKER = "*, workers!worker_id(*), schedules(*), subteams(*), department_roles(*)"
-# The absence report reads a department's month: every rota, who was on it, and what the roll call
+# The absence report reads a department's month: every rota, who was on it, and what attendance
 # recorded. Rooted at schedules because the report counts services as well as people — a month
-# where the roll call was taken twice out of twelve has to be able to say so, and an
+# where attendance was taken twice out of twelve has to be able to say so, and an
 # assignment-rooted read cannot see the rotas that have no attendance on them at all.
 SELECT_FOR_ATTENDANCE_REPORT = "*, schedule_assignments(*, workers!worker_id(*))"
 FUNCTION_GET_ASSIGNMENTS_DUE_FOR_REMINDER = "get_assignments_due_for_reminder"
@@ -48,8 +48,8 @@ REMINDER_SEND_CONFLICT_TARGET = "assignment_id,days_before"
 
 class Columns:
     ID = "id"
-    ROLL_CALL_CLOSED_AT = "roll_call_closed_at"
-    ROLL_CALL_CLOSED_BY = "roll_call_closed_by"
+    ATTENDANCE_CLOSED_AT = "attendance_closed_at"
+    ATTENDANCE_CLOSED_BY = "attendance_closed_by"
     DEPARTMENT_ID = "department_id"
     TITLE = "title"
     SCHEDULED_DATE = "scheduled_date"

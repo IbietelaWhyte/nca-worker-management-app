@@ -11,9 +11,9 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import PermissionDeniedError
-from app.schemas.attendance.models import AbsenceReport, RollCallCount
+from app.schemas.attendance.models import AbsenceReport, AttendanceCount
 from app.schemas.models import UserRole
-from app.schemas.schedules.models import RollCallResult
+from app.schemas.schedules.models import AttendanceResult
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_schedule
 
@@ -35,10 +35,10 @@ ALL_ROUTES = WRITE_ROUTES + [
 ]
 
 
-def roll_call_result() -> RollCallResult:
-    return RollCallResult(
+def attendance_result() -> AttendanceResult:
+    return AttendanceResult(
         schedule=make_schedule(id=SCHEDULE_ID, department_id=DEPARTMENT_ID),
-        counts=RollCallCount(assigned=0, present=0, late=0, absent=0, excused=0, not_recorded=0),
+        counts=AttendanceCount(assigned=0, present=0, late=0, absent=0, excused=0, not_recorded=0),
     )
 
 
@@ -48,7 +48,7 @@ def absence_report() -> AbsenceReport:
         from_date=date(2026, 3, 1),
         to_date=date(2026, 3, 31),
         services=0,
-        services_with_roll_call=0,
+        services_with_attendance=0,
         window_days=90,
         repeat_threshold=2,
     )
@@ -57,11 +57,11 @@ def absence_report() -> AbsenceReport:
 def stub(service):
     service.department_for_assignment.return_value = DEPARTMENT_ID
     service.department_for_schedule.return_value = DEPARTMENT_ID
-    service.check_in.return_value = roll_call_result()
-    service.undo_check_in.return_value = roll_call_result()
-    service.set_excused.return_value = roll_call_result()
-    service.close_roll_call.return_value = roll_call_result()
-    service.reopen_roll_call.return_value = roll_call_result()
+    service.check_in.return_value = attendance_result()
+    service.undo_check_in.return_value = attendance_result()
+    service.set_excused.return_value = attendance_result()
+    service.close_attendance.return_value = attendance_result()
+    service.reopen_attendance.return_value = attendance_result()
     service.get_report.return_value = absence_report()
     return service
 
@@ -100,14 +100,14 @@ class TestAWorkerCannotRecordAttendance:
         call(client, method, path)
 
         mock_attendance_service.check_in.assert_not_called()
-        mock_attendance_service.close_roll_call.assert_not_called()
+        mock_attendance_service.close_attendance.assert_not_called()
         mock_attendance_service.get_report.assert_not_called()
 
 
 class TestAHeadIsScopedToTheirOwnDepartments:
     @pytest.mark.parametrize(("method", "path"), ALL_ROUTES)
     def test_another_department_is_refused(self, method, path, mock_attendance_service, mock_worker_service):
-        # HODUser alone would let a head of Ushering close the Choir's roll call. Every route has
+        # HODUser alone would let a head of Ushering close the Choir's attendance. Every route has
         # to call the fine gate as well; this is what proves each one does.
         mock_worker_service.authorize_record_attendance.side_effect = PermissionDeniedError(
             "You can only record attendance for departments you manage"
@@ -138,7 +138,7 @@ class TestAHeadCanRecordAttendance:
         assert response.json()["counts"]["assigned"] == 0
         mock_attendance_service.check_in.assert_called_once()
 
-    def test_closing_the_roll_call_is_allowed(self, mock_attendance_service, mock_worker_service):
+    def test_closing_the_attendance_is_allowed(self, mock_attendance_service, mock_worker_service):
         client = make_client(
             role=UserRole.HOD,
             attendance_service=stub(mock_attendance_service),
@@ -148,7 +148,7 @@ class TestAHeadCanRecordAttendance:
         response = client.post(f"/api/v1/attendance/schedules/{SCHEDULE_ID}/close")
 
         assert response.status_code == 200
-        mock_attendance_service.close_roll_call.assert_called_once()
+        mock_attendance_service.close_attendance.assert_called_once()
 
     def test_an_assistant_head_may_record_attendance(self, mock_attendance_service, mock_worker_service):
         # Assistant HODs run services too, and HODUser already admits them.

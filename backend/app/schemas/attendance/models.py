@@ -16,7 +16,7 @@ class AttendanceState(str, Enum):
     Postgres: `20260918090000` removed the last status enum from this table for good reasons,
     and reintroducing one would invite `pending` and `unknown` to creep in as values.
 
-    NOT_RECORDED is the state that matters most. It is a duty nobody took a roll call for, and
+    NOT_RECORDED is the state that matters most. It is a duty nobody recorded attendance for, and
     it is emphatically not an absence - counting it as one is the failure the whole design is
     shaped to prevent.
     """
@@ -34,8 +34,8 @@ class AttendanceUpdate(BaseModel):
     excused: bool
 
 
-class RollCallCount(BaseModel):
-    """The tally on one rota, which is what an operator watches while taking the roll call."""
+class AttendanceCount(BaseModel):
+    """The tally on one rota, which is what an operator watches while taking attendance."""
 
     assigned: int
     present: int
@@ -50,7 +50,7 @@ class AbsenceRow(BaseModel):
 
     `duties` counts only **recorded** duties, so `absences` is judged against what is actually
     known rather than against a rota nobody checked. Dividing by rostered duties instead would
-    flatter a department that never takes the roll call, which is the wrong incentive to build in.
+    flatter a department that never takes attendance, which is the wrong incentive to build in.
     """
 
     worker_id: UUID
@@ -75,8 +75,8 @@ class AbsenceRow(BaseModel):
 class AbsenceReport(BaseModel):
     """A department's attendance over a window, plus how much of it is actually known.
 
-    `services` against `services_with_roll_call` is the honesty pair. Without it a month where
-    the roll call was taken twice out of twelve reads as near-perfect attendance, and the first
+    `services` against `services_with_attendance` is the honesty pair. Without it a month where
+    attendance was taken twice out of twelve reads as near-perfect attendance, and the first
     report anybody opens quietly teaches them to distrust the feature.
     """
 
@@ -84,7 +84,7 @@ class AbsenceReport(BaseModel):
     from_date: date
     to_date: date
     services: int
-    services_with_roll_call: int
+    services_with_attendance: int
     window_days: int
     repeat_threshold: int
     rows: list[AbsenceRow] = Field(default_factory=list)

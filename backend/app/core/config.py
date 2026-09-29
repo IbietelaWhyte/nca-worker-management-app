@@ -106,8 +106,8 @@ class Settings(BaseSettings):
     confirmation_token_ttl_days: int = Field(default=45, ge=1)
 
     # Attendance (see service/attendance/). An operator marks the people who turned up and then
-    # closes the roll call once; everyone left untapped is stamped absent at that moment, and a
-    # roll call nobody closes records nothing at all. The grace period is the slack between a
+    # closes attendance once; everyone left untapped is stamped absent at that moment, and a
+    # attendance nobody closes records nothing at all. The grace period is the slack between a
     # service's start_time and the point an arrival counts as late - ten minutes is about how long
     # it takes a car park to empty, and zero is legitimate for a department that means 09:00. The
     # judgement is stamped onto the row at the tap, so raising this later cannot quietly un-late a

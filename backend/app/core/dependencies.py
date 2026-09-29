@@ -403,7 +403,7 @@ def get_attendance_service(
     Args:
         schedule_repo: ScheduleRepository dependency — it owns both tables attendance lives on.
         leave_repo: WorkerLeaveRepository dependency, to excuse absences for workers on leave.
-        worker_repo: WorkerRepository dependency, to record who took the roll call.
+        worker_repo: WorkerRepository dependency, to record who took attendance.
 
     Returns:
         AttendanceService: Service for recording who turned up and reporting who did not.

@@ -6,7 +6,7 @@ import apiClient from './client'
  * this module does.
  *
  * Every write returns `{ schedule, counts, warnings }`: the whole re-read rota, so the caller
- * replaces its copy wholesale and the embeds come for free, plus the tally the roll-call screen
+ * replaces its copy wholesale and the embeds come for free, plus the tally the attendance screen
  * renders and anything the operator should know about what just happened.
  */
 
@@ -21,10 +21,10 @@ export const setExcused = (assignmentId, excused) =>
 
 // Closing stamps everyone untapped absent, so it is the one call here that writes about people
 // nobody touched. The dialog in front of it names them.
-export const closeRollCall = scheduleId =>
+export const closeAttendance = scheduleId =>
     apiClient.post(`/attendance/schedules/${scheduleId}/close`)
 
-export const reopenRollCall = scheduleId =>
+export const reopenAttendance = scheduleId =>
     apiClient.post(`/attendance/schedules/${scheduleId}/reopen`)
 
 // `range` is a { from, to } pair of yyyy-MM-dd strings, matching getSchedulesByDepartment.
