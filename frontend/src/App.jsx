@@ -13,6 +13,7 @@ const RegisterUser = lazy(() => import('@/components/workers/RegisterUser'))
 const DepartmentsPage = lazy(() => import('@/pages/DepartmentsPage'))
 const DepartmentDetailPage = lazy(() => import('@/pages/DepartmentDetailPage'))
 const SchedulesPage = lazy(() => import('@/pages/SchedulesPage'))
+const AttendancePage = lazy(() => import('@/pages/AttendancePage'))
 const AvailabilityPage = lazy(() => import('@/pages/AvailabilityPage'))
 const ScheduleDetailPage = lazy(() => import('@/pages/ScheduleDetailPage'))
 const SpecialServicesPage = lazy(() => import('@/pages/SpecialServicesPage'))
@@ -113,6 +114,14 @@ function App() {
                         element={
                             <ProtectedLayout>
                                 <ScheduleDetailPage />
+                            </ProtectedLayout>
+                        }
+                    />
+                    <Route
+                        path="/attendance"
+                        element={
+                            <ProtectedLayout>
+                                <AttendancePage />
                             </ProtectedLayout>
                         }
                     />

@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from app.core.authentication import verify_token
 from app.core.dependencies import (
     get_account_service,
+    get_attendance_service,
     get_authentication_service,
     get_availability_service,
     get_confirmation_token_service,
@@ -23,6 +24,7 @@ from app.core.dependencies import (
 from app.main import app
 from app.schemas.models import TokenPayload, UserRole
 from app.service.account.service import AccountService
+from app.service.attendance.service import AttendanceService
 from app.service.authentication.service import AuthenticationService
 from app.service.availabilities.service import AvailabilityService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
@@ -39,6 +41,11 @@ from app.service.workers.service import WorkerService
 
 def make_token_payload(role: UserRole = UserRole.WORKER) -> TokenPayload:
     return TokenPayload(sub=str(uuid4()), role=role, email="test@example.com")
+
+
+@pytest.fixture
+def mock_attendance_service():
+    return MagicMock(spec=AttendanceService)
 
 
 @pytest.fixture
@@ -122,9 +129,12 @@ def make_client(
     confirmation_token_service=None,
     worker_leave_service=None,
     special_service_service=None,
+    attendance_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
+    if attendance_service:
+        app.dependency_overrides[get_attendance_service] = lambda: attendance_service
     if worker_service:
         app.dependency_overrides[get_worker_service] = lambda: worker_service
     if department_service:

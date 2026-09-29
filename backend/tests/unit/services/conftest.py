@@ -213,10 +213,13 @@ def make_schedule(**kwargs) -> ScheduleResponse:
         end_time=kwargs.get("end_time", "11:00:00"),
         notes=kwargs.get("notes", None),
         reminder_days_before=kwargs.get("reminder_days_before", [1]),
+        roll_call_closed_at=kwargs.get("roll_call_closed_at", None),
+        roll_call_closed_by=kwargs.get("roll_call_closed_by", None),
         min_workers=kwargs.get("min_workers", None),
         max_workers=kwargs.get("max_workers", None),
         created_by=kwargs.get("created_by", uuid4()),
         created_at=kwargs.get("created_at", date.today()),
+        schedule_assignments=kwargs.get("schedule_assignments", []),
     )
 
 
@@ -241,6 +244,12 @@ def make_assignment(**kwargs) -> AssignmentResponse:
         department_role_id=kwargs.get("department_role_id", None),
         subteam_id=kwargs.get("subteam_id", None),
         notice_sent_at=kwargs.get("notice_sent_at", None),
+        checked_in_at=kwargs.get("checked_in_at", None),
+        checked_in_by=kwargs.get("checked_in_by", None),
+        marked_absent_at=kwargs.get("marked_absent_at", None),
+        minutes_late=kwargs.get("minutes_late", None),
+        is_late=kwargs.get("is_late", False),
+        excused=kwargs.get("excused", False),
         workers=kwargs.get("workers", None),
         schedules=kwargs.get("schedules", None),
     )

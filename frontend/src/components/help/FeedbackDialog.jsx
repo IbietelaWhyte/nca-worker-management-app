@@ -20,6 +20,7 @@ const AREAS = [
     'Dashboard',
     'My availability',
     'Schedules and rotas',
+    'Attendance and roll call',
     'Workers',
     'Departments',
     'My account',
