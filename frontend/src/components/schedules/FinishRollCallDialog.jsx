@@ -52,13 +52,8 @@ export default function FinishRollCallDialog({ open, untapped, busy, error, onCa
                     </ul>
                 )}
 
-                {/* Both of these are what people assume, and neither is true. Saying so here is
-                    what stops a head hesitating over a button that does not actually tell anyone
-                    off — and anyone on leave is excused automatically rather than marked absent. */}
                 <p className="text-sm text-muted-foreground">
-                    Nobody is texted or emailed. This only records what happened, for the attendance
-                    report. Anyone on leave for this date is excused rather than marked absent, and
-                    you can reopen the roll call afterwards to correct it.
+                    You can reopen the roll call afterwards to correct it.
                 </p>
 
                 {error && (
