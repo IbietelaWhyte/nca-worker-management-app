@@ -68,7 +68,7 @@ class TestLateness:
 
 class TestStateOf:
     def test_neither_timestamp_is_not_recorded_rather_than_absent(self):
-        # The single most important assertion in the feature. A duty nobody took a register for
+        # The single most important assertion in the feature. A duty nobody recorded attendance for
         # is unknown, and counting it as an absence is the failure the design exists to prevent.
         assert state_of(None, None, False, False) is AttendanceState.NOT_RECORDED
 

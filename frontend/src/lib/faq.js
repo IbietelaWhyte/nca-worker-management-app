@@ -45,11 +45,11 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Does the app know whether I turned up?',
-                answer: 'It can. Whoever runs the service can mark who arrived and then finish the roll call, and anyone not marked is recorded as absent for that service. Nobody is texted or emailed about it — it is only there so your head of department can see how a rota actually went. If a date is recorded wrongly, tell your head and they can correct it.',
+                answer: 'It can. Whoever runs the service can mark who arrived and then finish attendance, and anyone not marked is recorded as absent for that service. Nobody is texted or emailed about it — it is only there so your head of department can see how a rota actually went. If a date is recorded wrongly, tell your head and they can correct it.',
             },
             {
                 question: 'What happens if I am on leave but still on the rota?',
-                answer: 'You are excused rather than marked absent. Leave never takes you off a rota by itself, so your head is told about the clash and moves the duty — but if it is still there on the day, the roll call knows you were away and does not count it against you.',
+                answer: 'You are excused rather than marked absent. Leave never takes you off a rota by itself, so your head is told about the clash and moves the duty — but if it is still there on the day, whoever takes attendance sees you were away and it is not counted against you.',
             },
         ],
     },
@@ -137,15 +137,15 @@ export const FAQ_SECTIONS = [
         items: [
             {
                 question: 'How do I record who turned up?',
-                answer: 'Open the service and tap Take roll call — it appears from the service date onward, not before. Tap Mark here beside everyone who came, then tap Finish roll call once. Anyone you have not tapped is recorded absent at that moment.',
+                answer: 'Open the service and tap Take Attendance — it appears from the service date onward, not before. Tap Mark here beside everyone who came, then tap Finish Attendance once. Anyone you have not tapped is recorded absent at that moment.',
             },
             {
-                question: 'What if I forget to take the roll call?',
-                answer: 'Nothing is recorded and nobody is marked absent. A service only produces absences if somebody finishes its roll call, so forgetting can never count against your team. The attendance report shows how many services were actually checked, so a thin month reads as thin rather than as perfect attendance.',
+                question: 'What if I forget to take attendance?',
+                answer: 'Nothing is recorded and nobody is marked absent. A service only produces absences if somebody closes its attendance, so forgetting can never count against your team. The attendance report shows how many services were actually checked, so a thin month reads as thin rather than as perfect attendance.',
             },
             {
-                question: 'Somebody arrived after I finished the roll call. Can I fix it?',
-                answer: 'Yes. Tap Reopen roll call, mark them here, and finish again — or just mark them here, which clears the absence on its own. Reopening only undoes the absences; anyone already marked present stays marked.',
+                question: 'Somebody arrived after I finished attendance. Can I fix it?',
+                answer: 'Yes. Tap Reopen Attendance, mark them here, and finish again — or just mark them here, which clears the absence on its own. Reopening only undoes the absences; anyone already marked present stays marked.',
             },
             {
                 question: 'Does anyone get told they were marked absent?',

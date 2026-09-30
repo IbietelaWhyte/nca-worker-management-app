@@ -3,11 +3,11 @@
 A rota says who was asked; this says who came. The whole feature turns on one rule, and the
 schema, the service and the UI all exist to keep it true:
 
-    **A roll call nobody closed records nothing.**
+    **Attendance nobody closed records nothing.**
 
-Absence is stamped by `close_roll_call` and by nothing else, so an operator who forgets - or who
-never takes the register at all - leaves every duty reading "not recorded" rather than marking a
-department absent. The alternative, deriving absence from "the register closed and this one has no
+Absence is stamped by `close_attendance` and by nothing else, so an operator who forgets - or who
+never takes attendance at all - leaves every duty reading "not recorded" rather than marking a
+department absent. The alternative, deriving absence from "attendance closed and this one has no
 check-in", also marks anyone *added to the rota after closure* absent, and a head repairing a rota
 after the fact is adding exactly the person who did turn up.
 
@@ -29,10 +29,10 @@ from app.repository.workers.repository import WorkerRepository
 from app.schemas.attendance.models import (
     AbsenceReport,
     AbsenceRow,
+    AttendanceCount,
     AttendanceState,
-    RollCallCount,
 )
-from app.schemas.schedules.models import AssignmentResponse, RollCallResult, ScheduleResponse
+from app.schemas.schedules.models import AssignmentResponse, AttendanceResult, ScheduleResponse
 from app.schemas.workers.models import WorkerResponse
 from app.service.attendance import rules
 
@@ -55,7 +55,7 @@ class AttendanceService:
     # Taking the register
     # ------------------------------------------------------------------
 
-    def check_in(self, assignment_id: UUID, actor_email: str | None) -> RollCallResult:
+    def check_in(self, assignment_id: UUID, actor_email: str | None) -> AttendanceResult:
         """Mark one worker present, judging lateness against the service they were on.
 
         Clears any absence already stamped against them, so somebody who arrives after the
@@ -67,7 +67,7 @@ class AttendanceService:
             actor_email: The signed-in operator, recorded as who saw them.
 
         Returns:
-            RollCallResult: The re-read rota and its tally.
+            AttendanceResult: The re-read rota and its tally.
 
         Raises:
             NotFoundError: If the assignment or its schedule is gone.
@@ -91,11 +91,11 @@ class AttendanceService:
         log.info("checked_in", is_late=is_late, minutes_late=minutes_late)
         return self._result(schedule.id)
 
-    def undo_check_in(self, assignment_id: UUID) -> RollCallResult:
+    def undo_check_in(self, assignment_id: UUID) -> AttendanceResult:
         """Take a check-in back.
 
         Where it lands depends on the register: on an open one the duty returns to "not recorded",
-        and on a closed one it returns to absent. A closed register must not develop a hole that
+        and on a closed one it returns to absent. Closed attendance must not develop a hole that
         says neither, because the report reads the absence of a record as "nobody checked" and
         would quietly stop counting a duty somebody did decide about.
 
@@ -103,7 +103,7 @@ class AttendanceService:
             assignment_id: The duty being un-marked.
 
         Returns:
-            RollCallResult: The re-read rota and its tally.
+            AttendanceResult: The re-read rota and its tally.
 
         Raises:
             NotFoundError: If the assignment or its schedule is gone.
@@ -112,14 +112,14 @@ class AttendanceService:
         assignment = self._require_assignment(assignment_id)
         schedule = self._require_schedule(assignment.schedule_id)
 
-        self.schedule_repo.clear_check_in(assignment_id, schedule.roll_call_closed_at)
-        log.info("check_in_undone", roll_call_closed=schedule.roll_call_closed_at is not None)
+        self.schedule_repo.clear_check_in(assignment_id, schedule.attendance_closed_at)
+        log.info("check_in_undone", attendance_closed=schedule.attendance_closed_at is not None)
         return self._result(schedule.id)
 
-    def close_roll_call(self, schedule_id: UUID, actor_email: str | None) -> RollCallResult:
+    def close_attendance(self, schedule_id: UUID, actor_email: str | None) -> AttendanceResult:
         """Finish the register: everyone untapped is recorded absent, from this moment.
 
-        The only writer of `marked_absent_at`, which is what makes "a roll call nobody closed
+        The only writer of `marked_absent_at`, which is what makes "attendance nobody closed
         records nothing" true by construction rather than by a predicate somebody can forget.
 
         **Workers on leave are excused, not absent.** Leave never edits the rota by design - a
@@ -132,18 +132,18 @@ class AttendanceService:
             actor_email: The signed-in operator.
 
         Returns:
-            RollCallResult: The re-read rota, its tally, and anything worth saying about it.
+            AttendanceResult: The re-read rota, its tally, and anything worth saying about it.
 
         Raises:
             NotFoundError: If the schedule is gone.
             ConflictError: If the register is already closed.
             BadRequestError: If the service has not happened yet.
         """
-        log = self.logger.bind(method="close_roll_call", schedule_id=str(schedule_id))
+        log = self.logger.bind(method="close_attendance", schedule_id=str(schedule_id))
         schedule = self._require_schedule(schedule_id)
-        if schedule.roll_call_closed_at is not None:
-            raise ConflictError("The roll call for this rota is already closed. Reopen it to make changes.")
-        self._reject_future(schedule.scheduled_date, "close a roll call")
+        if schedule.attendance_closed_at is not None:
+            raise ConflictError("The attendance for this rota is already closed. Reopen it to make changes.")
+        self._reject_future(schedule.scheduled_date, "close attendance")
 
         assignments = schedule.schedule_assignments
         unmarked = [a for a in assignments if a.checked_in_at is None]
@@ -156,7 +156,7 @@ class AttendanceService:
         self.schedule_repo.mark_absent(excused_ids, now, excused=True)
 
         actor = self._actor(actor_email)
-        self.schedule_repo.set_roll_call_closed(schedule_id, now, actor.id if actor else None)
+        self.schedule_repo.set_attendance_closed(schedule_id, now, actor.id if actor else None)
 
         warnings: list[str] = []
         present = len(assignments) - len(unmarked)
@@ -165,17 +165,17 @@ class AttendanceService:
             # the whole team absent, and that number goes to their head.
             warnings.append(
                 "Nobody was marked present, so everyone on this rota has been recorded absent. "
-                "Reopen the roll call if that is not right."
+                "Reopen attendance if that is not right."
             )
         if excused_ids:
             warnings.append(
                 f"{len(excused_ids)} worker(s) were on leave for this date and have been excused "
                 "rather than marked absent."
             )
-        log.info("roll_call_closed", present=present, absent=len(absent_ids), excused=len(excused_ids))
+        log.info("attendance_closed", present=present, absent=len(absent_ids), excused=len(excused_ids))
         return self._result(schedule_id, warnings)
 
-    def reopen_roll_call(self, schedule_id: UUID) -> RollCallResult:
+    def reopen_attendance(self, schedule_id: UUID) -> AttendanceResult:
         """Reopen the register, erasing the absences closing it stamped.
 
         Check-ins survive. Closing invents absences; it does not invent the arrivals somebody
@@ -186,24 +186,24 @@ class AttendanceService:
             schedule_id: The rota whose register it is.
 
         Returns:
-            RollCallResult: The re-read rota and its tally.
+            AttendanceResult: The re-read rota and its tally.
 
         Raises:
             NotFoundError: If the schedule is gone.
             ConflictError: If the register is not closed.
         """
-        log = self.logger.bind(method="reopen_roll_call", schedule_id=str(schedule_id))
+        log = self.logger.bind(method="reopen_attendance", schedule_id=str(schedule_id))
         schedule = self._require_schedule(schedule_id)
-        if schedule.roll_call_closed_at is None:
-            raise ConflictError("The roll call for this rota is not closed.")
+        if schedule.attendance_closed_at is None:
+            raise ConflictError("The attendance for this rota is not closed.")
 
         absent_ids = [a.id for a in schedule.schedule_assignments if a.marked_absent_at is not None]
         cleared = self.schedule_repo.clear_absences(absent_ids)
-        self.schedule_repo.set_roll_call_closed(schedule_id, None, None)
-        log.info("roll_call_reopened", absences_cleared=cleared)
+        self.schedule_repo.set_attendance_closed(schedule_id, None, None)
+        log.info("attendance_reopened", absences_cleared=cleared)
         return self._result(schedule_id)
 
-    def set_excused(self, assignment_id: UUID, excused: bool) -> RollCallResult:
+    def set_excused(self, assignment_id: UUID, excused: bool) -> AttendanceResult:
         """Mark an absence as not counting against the worker, or put it back.
 
         Args:
@@ -211,7 +211,7 @@ class AttendanceService:
             excused: Whether it should count.
 
         Returns:
-            RollCallResult: The re-read rota and its tally.
+            AttendanceResult: The re-read rota and its tally.
 
         Raises:
             NotFoundError: If the assignment or its schedule is gone.
@@ -284,7 +284,7 @@ class AttendanceService:
             from_date=from_date,
             to_date=to_date,
             services=len(schedules),
-            services_with_roll_call=sum(1 for s in schedules if s.roll_call_closed_at is not None),
+            services_with_attendance=sum(1 for s in schedules if s.attendance_closed_at is not None),
             window_days=settings.attendance_window_days,
             repeat_threshold=settings.attendance_repeat_threshold,
             rows=report_rows,
@@ -332,7 +332,7 @@ class AttendanceService:
 
         `duties` counts only what was actually recorded, so the absence rate is judged against
         what is known. Dividing by rostered duties instead would flatter a department that never
-        takes the register, which is precisely the wrong incentive to build in.
+        takes attendance, which is precisely the wrong incentive to build in.
         """
         state = rules.state_of(
             assignment.checked_in_at, assignment.marked_absent_at, assignment.is_late, assignment.excused
@@ -363,19 +363,19 @@ class AttendanceService:
         records = self.leave_repo.get_for_workers(worker_ids, on, on)
         return {leave.worker_id for leave in records if leave.covers(on)}
 
-    def _result(self, schedule_id: UUID, warnings: list[str] | None = None) -> RollCallResult:
+    def _result(self, schedule_id: UUID, warnings: list[str] | None = None) -> AttendanceResult:
         """Re-read the rota and count it, so the caller replaces its copy wholesale."""
         schedule = self._require_schedule(schedule_id)
-        return RollCallResult(schedule=schedule, counts=self.count(schedule), warnings=warnings or [])
+        return AttendanceResult(schedule=schedule, counts=self.count(schedule), warnings=warnings or [])
 
     @staticmethod
-    def count(schedule: ScheduleResponse) -> RollCallCount:
+    def count(schedule: ScheduleResponse) -> AttendanceCount:
         """The tally an operator watches while taking the register."""
         states = [
             rules.state_of(a.checked_in_at, a.marked_absent_at, a.is_late, a.excused)
             for a in schedule.schedule_assignments
         ]
-        return RollCallCount(
+        return AttendanceCount(
             assigned=len(states),
             present=sum(1 for s in states if s in (AttendanceState.PRESENT, AttendanceState.LATE)),
             late=sum(1 for s in states if s is AttendanceState.LATE),

@@ -21,11 +21,18 @@ const name = assignment =>
  * Okonkwo" is what makes somebody say "wait, she IS here" — and this record is what their head
  * reads later, so the moment to catch it is now.
  *
- * The confirm is the ordinary purple button, not destructive: finishing a roll call is a routine
+ * The confirm is the ordinary purple button, not destructive: finishing attendance is a routine
  * completion, and in this app red means delete. (`ui/button.jsx`'s destructive variant is an
  * underlined text link anyway, not a filled red button.)
  */
-export default function FinishRollCallDialog({ open, untapped, busy, error, onCancel, onConfirm }) {
+export default function FinishAttendanceDialog({
+    open,
+    untapped,
+    busy,
+    error,
+    onCancel,
+    onConfirm,
+}) {
     const count = untapped.length
 
     return (
@@ -34,12 +41,12 @@ export default function FinishRollCallDialog({ open, untapped, busy, error, onCa
                 <DialogHeader>
                     <DialogTitle>
                         {count === 0
-                            ? 'Finish roll call?'
+                            ? 'Finish attendance?'
                             : `Mark ${count} ${count === 1 ? 'person' : 'people'} absent?`}
                     </DialogTitle>
                     <DialogDescription>
                         {count === 0
-                            ? 'Everybody on this rota is marked. This just closes the roll call.'
+                            ? 'Everybody on this rota is marked. This just closes attendance for the service.'
                             : 'Everyone you have not tapped is recorded as absent for this service.'}
                     </DialogDescription>
                 </DialogHeader>
@@ -53,7 +60,7 @@ export default function FinishRollCallDialog({ open, untapped, busy, error, onCa
                 )}
 
                 <p className="text-sm text-muted-foreground">
-                    You can reopen the roll call afterwards to correct it.
+                    You can reopen the attendance afterwards to correct it.
                 </p>
 
                 {error && (

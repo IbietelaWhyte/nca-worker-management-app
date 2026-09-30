@@ -87,7 +87,7 @@ def state_of(
 
     Args:
         checked_in_at: When they were marked present, if they were.
-        marked_absent_at: When closing the roll call recorded them absent, if it did.
+        marked_absent_at: When closing attendance recorded them absent, if it did.
         is_late: The stamped lateness judgement.
         excused: Whether this absence was excused.
 

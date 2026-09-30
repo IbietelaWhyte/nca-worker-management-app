@@ -1,7 +1,7 @@
 """Tests for AttendanceService.
 
-The rule every one of these defends: **a roll call nobody closed records nothing.** Absence is
-stamped by `close_roll_call` and by nothing else, so forgetting the register - or repairing a rota
+The rule every one of these defends: **attendance nobody closed records nothing.** Absence is
+stamped by `close_attendance` and by nothing else, so forgetting attendance - or repairing a rota
 after it - can never manufacture an absence against somebody who was there.
 """
 
@@ -33,7 +33,7 @@ def rota(repo, *assignments, closed_at=None, scheduled_date=PAST):
     """Point the repository at one schedule carrying these assignments."""
     schedule = make_schedule(
         scheduled_date=scheduled_date,
-        roll_call_closed_at=closed_at,
+        attendance_closed_at=closed_at,
         schedule_assignments=list(assignments),
     )
     repo.get_with_assignments.return_value = schedule
@@ -54,9 +54,9 @@ def leave_for(worker_id, on=PAST):
     )
 
 
-class TestNothingIsRecordedUntilTheRollCallCloses:
-    def test_an_open_roll_call_stamps_no_absences(self, service, mock_schedule_repo):
-        # The requirement in one test. Three people on the rota, one tapped, register left open -
+class TestNothingIsRecordedUntilAttendanceIsClosed:
+    def test_an_open_attendance_stamps_no_absences(self, service, mock_schedule_repo):
+        # The requirement in one test. Three people on the rota, one tapped, attendance left open -
         # and the two untapped must not acquire an absence from anywhere.
         present, missing, other = (make_assignment(schedule_id=uuid4()) for _ in range(3))
         schedule = rota(mock_schedule_repo, present, missing, other)
@@ -72,7 +72,7 @@ class TestNothingIsRecordedUntilTheRollCallCloses:
         away_one, away_two = make_assignment(), make_assignment()
         schedule = rota(mock_schedule_repo, here, away_one, away_two)
 
-        service.close_roll_call(schedule.id, "head@example.com")
+        service.close_attendance(schedule.id, "head@example.com")
 
         args, kwargs = mock_schedule_repo.mark_absent.call_args_list[0]
         assert set(args[0]) == {away_one.id, away_two.id}
@@ -84,7 +84,7 @@ class TestNothingIsRecordedUntilTheRollCallCloses:
         # Almost always a misclick, and the number goes to the workers' head.
         schedule = rota(mock_schedule_repo, make_assignment(), make_assignment())
 
-        result = service.close_roll_call(schedule.id, "head@example.com")
+        result = service.close_attendance(schedule.id, "head@example.com")
 
         assert any("Nobody was marked present" in w for w in result.warnings)
 
@@ -92,7 +92,7 @@ class TestNothingIsRecordedUntilTheRollCallCloses:
         schedule = rota(mock_schedule_repo, make_assignment(), closed_at=CLOSED_AT)
 
         with pytest.raises(ConflictError):
-            service.close_roll_call(schedule.id, "head@example.com")
+            service.close_attendance(schedule.id, "head@example.com")
 
     def test_a_future_service_cannot_be_closed(self, service, mock_schedule_repo):
         # The mirror image of a false absence: nobody can have failed to turn up to a service
@@ -100,7 +100,7 @@ class TestNothingIsRecordedUntilTheRollCallCloses:
         schedule = rota(mock_schedule_repo, make_assignment(), scheduled_date=date.today() + timedelta(days=7))
 
         with pytest.raises(BadRequestError):
-            service.close_roll_call(schedule.id, "head@example.com")
+            service.close_attendance(schedule.id, "head@example.com")
 
     def test_a_future_service_cannot_be_checked_into(self, service, mock_schedule_repo):
         future = make_assignment()
@@ -119,7 +119,7 @@ class TestLeaveIsExcusedRatherThanAbsent:
         schedule = rota(mock_schedule_repo, away, missing)
         mock_leave_repo.get_for_workers.return_value = [leave_for(away.worker_id)]
 
-        result = service.close_roll_call(schedule.id, "head@example.com")
+        result = service.close_attendance(schedule.id, "head@example.com")
 
         calls = {kwargs["excused"]: args[0] for args, kwargs in mock_schedule_repo.mark_absent.call_args_list}
         assert calls[True] == [away.id]
@@ -129,14 +129,14 @@ class TestLeaveIsExcusedRatherThanAbsent:
     def test_leave_is_looked_up_for_the_service_date_not_today(self, service, mock_schedule_repo, mock_leave_repo):
         schedule = rota(mock_schedule_repo, make_assignment())
 
-        service.close_roll_call(schedule.id, "head@example.com")
+        service.close_attendance(schedule.id, "head@example.com")
 
         _, start, end = mock_leave_repo.get_for_workers.call_args.args
         assert start == end == PAST
 
 
 class TestUndoAndReopen:
-    def test_undo_on_an_open_register_leaves_no_record(self, service, mock_schedule_repo):
+    def test_undo_on_open_attendance_leaves_no_record(self, service, mock_schedule_repo):
         here = make_assignment(checked_in_at=CLOSED_AT)
         rota(mock_schedule_repo, here)
 
@@ -144,8 +144,8 @@ class TestUndoAndReopen:
 
         mock_schedule_repo.clear_check_in.assert_called_once_with(here.id, None)
 
-    def test_undo_on_a_closed_register_leaves_them_absent(self, service, mock_schedule_repo):
-        # A closed register must not develop a hole that says neither present nor absent - the
+    def test_undo_on_closed_attendance_leaves_them_absent(self, service, mock_schedule_repo):
+        # Closed attendance must not develop a hole that says neither present nor absent - the
         # report reads no record as "nobody checked" and would stop counting a decided duty.
         here = make_assignment(checked_in_at=CLOSED_AT)
         rota(mock_schedule_repo, here, closed_at=CLOSED_AT)
@@ -159,16 +159,16 @@ class TestUndoAndReopen:
         absent = make_assignment(marked_absent_at=CLOSED_AT)
         schedule = rota(mock_schedule_repo, here, absent, closed_at=CLOSED_AT)
 
-        service.reopen_roll_call(schedule.id)
+        service.reopen_attendance(schedule.id)
 
         mock_schedule_repo.clear_absences.assert_called_once_with([absent.id])
-        mock_schedule_repo.set_roll_call_closed.assert_called_once_with(schedule.id, None, None)
+        mock_schedule_repo.set_attendance_closed.assert_called_once_with(schedule.id, None, None)
 
-    def test_reopening_an_open_register_is_refused(self, service, mock_schedule_repo):
+    def test_reopening_open_attendance_is_refused(self, service, mock_schedule_repo):
         schedule = rota(mock_schedule_repo, make_assignment())
 
         with pytest.raises(ConflictError):
-            service.reopen_roll_call(schedule.id)
+            service.reopen_attendance(schedule.id)
 
 
 class TestExcusing:
@@ -214,7 +214,7 @@ class TestReport:
         mock_schedule_repo.get_for_attendance_report.return_value = [
             make_schedule(
                 scheduled_date=date(2026, 3, 1),
-                roll_call_closed_at=CLOSED_AT,
+                attendance_closed_at=CLOSED_AT,
                 schedule_assignments=[make_assignment(worker_id=worker.id, workers=worker, marked_absent_at=CLOSED_AT)],
             ),
             make_schedule(
@@ -228,14 +228,14 @@ class TestReport:
         row = report.rows[0]
         assert (row.duties, row.absences, row.not_recorded) == (1, 1, 1)
         assert row.absence_rate == 1.0
-        assert (report.services, report.services_with_roll_call) == (2, 1)
+        assert (report.services, report.services_with_attendance) == (2, 1)
 
     def test_an_excused_absence_stays_in_the_denominator(self, service, mock_schedule_repo):
         worker = make_worker()
         mock_schedule_repo.get_for_attendance_report.return_value = [
             make_schedule(
                 scheduled_date=date(2026, 3, 1),
-                roll_call_closed_at=CLOSED_AT,
+                attendance_closed_at=CLOSED_AT,
                 schedule_assignments=[
                     make_assignment(worker_id=worker.id, workers=worker, marked_absent_at=CLOSED_AT, excused=True)
                 ],
@@ -257,7 +257,7 @@ class TestReport:
         mock_schedule_repo.get_for_attendance_report.return_value = [
             make_schedule(
                 scheduled_date=date(2026, 3, d),
-                roll_call_closed_at=CLOSED_AT,
+                attendance_closed_at=CLOSED_AT,
                 schedule_assignments=[
                     make_assignment(worker_id=steady.id, workers=steady, checked_in_at=CLOSED_AT),
                     make_assignment(worker_id=flaky.id, workers=flaky, marked_absent_at=CLOSED_AT),
@@ -284,9 +284,9 @@ class TestMissingRecords:
         mock_schedule_repo.get_with_assignments.return_value = None
 
         with pytest.raises(NotFoundError):
-            service.close_roll_call(uuid4(), "head@example.com")
+            service.close_attendance(uuid4(), "head@example.com")
 
-    def test_an_operator_without_a_worker_record_can_still_take_the_register(
+    def test_an_operator_without_a_worker_record_can_still_take_attendance(
         self, service, mock_schedule_repo, mock_worker_repo
     ):
         # An admin need not have a worker profile, and that is no reason to refuse them the

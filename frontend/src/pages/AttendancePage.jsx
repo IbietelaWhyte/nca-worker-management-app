@@ -76,7 +76,7 @@ export default function AttendancePage() {
     const department = departments.find(d => d.id === departmentId)
     const rows = report?.rows ?? []
     const threshold = report?.repeat_threshold ?? 2
-    const unrecorded = report ? report.services - report.services_with_roll_call : 0
+    const unrecorded = report ? report.services - report.services_with_attendance : 0
 
     const handleExport = () => {
         const { headers, rows: csvRows } = toAbsenceCsv(report)
@@ -97,7 +97,7 @@ export default function AttendancePage() {
                 <div>
                     <h2 className="text-2xl font-bold">Attendance</h2>
                     <p className="text-sm text-muted-foreground">
-                        Who has been turning up, from the roll calls your team has taken.
+                        Who has been turning up, from attendances your team has taken.
                     </p>
                 </div>
                 {/* A plain button, not a dialog: the table on screen is the preview, and the
@@ -183,7 +183,7 @@ export default function AttendancePage() {
                     {report && unrecorded > 0 && (
                         <Alert variant="warning">
                             <p className="text-sm">
-                                Roll call was taken at {report.services_with_roll_call} of{' '}
+                                Attendance was taken at {report.services_with_attendance} of{' '}
                                 {report.services} services in this period. The other {unrecorded}{' '}
                                 {unrecorded === 1 ? 'is' : 'are'} not counted here.
                             </p>
@@ -197,7 +197,7 @@ export default function AttendancePage() {
                     ) : rows.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
                             Nothing recorded for this period yet. Open a past service and take the
-                            roll call to start.
+                            attendance to start.
                         </p>
                     ) : (
                         <>

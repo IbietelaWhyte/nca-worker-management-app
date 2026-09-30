@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
     checkIn as apiCheckIn,
-    closeRollCall as apiCloseRollCall,
-    reopenRollCall as apiReopenRollCall,
+    closeAttendance as apiCloseAttendance,
+    reopenAttendance as apiReopenAttendance,
     setExcused as apiSetExcused,
     undoCheckIn as apiUndoCheckIn,
 } from '@/api/attendance'
@@ -68,7 +68,7 @@ export function useScheduleDetail(scheduleId) {
     const removeWorker = async assignmentId => replaceFrom(await removeAssignment(assignmentId))
 
     // Attendance. Same wholesale-replace shape as the edit paths above, for the same reason:
-    // closing the roll call changes every row at once, so patching one would leave the tally and
+    // closing attendance changes every row at once, so patching one would leave the tally and
     // the badges disagreeing with each other.
     //
     // Deliberately optimistic where the others are not. An operator taking a register is looking
@@ -118,9 +118,9 @@ export function useScheduleDetail(scheduleId) {
     const excuseAbsence = async (assignmentId, excused) =>
         optimistically(assignmentId, { excused }, () => apiSetExcused(assignmentId, excused))
 
-    const finishRollCall = async () => replaceFrom(await apiCloseRollCall(scheduleId))
+    const finishAttendance = async () => replaceFrom(await apiCloseAttendance(scheduleId))
 
-    const reopenRollCall = async () => replaceFrom(await apiReopenRollCall(scheduleId))
+    const reopenAttendance = async () => replaceFrom(await apiReopenAttendance(scheduleId))
 
     const sendReminders = async () => {
         const response = await triggerReminders()
@@ -144,8 +144,8 @@ export function useScheduleDetail(scheduleId) {
         markHere,
         undoHere,
         excuseAbsence,
-        finishRollCall,
-        reopenRollCall,
+        finishAttendance,
+        reopenAttendance,
         sendReminders,
         sendRemindersForSchedule,
     }

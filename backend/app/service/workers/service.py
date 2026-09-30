@@ -935,7 +935,7 @@ class WorkerService:
         """Ensure the requesting user may record attendance for the given department.
 
         The same rule as `authorize_create_assignment` with its own message, because a head who
-        tried to take a roll call and is told "you can only assign workers to departments you
+        tried to take attendance and is told "you can only assign workers to departments you
         manage" has to work out what that has to do with what they did.
 
         **A plain worker never passes this**, which is the feature's hardest requirement: there

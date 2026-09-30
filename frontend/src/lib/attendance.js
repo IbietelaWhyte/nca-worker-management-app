@@ -4,7 +4,7 @@
  * Pure and React-free, like rota.js, dashboard.js and staffing.js. The three-state rule this
  * encodes is the whole feature, so it lives in one place rather than in each component:
  *
- *   neither timestamp -> not recorded   (a duty nobody took a register for)
+ *   neither timestamp -> not recorded   (a duty nobody recorded attendance for)
  *   checked in        -> present, or late if the backend stamped it so
  *   marked absent     -> absent, or excused
  *

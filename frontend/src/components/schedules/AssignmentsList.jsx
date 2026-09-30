@@ -146,7 +146,7 @@ export default function AssignmentsList({
                                                     about it — and, once the service has happened,
                                                     records about it.
 
-                                                    Roll call is a mode rather than an extra
+                                                    Attendance is a mode rather than an extra
                                                     column: this cluster already holds a role
                                                     select, Swap and Remove, and five controls
                                                     will not fit 375px or be aimed at reliably.
@@ -162,7 +162,7 @@ export default function AssignmentsList({
                                                                 : 'outline'
                                                         }
                                                         /* No Button size reaches 44px — sm is
-                                                           h-9 and default h-10 — and a roll call
+                                                           h-9 and default h-10 — and attendance
                                                            is forty taps on a phone, so they have
                                                            to land. min-h-11 is the idiom the
                                                            sidebar already uses for this. */

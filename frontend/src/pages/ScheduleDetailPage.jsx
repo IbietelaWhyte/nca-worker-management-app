@@ -11,7 +11,7 @@ import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, UserPlus } from 'lucide-react'
 import { isHere, tally } from '@/lib/attendance'
-import FinishRollCallDialog from '@/components/schedules/FinishRollCallDialog'
+import FinishAttendanceDialog from '@/components/schedules/FinishAttendanceDialog'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
 import { getSubteamsByDepartment } from '@/api/subteams'
@@ -40,8 +40,8 @@ export default function ScheduleDetailPage() {
         removeWorker,
         markHere,
         undoHere,
-        finishRollCall,
-        reopenRollCall,
+        finishAttendance,
+        reopenAttendance,
         sendRemindersForSchedule,
     } = useScheduleDetail(id)
     const [reminderLoading, setReminderLoading] = useState(false)
@@ -58,10 +58,10 @@ export default function ScheduleDetailPage() {
     // null | { mode: 'add' } | { mode: 'swap', assignment } — one picker for the whole page.
     const [picker, setPicker] = useState(null)
     const [removeTarget, setRemoveTarget] = useState(null)
-    // Roll call is a mode the page is in, not a per-row control — see the comment in
+    // Attendance is a mode the page is in, not a per-row control — see the comment in
     // AssignmentsList. `attendanceBusyId` stops a double-fire on one row while its write is in
     // flight, which matters because the taps are optimistic.
-    const [rollCall, setRollCall] = useState(false)
+    const [takingAttendance, setTakingAttendance] = useState(false)
     const [attendanceBusyId, setAttendanceBusyId] = useState(null)
     const [finishOpen, setFinishOpen] = useState(false)
     const [editBusy, setEditBusy] = useState(false)
@@ -243,7 +243,7 @@ export default function ScheduleDetailPage() {
     const reminderLadder = schedule.reminder_days_before ?? []
     const canManage = isAdmin || isDepartmentHead
     const counts = tally(assignments)
-    const rollCallClosed = Boolean(schedule.roll_call_closed_at)
+    const attendanceClosed = Boolean(schedule.attendance_closed_at)
     // Only from the service date onward. Marking somebody present for a rota three weeks out is
     // nonsense, and since most rotas on screen are future ones a permanently disabled button
     // would be clutter on the common case — so it is absent rather than disabled.
@@ -265,14 +265,14 @@ export default function ScheduleDetailPage() {
     }
 
     const handleFinish = async () => {
-        if (await runEdit(finishRollCall)) {
+        if (await runEdit(finishAttendance)) {
             setFinishOpen(false)
-            setRollCall(false)
+            setTakingAttendance(false)
         }
     }
 
     const handleReopen = async () => {
-        if (await runEdit(reopenRollCall)) setRollCall(true)
+        if (await runEdit(reopenAttendance)) setTakingAttendance(true)
     }
 
     return (
@@ -308,16 +308,16 @@ export default function ScheduleDetailPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                    {canManage && serviceHasHappened && !rollCall && !rollCallClosed && (
-                        <Button onClick={() => setRollCall(true)}>
+                    {canManage && serviceHasHappened && !takingAttendance && !attendanceClosed && (
+                        <Button onClick={() => setTakingAttendance(true)}>
                             <ClipboardCheck size={16} className="mr-2" />
-                            Take roll call
+                            Take Attendance
                         </Button>
                     )}
-                    {canManage && rollCallClosed && (
+                    {canManage && attendanceClosed && (
                         <Button variant="outline" onClick={handleReopen} disabled={editBusy}>
                             <RotateCcw size={16} className="mr-2" />
-                            Reopen roll call
+                            Reopen Attendance
                         </Button>
                     )}
                     {canManage && (
@@ -345,7 +345,7 @@ export default function ScheduleDetailPage() {
                     </p>
                     <p className="text-xs text-muted-foreground">Wanted</p>
                 </div>
-                {(rollCall || rollCallClosed || counts.present > 0) && (
+                {(takingAttendance || attendanceClosed || counts.present > 0) && (
                     <>
                         <div className="text-center">
                             <p className="text-2xl font-bold">{counts.present}</p>
@@ -409,23 +409,23 @@ export default function ScheduleDetailPage() {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h3 className="font-semibold">
-                            {rollCall
+                            {takingAttendance
                                 ? `${counts.present} of ${counts.assigned} here`
                                 : 'Assigned Workers'}
                         </h3>
-                        {rollCall && untapped.length > 0 && (
+                        {takingAttendance && untapped.length > 0 && (
                             <p className="text-xs text-muted-foreground">
                                 {untapped.length} not tapped yet
                             </p>
                         )}
                     </div>
-                    {rollCall ? (
+                    {takingAttendance ? (
                         <div className="flex flex-wrap items-center gap-2">
-                            <Button variant="outline" onClick={() => setRollCall(false)}>
+                            <Button variant="outline" onClick={() => setTakingAttendance(false)}>
                                 Stop without finishing
                             </Button>
                             <Button onClick={() => setFinishOpen(true)} disabled={editBusy}>
-                                Finish roll call
+                                Finish Attendance
                             </Button>
                         </div>
                     ) : (
@@ -470,15 +470,15 @@ export default function ScheduleDetailPage() {
                     <AssignmentsList
                         groupedAssignments={groupedAssignments}
                         onRoleChange={changeAssignmentRole}
-                        onMarkHere={canManage && rollCall ? handleMarkHere : null}
+                        onMarkHere={canManage && takingAttendance ? handleMarkHere : null}
                         attendanceBusyId={attendanceBusyId}
                         onSwap={
-                            canManage && !rollCall
+                            canManage && !takingAttendance
                                 ? assignment => openPicker({ mode: 'swap', assignment })
                                 : null
                         }
                         onRemove={
-                            canManage && !rollCall
+                            canManage && !takingAttendance
                                 ? assignment => {
                                       setEditError(null)
                                       setEditWarnings([])
@@ -493,16 +493,16 @@ export default function ScheduleDetailPage() {
                 {/* Again at the end of the list rather than a sticky footer: position:sticky
                     bottom sits under mobile browser chrome, the same trap min-h-screen has, and
                     a long roster must not make the way out hard to find. */}
-                {rollCall && assignments.length > 6 && (
+                {takingAttendance && assignments.length > 6 && (
                     <div className="flex justify-end">
                         <Button onClick={() => setFinishOpen(true)} disabled={editBusy}>
-                            Finish roll call
+                            Finish Attendance
                         </Button>
                     </div>
                 )}
             </div>
 
-            <FinishRollCallDialog
+            <FinishAttendanceDialog
                 open={finishOpen}
                 untapped={untapped}
                 busy={editBusy}
