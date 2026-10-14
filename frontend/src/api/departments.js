@@ -1,7 +1,8 @@
 // src/api/department.js
 import apiClient from './client'
 
-export const getDepartments = () => apiClient.get('/departments')
+// params (all optional): search, limit, offset. Total across pages is in X-Total-Count.
+export const getDepartments = params => apiClient.get('/departments', { params })
 
 export const getDepartment = id => apiClient.get(`/departments/${id}`)
 

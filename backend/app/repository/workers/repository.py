@@ -1,6 +1,8 @@
+from datetime import date
 from typing import Any
 from uuid import UUID
 
+from postgrest import CountMethod
 from supabase import Client
 
 from app.core.logging import get_logger
@@ -9,7 +11,7 @@ from app.core.redaction import mask_email, mask_phone
 from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
 from app.repository.workers import queries as q
-from app.schemas.models import UserRole
+from app.schemas.models import UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerContactMatch, WorkerResponse
 
 logger = get_logger(__name__)
@@ -260,40 +262,82 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         self.client.table(q.TABLE).delete().in_(q.Columns.ID, [str(i) for i in ids]).execute()
         log.info("workers_deleted")
 
-    def search(self, query: str) -> list[WorkerResponse]:
+    def search(
+        self,
+        query: str | None = None,
+        *,
+        department_ids: list[UUID] | None = None,
+        role: UserRole | None = None,
+        status: WorkerStatus | None = None,
+        today: date | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[WorkerResponse], int]:
         """
-        Search for workers by first name or last name.
+        Search and filter workers, one page at a time, returning the page and the total match count.
 
-        This method performs a case-insensitive partial match search across both the first_name
-        and last_name columns. It uses the SQL ILIKE operator to find workers whose first or
-        last name contains the search query string.
+        Every argument is optional and they combine with AND. ``query`` is split on whitespace and
+        each word must match the first name, last name or email (case-insensitive), so "john smi"
+        finds John Smith. The page and the total come back from a single PostgREST request.
 
         Args:
-            query (str): The search term to match against worker names. The search is case-insensitive
-                        and matches partial strings (e.g., "john" will match "John", "Johnny", "Johnson").
+            query (str | None): Free-text search over first name, last name and email.
+            department_ids (list[UUID] | None): Keep only workers in at least one of these
+                departments. An empty list matches nobody.
+            role (UserRole | None): Keep only workers holding this app role.
+            status (WorkerStatus | None): ``active``/``inactive`` on ``is_active``; ``on_leave``
+                for leave covering ``today``.
+            today (date | None): The date ``on_leave`` is judged against. Defaults to today.
+            limit (int): Maximum workers to return.
+            offset (int): Workers to skip, in last name, first name order.
 
         Returns:
-            list[WorkerResponse]: A list of WorkerResponse model instances whose first or last name matches the query.
-                         Returns an empty list if no matches are found or if the response contains no data.
-
-        Example:
-            >>> repository.search("smith")
-            [WorkerResponse(first_name="John", last_name="Smith"),
-            WorkerResponse(first_name="Jane", last_name="Smithson")]
+            tuple[list[WorkerResponse], int]: The page of workers and the number matching overall.
         """
-        log = self.logger.bind(method="search", query=query)
-        # Quote/escape the user value so PostgREST reserved characters in it (',', '.', '(', ')', '"')
-        # are treated as literal data and cannot inject additional filter conditions.
-        pattern = quote_postgrest_value(f"%{query}%")
+        # The query may be an email address, so only whether one was given reaches the log.
+        log = self.logger.bind(method="search", has_query=bool(query), role=role, status=status)
+        if department_ids is not None and not department_ids:
+            return [], 0
+
+        embeds = []
+        if department_ids is not None:
+            embeds.append(q.EMBED_DEPARTMENTS)
+        if role is not None:
+            embeds.append(q.EMBED_APP_ROLES)
+        if status == WorkerStatus.ON_LEAVE:
+            embeds.append(q.EMBED_LEAVE)
+
+        request = self.client.table(q.TABLE).select(", ".join([q.SELECT_ALL, *embeds]), count=CountMethod.exact)
+        if department_ids is not None:
+            request = request.in_(q.FILTER_DEPARTMENT_ID, [str(i) for i in department_ids])
+        if role is not None:
+            request = request.eq(q.FILTER_APP_ROLE, role.value)
+        if status == WorkerStatus.ON_LEAVE:
+            on = (today or date.today()).isoformat()
+            request = request.lte(q.FILTER_LEAVE_START, on).gte(q.FILTER_LEAVE_END, on)
+        elif status is not None:
+            request = request.eq(q.Columns.IS_ACTIVE, status == WorkerStatus.ACTIVE)
+        for term in (query or "").split()[: q.MAX_SEARCH_TERMS]:
+            # Quote/escape the user value so PostgREST reserved characters in it (',', '.', '(', ')', '"')
+            # are treated as literal data and cannot inject additional filter conditions.
+            pattern = quote_postgrest_value(f"%{term}%")
+            request = request.or_(
+                f"{q.Columns.FIRST_NAME}.ilike.{pattern},"
+                f"{q.Columns.LAST_NAME}.ilike.{pattern},"
+                f"{q.Columns.EMAIL}.ilike.{pattern}"
+            )
+
         response = (
-            self.client.table(q.TABLE)
-            .select(q.SELECT_ALL)
-            .or_(f"{q.Columns.FIRST_NAME}.ilike.{pattern},{q.Columns.LAST_NAME}.ilike.{pattern}")
+            request.order(q.Columns.LAST_NAME)
+            .order(q.Columns.FIRST_NAME)
+            .order(q.Columns.ID)
+            .range(offset, offset + limit - 1)
             .execute()
         )
         workers = self._to_model_list(response.data or [])
-        log.debug("search_completed", count=len(workers))
-        return workers
+        total = response.count if response.count is not None else len(workers)
+        log.debug("search_completed", count=len(workers), total=total)
+        return workers, total
 
     def get_worker_roles(self, worker_id: UUID) -> list[UserRole]:
         """Retrieve all roles assigned to a worker from worker_app_roles table.

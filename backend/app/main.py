@@ -29,6 +29,7 @@ from app.router import (
     worker_leave,
     workers,
 )
+from app.schemas.models import TOTAL_COUNT_HEADER
 from app.service.reminders.service import ReminderService
 from app.service.sms.service import SMSService
 
@@ -115,6 +116,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[TOTAL_COUNT_HEADER],
 )
 
 app.include_router(workers.router, prefix="/api/v1")

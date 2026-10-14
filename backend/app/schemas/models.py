@@ -26,8 +26,12 @@ class DayOfWeek(StrEnum):
 
 
 class WorkerStatus(StrEnum):
+    """What the worker list's status filter offers. ``ON_LEAVE`` is leave covering today, and is not
+    the opposite of ``ACTIVE``: someone on leave is still an active worker."""
+
     ACTIVE = "active"
     INACTIVE = "inactive"
+    ON_LEAVE = "on_leave"
 
 
 class UserRole(StrEnum):
@@ -53,6 +57,11 @@ class TokenPayload(BaseModel):
     sub: str  # Supabase user UUID
     role: str = UserRole.WORKER
     email: str | None = None
+
+
+# List endpoints that page keep returning a plain array, so the total rides in a header instead.
+# main.py exposes it through CORS, without which the browser hides it from a cross-origin caller.
+TOTAL_COUNT_HEADER = "X-Total-Count"
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
