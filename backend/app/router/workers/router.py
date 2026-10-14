@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -12,7 +12,7 @@ from app.core.dependencies import (
 )
 from app.schemas.authentication.models import GrantAccountRequest, RegisterResponse
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.models import TokenPayload
+from app.schemas.models import TOTAL_COUNT_HEADER, TokenPayload, UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerCreate, WorkerResponse, WorkerUpdate
 from app.service.authentication.service import AuthenticationService
 from app.service.departments.service import DepartmentService
@@ -23,29 +23,49 @@ router = APIRouter(prefix="/workers", tags=["workers"])
 
 @router.get("", response_model=list[WorkerResponse])
 def list_workers(
+    response: Response,
     active_only: bool = Query(default=False),
     search: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    department_id: UUID | None = Query(default=None),
+    role: UserRole | None = Query(default=None),
+    status: WorkerStatus | None = Query(default=None),
     current_user: TokenPayload = CurrentUser,
     worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[WorkerResponse]:
     """List workers visible to the requesting user, filtered by HOD/Assistant HOD scope.
 
+    The body stays a plain array so existing callers are unaffected; the number of workers matching
+    across all pages is returned in the ``X-Total-Count`` header for callers that page.
+
     Args:
-        active_only: If True, return only active workers.
-        search: Optional search query to filter by worker name.
-        limit: Max workers to return for the unfiltered listing (pagination).
-        offset: Number of workers to skip for the unfiltered listing (pagination).
+        response: Outgoing response, used to set ``X-Total-Count``.
+        active_only: If True, return only active workers (same as ``status=active``).
+        search: Optional search over worker name and email.
+        limit: Max workers to return (pagination).
+        offset: Number of workers to skip (pagination).
+        department_id: Optional department to filter by.
+        role: Optional app role to filter by.
+        status: Optional status to filter by: active, inactive or on_leave (today).
         current_user: Current authenticated user token.
         worker_service: Worker service dependency.
 
     Returns:
         list[WorkerResponse]: All workers for admins/workers, department-filtered for HOD/Assistant HOD.
     """
-    return worker_service.list_visible_workers(
-        current_user, active_only=active_only, search=search, limit=limit, offset=offset
+    workers, total = worker_service.list_visible_workers(
+        current_user,
+        active_only=active_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+        department_id=department_id,
+        role=role,
+        status=status,
     )
+    response.headers[TOTAL_COUNT_HEADER] = str(total)
+    return workers
 
 
 @router.get("/{worker_id}", response_model=WorkerResponse)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
     getWorkers,
     createWorker,
@@ -7,23 +7,37 @@ import {
     deleteWorkerPermanently,
 } from '@/api/workers'
 
-export function useWorkers() {
+/**
+ * With no argument this loads the whole list, as every picker expects. Pass `params` (forwarded to
+ * the API as query params) to load one filtered page; `total` is then the count across all pages.
+ * `total` stays null until the first load succeeds, so a page can tell "first load" from "refetch".
+ */
+export function useWorkers(params) {
+    // Keyed on the serialised params so a new-but-equal object literal each render does not refetch.
+    const key = JSON.stringify(params ?? null)
+    const [total, setTotal] = useState(null)
+    // Only the latest request may land: typing fast must not let an older page overwrite a newer one.
+    const latestRequest = useRef(0)
     const [workers, setWorkers] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
 
     const fetchWorkers = useCallback(async () => {
+        const request = ++latestRequest.current
         try {
             setLoading(true)
             setError(null)
-            const response = await getWorkers()
+            const response = await getWorkers(JSON.parse(key) ?? undefined)
+            if (request !== latestRequest.current) return
             setWorkers(response.data)
+            setTotal(Number(response.headers?.['x-total-count'] ?? response.data.length))
         } catch (err) {
+            if (request !== latestRequest.current) return
             setError(err.response?.data?.detail ?? 'Failed to load workers')
         } finally {
-            setLoading(false)
+            if (request === latestRequest.current) setLoading(false)
         }
-    }, [])
+    }, [key])
 
     useEffect(() => {
         fetchWorkers()
@@ -56,6 +70,7 @@ export function useWorkers() {
 
     return {
         workers,
+        total,
         loading,
         error,
         refetch: fetchWorkers,

@@ -15,7 +15,7 @@ from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.models import TokenPayload, UserRole, highest_role
+from app.schemas.models import TokenPayload, UserRole, WorkerStatus, highest_role
 from app.schemas.workers.models import (
     WorkerCreate,
     WorkerImportResult,
@@ -681,19 +681,18 @@ class WorkerService:
         log.info("worker_deleted", email=mask_email(worker.email))
 
     def search_workers(self, query: str) -> list[WorkerResponse]:
-        """Search for workers by name.
+        """Search for workers by name or email.
 
-        Performs case-insensitive partial matching on first and last names.
+        Performs case-insensitive partial matching on first name, last name and email.
 
         Args:
-            query: Search term to match against worker names.
+            query: Search term to match against worker names and emails.
 
         Returns:
-            list[WorkerResponse]: List of workers matching the search query.
+            list[WorkerResponse]: The first page of workers matching the search query.
         """
-        # bind the method and query for better traceability in logs
-        log = self.logger.bind(method="search_workers", query=query)
-        workers = self.worker_repo.search(query)
+        log = self.logger.bind(method="search_workers")
+        workers, _ = self.worker_repo.search(query)
         log.info("worker_search", results=len(workers))
         return workers
 
@@ -963,50 +962,61 @@ class WorkerService:
         search: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> list[WorkerResponse]:
-        """List the workers visible to the requesting user, applying optional filters.
+        department_id: UUID | None = None,
+        role: UserRole | None = None,
+        status: WorkerStatus | None = None,
+    ) -> tuple[list[WorkerResponse], int]:
+        """List one page of the workers visible to the requesting user, applying optional filters.
 
         Admins see all workers; HODs and assistant HODs see only workers in the departments they
-        manage; a regular worker sees only their own record. The ``active_only`` and ``search``
-        filters apply to every result. ``limit``/``offset`` page the unfiltered admin listing.
+        manage; a regular worker sees only their own record. Filters combine with AND; a regular
+        worker's record honours only ``search`` and active/inactive. ``active_only`` is the older
+        spelling of ``status=active`` and is ignored when ``status`` is given.
 
         Args:
             token: The verified token payload of the requesting user.
             active_only: If True, return only active workers.
-            search: Optional case-insensitive name filter.
-            limit: Max workers for the unfiltered listing.
-            offset: Number of workers to skip for the unfiltered listing.
+            search: Optional case-insensitive filter over name and email.
+            limit: Max workers to return.
+            offset: Number of workers to skip.
+            department_id: Keep only workers in this department. For a HOD, a department they do
+                not manage matches nobody rather than raising.
+            role: Keep only workers holding this app role.
+            status: Active, inactive, or on leave today.
 
         Returns:
-            list[WorkerResponse]: The filtered, deduplicated workers visible to the user.
+            tuple[list[WorkerResponse], int]: The page of workers, with roles, and the total number
+            matching across all pages.
         """
-        if token.role == UserRole.ADMIN:
-            # Admins see everyone.
-            if search:
-                return self.search_workers(search)
-            if active_only:
-                return self.get_active_workers()
-            return self.get_all_workers(limit=limit, offset=offset)
+        if status is None and active_only:
+            status = WorkerStatus.ACTIVE
 
-        if token.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
-            # HOD / assistant HOD: only workers in departments they manage.
-            actor = self.get_worker_for_token(token)
-            managed_dept_ids = self.get_managed_department_ids(actor.id)
-            if not managed_dept_ids:
-                return []
-
-            workers_by_id: dict[UUID, WorkerResponse] = {}
-            for dept_id in managed_dept_ids:
-                for worker in self.get_workers_by_department(dept_id):
-                    workers_by_id[worker.id] = worker
-            workers = list(workers_by_id.values())
-        else:
-            # Regular workers see only their own record.
+        if token.role not in (UserRole.ADMIN, UserRole.HOD, UserRole.ASSISTANT_HOD):
+            # Regular workers see only their own record. The Workers page is for managers, so only
+            # the two filters this path has always honoured are applied to it.
             workers = self._attach_roles([self.get_worker_for_token(token)])
+            if search:
+                needle = search.lower()
+                workers = [w for w in workers if needle in w.first_name.lower() or needle in w.last_name.lower()]
+            if status in (WorkerStatus.ACTIVE, WorkerStatus.INACTIVE):
+                workers = [w for w in workers if w.is_active == (status == WorkerStatus.ACTIVE)]
+            return workers, len(workers)
 
-        if search:
-            needle = search.lower()
-            workers = [w for w in workers if needle in w.first_name.lower() or needle in w.last_name.lower()]
-        if active_only:
-            workers = [w for w in workers if w.is_active]
-        return workers
+        department_ids: list[UUID] | None = [department_id] if department_id else None
+        if token.role != UserRole.ADMIN:
+            # HOD / assistant HOD: only workers in departments they manage.
+            managed = self.get_managed_department_ids(self.get_worker_for_token(token).id)
+            department_ids = [d for d in (department_ids or managed) if d in managed]
+            if not department_ids:
+                return [], 0
+
+        workers, total = self.worker_repo.search(
+            search,
+            department_ids=department_ids,
+            role=role,
+            status=status,
+            today=date.today(),
+            limit=limit,
+            offset=offset,
+        )
+        return self._attach_roles(workers), total

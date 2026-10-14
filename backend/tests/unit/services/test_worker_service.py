@@ -5,7 +5,7 @@ from supabase_auth.errors import AuthApiError
 
 from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
-from app.schemas.models import TokenPayload, UserRole
+from app.schemas.models import TokenPayload, UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerContactMatch, WorkerCreate, WorkerUpdate
 from app.service.workers.service import WorkerService
 from tests.unit.services.conftest import make_assignment, make_department, make_worker
@@ -286,7 +286,7 @@ class TestDeleteWorker:
 class TestSearchWorkers:
     def test_returns_matching_workers(self, service, mock_worker_repo):
         workers = [make_worker(first_name="Samuel"), make_worker(first_name="Sara")]
-        mock_worker_repo.search.return_value = workers
+        mock_worker_repo.search.return_value = (workers, 2)
 
         result = service.search_workers("sa")
         assert len(result) == 2
@@ -473,15 +473,38 @@ class TestAuthorizeCreateAssignment:
 
 class TestListVisibleWorkers:
     def test_admin_sees_all(self, service, mock_worker_repo):
-        mock_worker_repo.get_all.return_value = [make_worker(), make_worker()]
-        mock_worker_repo.get_worker_roles.return_value = []
-        result = service.list_visible_workers(_token(role=UserRole.ADMIN))
+        mock_worker_repo.search.return_value = ([make_worker(), make_worker()], 7)
+        mock_worker_repo.get_roles_for_workers.return_value = {}
+        result, total = service.list_visible_workers(_token(role=UserRole.ADMIN))
         assert len(result) == 2
+        assert total == 7
+        assert mock_worker_repo.search.call_args.kwargs["department_ids"] is None
 
-    def test_admin_search_delegates_to_search(self, service, mock_worker_repo):
-        mock_worker_repo.search.return_value = [make_worker()]
-        service.list_visible_workers(_token(role=UserRole.ADMIN), search="jo")
-        mock_worker_repo.search.assert_called_once_with("jo")
+    def test_admin_filters_are_forwarded_together(self, service, mock_worker_repo):
+        # search and active_only used to be mutually exclusive: a search silently dropped the
+        # active filter. Every filter now reaches the one query.
+        dept_id = uuid4()
+        mock_worker_repo.search.return_value = ([], 0)
+        service.list_visible_workers(
+            _token(role=UserRole.ADMIN),
+            search="jo",
+            active_only=True,
+            department_id=dept_id,
+            role=UserRole.HOD,
+            limit=25,
+            offset=50,
+        )
+        args, kwargs = mock_worker_repo.search.call_args
+        assert args == ("jo",)
+        assert kwargs["department_ids"] == [dept_id]
+        assert kwargs["role"] == UserRole.HOD
+        assert kwargs["status"] == WorkerStatus.ACTIVE
+        assert (kwargs["limit"], kwargs["offset"]) == (25, 50)
+
+    def test_status_overrides_active_only(self, service, mock_worker_repo):
+        mock_worker_repo.search.return_value = ([], 0)
+        service.list_visible_workers(_token(role=UserRole.ADMIN), active_only=True, status=WorkerStatus.ON_LEAVE)
+        assert mock_worker_repo.search.call_args.kwargs["status"] == WorkerStatus.ON_LEAVE
 
     def test_hod_sees_only_managed_department_workers(self, service, mock_worker_repo, mock_department_repo):
         actor = make_worker()
@@ -490,25 +513,54 @@ class TestListVisibleWorkers:
         mock_worker_repo.get_by_email.return_value = actor
         mock_department_repo.get_departments_by_hod.return_value = [managed_dept]
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
-        mock_worker_repo.get_workers_by_department.return_value = [w1, w2]
+        mock_worker_repo.search.return_value = ([w1, w2], 2)
+        mock_worker_repo.get_roles_for_workers.return_value = {w1.id: [UserRole.WORKER]}
 
-        result = service.list_visible_workers(_token(role=UserRole.HOD))
+        result, total = service.list_visible_workers(_token(role=UserRole.HOD))
+
         assert {w.id for w in result} == {w1.id, w2.id}
+        assert total == 2
+        assert mock_worker_repo.search.call_args.kwargs["department_ids"] == [managed_dept.id]
+        # The old per-department loop never attached roles, so a HOD saw every role column empty.
+        assert result[0].roles == [UserRole.WORKER]
+
+    def test_hod_department_filter_narrows_to_a_managed_department(
+        self, service, mock_worker_repo, mock_department_repo
+    ):
+        headed, assisted = make_department(), uuid4()
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_department_repo.get_departments_by_hod.return_value = [headed]
+        mock_department_repo.get_assistant_hod_department_ids.return_value = [assisted]
+        mock_worker_repo.search.return_value = ([], 0)
+
+        service.list_visible_workers(_token(role=UserRole.HOD), department_id=assisted)
+
+        assert mock_worker_repo.search.call_args.kwargs["department_ids"] == [assisted]
+
+    def test_hod_filtering_by_unmanaged_department_sees_none(self, service, mock_worker_repo, mock_department_repo):
+        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_department_repo.get_departments_by_hod.return_value = [make_department()]
+        mock_department_repo.get_assistant_hod_department_ids.return_value = []
+
+        assert service.list_visible_workers(_token(role=UserRole.HOD), department_id=uuid4()) == ([], 0)
+        mock_worker_repo.search.assert_not_called()
 
     def test_hod_with_no_departments_sees_none(self, service, mock_worker_repo, mock_department_repo):
         mock_worker_repo.get_by_email.return_value = make_worker()
         mock_department_repo.get_departments_by_hod.return_value = []
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
-        assert service.list_visible_workers(_token(role=UserRole.HOD)) == []
+        assert service.list_visible_workers(_token(role=UserRole.HOD)) == ([], 0)
+        mock_worker_repo.search.assert_not_called()
 
     def test_worker_sees_only_self(self, service, mock_worker_repo):
         me = make_worker()
         mock_worker_repo.get_by_email.return_value = me
         mock_worker_repo.get_roles_for_workers.return_value = {me.id: [UserRole.WORKER]}
 
-        result = service.list_visible_workers(_token(role=UserRole.WORKER))
+        result, total = service.list_visible_workers(_token(role=UserRole.WORKER))
 
         assert [w.id for w in result] == [me.id]
+        assert total == 1
         # A regular worker never enumerates the full table.
         mock_worker_repo.get_all.assert_not_called()
         mock_worker_repo.search.assert_not_called()
@@ -621,16 +673,6 @@ class TestBatchRoleLoading:
         mock_worker_repo.get_roles_for_workers.return_value = {}
 
         service.get_all_workers(limit=5, offset=10)
-
-        mock_worker_repo.get_all.assert_called_once_with(limit=5, offset=10)
-
-
-class TestListVisibleWorkersPagination:
-    def test_admin_unfiltered_listing_forwards_limit_and_offset(self, service, mock_worker_repo):
-        mock_worker_repo.get_all.return_value = []
-        mock_worker_repo.get_roles_for_workers.return_value = {}
-
-        service.list_visible_workers(_token(role=UserRole.ADMIN), limit=5, offset=10)
 
         mock_worker_repo.get_all.assert_called_once_with(limit=5, offset=10)
 

@@ -1,10 +1,12 @@
 from typing import Any, cast
 from uuid import UUID
 
+from postgrest import CountMethod
 from supabase import Client
 
 from app.core.logging import get_logger
 from app.repository.departments import queries as q
+from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
 from app.schemas.departments.models import DepartmentResponse, DepartmentWithWorkersResponse
 
@@ -21,6 +23,41 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         """
         super().__init__(client, q.TABLE, DepartmentResponse)
         self.logger = logger.bind(repository="DepartmentRepository")
+
+    def search(
+        self,
+        query: str | None = None,
+        *,
+        ids: list[UUID] | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[DepartmentResponse], int]:
+        """
+        Search departments by name or description, one page at a time.
+
+        Args:
+            query (str | None): Case-insensitive text matched against name and description.
+            ids (list[UUID] | None): Restrict to these departments. An empty list matches nothing.
+            limit (int): Maximum departments to return.
+            offset (int): Departments to skip, in name order.
+
+        Returns:
+            tuple[list[DepartmentResponse], int]: The page of departments and the number matching overall.
+        """
+        if ids is not None and not ids:
+            return [], 0
+        request = self.client.table(q.TABLE).select(q.SELECT_ALL, count=CountMethod.exact)
+        if ids is not None:
+            request = request.in_(q.Columns.ID, [str(i) for i in ids])
+        if query and query.strip():
+            # Quoted so PostgREST reserved characters in the user's text cannot inject filters.
+            pattern = quote_postgrest_value(f"%{query.strip()}%")
+            request = request.or_(f"{q.Columns.NAME}.ilike.{pattern},{q.Columns.DESCRIPTION}.ilike.{pattern}")
+        response = request.order(q.Columns.NAME).order(q.Columns.ID).range(offset, offset + limit - 1).execute()
+        departments = self._to_model_list(response.data or [])
+        total = response.count if response.count is not None else len(departments)
+        self.logger.debug("department_search_completed", count=len(departments), total=total)
+        return departments, total
 
     def get_by_name(self, name: str) -> DepartmentResponse | None:
         """

@@ -10,12 +10,29 @@ from tests.unit.services.conftest import make_department, make_subteam
 class TestListDepartments:
     def test_returns_200_with_departments(self, mock_department_service):
         depts = [make_department(), make_department(name="Choir")]
-        mock_department_service.get_all_departments.return_value = depts
+        mock_department_service.get_all_departments.return_value = (depts, 12)
         client = make_client(department_service=mock_department_service)
 
-        response = client.get("/api/v1/departments")
+        response = client.get("/api/v1/departments?search=ush&limit=2&offset=4")
         assert response.status_code == 200
         assert len(response.json()) == 2
+        assert response.headers["X-Total-Count"] == "12"
+        kwargs = mock_department_service.get_all_departments.call_args.kwargs
+        assert (kwargs["search"], kwargs["limit"], kwargs["offset"]) == ("ush", 2, 4)
+        # Admins and regular workers see every department.
+        assert kwargs["department_ids"] is None
+
+    def test_hod_is_scoped_to_headed_and_assisted_departments(self, mock_department_service, mock_worker_service):
+        headed, assisted = uuid4(), uuid4()
+        mock_worker_service.get_managed_department_ids.return_value = {headed, assisted}
+        mock_department_service.get_all_departments.return_value = ([], 0)
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
+
+        assert client.get("/api/v1/departments").status_code == 200
+        kwargs = mock_department_service.get_all_departments.call_args.kwargs
+        assert set(kwargs["department_ids"]) == {headed, assisted}
 
 
 class TestListSubteams:

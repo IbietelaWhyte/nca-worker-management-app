@@ -42,20 +42,28 @@ class DepartmentService:
             raise NotFoundError(f"Department {department_id} not found")
         return dept
 
-    def get_all_departments(self, limit: int = 100, offset: int = 0) -> list[DepartmentResponse]:
-        """Retrieve all departments (paginated).
+    def get_all_departments(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        search: str | None = None,
+        department_ids: list[UUID] | None = None,
+    ) -> tuple[list[DepartmentResponse], int]:
+        """Retrieve one page of departments, optionally searched and restricted to a set of ids.
 
         Args:
             limit: Maximum number of departments to return.
             offset: Number of departments to skip before returning results.
+            search: Optional case-insensitive text matched against name and description.
+            department_ids: If given, only these departments are eligible (a HOD's scope).
 
         Returns:
-            list[DepartmentResponse]: List of departments in the system.
+            tuple[list[DepartmentResponse], int]: The page of departments and the total matching.
         """
         log = self.logger.bind(method="get_all_departments", limit=limit, offset=offset)
-        depts = self.department_repo.get_all(limit=limit, offset=offset)
-        log.info("fetched_all_departments", count=len(depts))
-        return depts
+        depts, total = self.department_repo.search(search, ids=department_ids, limit=limit, offset=offset)
+        log.info("fetched_all_departments", count=len(depts), total=total)
+        return depts, total
 
     def get_departments_by_hod(self, hod_id: UUID) -> list[DepartmentResponse]:
         """Retrieve all departments where a worker is the Head of Department (HOD).

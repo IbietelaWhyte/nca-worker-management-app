@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from app.core.dependencies import (
     AdminUser,
@@ -24,7 +24,7 @@ from app.schemas.departments.models import (
     DepartmentUpdate,
     DepartmentWithWorkersResponse,
 )
-from app.schemas.models import MessageResponse, TokenPayload, UserRole
+from app.schemas.models import TOTAL_COUNT_HEADER, MessageResponse, TokenPayload, UserRole
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerImportResult
 from app.service.availability_prompts.service import AvailabilityPromptService
@@ -38,6 +38,8 @@ router = APIRouter(prefix="/departments", tags=["departments"])
 
 @router.get("", response_model=list[DepartmentResponse])
 def list_departments(
+    response: Response,
+    search: str | None = Query(default=None, max_length=100),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: TokenPayload = CurrentUser,
@@ -46,9 +48,14 @@ def list_departments(
 ) -> list[DepartmentResponse]:
     """List departments - filtered by HOD or Assistant HOD role if applicable.
 
+    The body stays a plain array so existing callers are unaffected; the number of departments
+    matching across all pages is returned in the ``X-Total-Count`` header.
+
     Args:
-        limit: Max departments to return for the admin/worker listing (pagination).
-        offset: Number of departments to skip for the admin/worker listing (pagination).
+        response: Outgoing response, used to set ``X-Total-Count``.
+        search: Optional search over department name and description.
+        limit: Max departments to return (pagination).
+        offset: Number of departments to skip (pagination).
         current_user: Current authenticated user token.
         service: Department service dependency.
         worker_service: Worker service dependency.
@@ -56,14 +63,18 @@ def list_departments(
     Returns:
         list[DepartmentResponse]: All departments for admin/worker, managed-only for HOD/Assistant HOD.
     """
-    # HOD or Assistant HOD sees only their departments; admins and regular workers see all.
-    if current_user.role == UserRole.HOD or current_user.role == UserRole.ASSISTANT_HOD:
+    # HOD or Assistant HOD sees only the departments they head or assist; admins and regular
+    # workers see all.
+    department_ids: list[UUID] | None = None
+    if current_user.role in (UserRole.HOD, UserRole.ASSISTANT_HOD):
         worker = worker_service.get_worker_for_token(current_user)
-        if current_user.role == UserRole.HOD:
-            return service.get_departments_by_hod(worker.id)
-        return service.get_assistant_hod_departments(worker.id)
+        department_ids = list(worker_service.get_managed_department_ids(worker.id))
 
-    return service.get_all_departments(limit=limit, offset=offset)
+    departments, total = service.get_all_departments(
+        limit=limit, offset=offset, search=search, department_ids=department_ids
+    )
+    response.headers[TOTAL_COUNT_HEADER] = str(total)
+    return departments
 
 
 @router.get("/{department_id}", response_model=DepartmentResponse)

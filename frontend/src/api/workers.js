@@ -1,7 +1,9 @@
 // src/api/workers.js
 import apiClient from './client'
 
-export const getWorkers = () => apiClient.get('/workers')
+// params (all optional): search, department_id, role, status, limit, offset. The body is always a
+// plain array; the total across pages is in the X-Total-Count header.
+export const getWorkers = params => apiClient.get('/workers', { params })
 
 export const getWorker = id => apiClient.get(`/workers/${id}`)
 

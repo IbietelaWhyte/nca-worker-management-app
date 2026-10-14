@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.main import app
 from app.schemas.authentication.models import RegisterResponse
-from app.schemas.models import UserRole
+from app.schemas.models import UserRole, WorkerStatus
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_worker
 
@@ -13,15 +13,34 @@ from tests.unit.services.conftest import make_worker
 class TestListWorkers:
     def test_returns_200_with_workers(self, mock_worker_service):
         workers = [make_worker(), make_worker()]
-        mock_worker_service.list_visible_workers.return_value = workers
+        mock_worker_service.list_visible_workers.return_value = (workers, 30)
         client = make_client(worker_service=mock_worker_service)
 
         response = client.get("/api/v1/workers")
         assert response.status_code == 200
+        # Still a plain array, so the pickers that read it are unaffected; the total is a header.
         assert len(response.json()) == 2
+        assert response.headers["X-Total-Count"] == "30"
+
+    def test_passes_filters(self, mock_worker_service):
+        mock_worker_service.list_visible_workers.return_value = ([], 0)
+        client = make_client(worker_service=mock_worker_service)
+        dept_id = uuid4()
+
+        response = client.get(f"/api/v1/workers?department_id={dept_id}&role=assistant_hod&status=on_leave")
+        assert response.status_code == 200
+        kwargs = mock_worker_service.list_visible_workers.call_args.kwargs
+        assert kwargs["department_id"] == dept_id
+        assert kwargs["role"] == UserRole.ASSISTANT_HOD
+        assert kwargs["status"] == WorkerStatus.ON_LEAVE
+
+    def test_rejects_unknown_status_and_role(self, mock_worker_service):
+        client = make_client(worker_service=mock_worker_service)
+        assert client.get("/api/v1/workers?status=retired").status_code == 422
+        assert client.get("/api/v1/workers?role=pastor").status_code == 422
 
     def test_passes_active_only_flag(self, mock_worker_service):
-        mock_worker_service.list_visible_workers.return_value = [make_worker()]
+        mock_worker_service.list_visible_workers.return_value = ([make_worker()], 1)
         client = make_client(worker_service=mock_worker_service)
 
         response = client.get("/api/v1/workers?active_only=true")
@@ -29,7 +48,7 @@ class TestListWorkers:
         assert mock_worker_service.list_visible_workers.call_args.kwargs["active_only"] is True
 
     def test_passes_search_query(self, mock_worker_service):
-        mock_worker_service.list_visible_workers.return_value = [make_worker()]
+        mock_worker_service.list_visible_workers.return_value = ([make_worker()], 1)
         client = make_client(worker_service=mock_worker_service)
 
         response = client.get("/api/v1/workers?search=john")
@@ -37,7 +56,7 @@ class TestListWorkers:
         assert mock_worker_service.list_visible_workers.call_args.kwargs["search"] == "john"
 
     def test_passes_limit_and_offset(self, mock_worker_service):
-        mock_worker_service.list_visible_workers.return_value = []
+        mock_worker_service.list_visible_workers.return_value = ([], 0)
         client = make_client(worker_service=mock_worker_service)
 
         response = client.get("/api/v1/workers?limit=5&offset=10")
@@ -47,7 +66,7 @@ class TestListWorkers:
         assert kwargs["offset"] == 10
 
     def test_rejects_out_of_range_limit(self, mock_worker_service):
-        mock_worker_service.list_visible_workers.return_value = []
+        mock_worker_service.list_visible_workers.return_value = ([], 0)
         client = make_client(worker_service=mock_worker_service)
 
         response = client.get("/api/v1/workers?limit=999")
