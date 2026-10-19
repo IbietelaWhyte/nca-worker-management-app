@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
@@ -9,6 +10,7 @@ from app.core.dependencies import (
     get_availability_prompt_service,
     get_department_role_service,
     get_department_service,
+    get_monthly_lead_service,
     get_subteam_service,
     get_worker_service,
 )
@@ -25,11 +27,13 @@ from app.schemas.departments.models import (
     DepartmentWithWorkersResponse,
 )
 from app.schemas.models import TOTAL_COUNT_HEADER, MessageResponse, TokenPayload, UserRole
+from app.schemas.monthly_leads.models import MonthlyLeadsResponse, MonthlyLeadsSet
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import WorkerImportResult
 from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
+from app.service.monthly_leads.service import MonthlyLeadService
 from app.service.subteams.service import SubteamService
 from app.service.workers.service import WorkerService
 
@@ -204,6 +208,54 @@ async def import_workers(
     worker_service.authorize_create_assignment(current_user, department_id)
     file_bytes = await file.read()
     return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run, skip_duplicates=skip_duplicates)
+
+
+@router.get("/{department_id}/monthly-leads", response_model=MonthlyLeadsResponse)
+def get_monthly_leads(
+    department_id: UUID,
+    month: date = Query(description="Any date in the month; normalised to the 1st"),
+    _: TokenPayload = CurrentUser,
+    lead_service: MonthlyLeadService = Depends(get_monthly_lead_service),
+) -> MonthlyLeadsResponse:
+    """A department's monthly leads ("Teacher of the Month") for the month a date falls in.
+
+    Open to every signed-in user: the names are shown at the top of schedules workers can see.
+
+    Args:
+        department_id: The department.
+        month: Any date in the month.
+        _: Any authenticated user.
+        lead_service: Monthly lead service dependency.
+
+    Returns:
+        MonthlyLeadsResponse: What the department calls its leads, and who they are that month.
+    """
+    return lead_service.get_leads(department_id, month)
+
+
+@router.put("/{department_id}/monthly-leads", response_model=MonthlyLeadsResponse)
+def set_monthly_leads(
+    department_id: UUID,
+    data: MonthlyLeadsSet,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
+    lead_service: MonthlyLeadService = Depends(get_monthly_lead_service),
+) -> MonthlyLeadsResponse:
+    """Replace a department's monthly leads for one month (admin/HOD). An empty list clears it.
+
+    Args:
+        department_id: The department.
+        data: The month and the complete set of workers to name.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
+        lead_service: Monthly lead service dependency.
+
+    Returns:
+        MonthlyLeadsResponse: The month as it now stands.
+    """
+    worker_service.authorize_create_assignment(current_user, department_id)
+    actor = None if current_user.role == UserRole.ADMIN else worker_service.get_worker_for_token(current_user)
+    return lead_service.set_leads(department_id, data.month, data.worker_ids, actor.id if actor else None)
 
 
 @router.get("/{department_id}/availability-prompts", response_model=list[AvailabilityPromptResponse])

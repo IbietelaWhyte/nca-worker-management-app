@@ -63,6 +63,38 @@ class TestUpdateDepartment:
             service.update_department(uuid4(), DepartmentUpdate(name="New Name"))
 
 
+class TestMonthlyLeadTitle:
+    """A null title turns monthly leads off, so unlike every other field it must reach the row."""
+
+    def test_sets_a_title(self, service, mock_department_repo):
+        dept = make_department()
+        mock_department_repo.get_by_id.return_value = dept
+        mock_department_repo.update.return_value = dept
+
+        service.update_department(dept.id, DepartmentUpdate(monthly_lead_title="  Teacher of the Month "))
+
+        mock_department_repo.update.assert_called_once_with(dept.id, {"monthly_lead_title": "Teacher of the Month"})
+
+    @pytest.mark.parametrize("cleared", [None, "", "   "])
+    def test_clearing_the_title_writes_null(self, service, mock_department_repo, cleared):
+        dept = make_department()
+        mock_department_repo.get_by_id.return_value = dept
+        mock_department_repo.update.return_value = dept
+
+        service.update_department(dept.id, DepartmentUpdate.model_validate({"monthly_lead_title": cleared}))
+
+        mock_department_repo.update.assert_called_once_with(dept.id, {"monthly_lead_title": None})
+
+    def test_an_update_that_omits_the_title_leaves_it_alone(self, service, mock_department_repo):
+        dept = make_department()
+        mock_department_repo.get_by_id.return_value = dept
+        mock_department_repo.update.return_value = dept
+
+        service.update_department(dept.id, DepartmentUpdate(name="Renamed"))
+
+        mock_department_repo.update.assert_called_once_with(dept.id, {"name": "Renamed"})
+
+
 class TestAssignWorker:
     def test_assigns_successfully(self, service, mock_department_repo):
         dept = make_department()

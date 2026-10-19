@@ -71,6 +71,10 @@ export const FAQ_SECTIONS = [
                 answer: 'Yes. Open the department and choose to import a CSV. Download the sample file, fill it in and upload it — you get a row-by-row preview before anything is saved. One bad row stops the whole import, and people already on your roster are flagged as duplicates rather than errors, so re-uploading a roster is safe.',
             },
             {
+                question: 'Can I name who is in charge each month, like a Teacher of the Month?',
+                answer: 'Yes, once an administrator gives your department a monthly lead title, such as "Teacher of the Month". A tab with that name appears on the department: pick a month and name up to three people. They are shown at the top of that month\'s schedules and on the rota image you share. Because they serve every service that month, they are left out when that month\'s rotas are generated for your department, though they can still be scheduled in other departments. Name them before you generate the month: schedules already generated are not changed, so remove them from those yourself. You can name people months ahead.',
+            },
+            {
                 question: 'Somebody needs to sign in to the app.',
                 answer: 'Ask an administrator to create their account; only administrators can. A worker does not need one to be scheduled — their duties, reminders and availability links reach them by text either way.',
             },

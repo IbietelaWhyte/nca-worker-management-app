@@ -74,6 +74,11 @@ class Settings(BaseSettings):
     # dates already past — "you cannot enter September's availability in October".
     availability_notice_days: int = Field(default=0, ge=0)
 
+    # Monthly leads (see service/monthly_leads/service.py) — the "Teacher of the Month" a head names
+    # for a department. Enforced in the service rather than by a constraint, since capping a count
+    # across rows would need a trigger.
+    max_monthly_leads: int = Field(default=3, ge=1)
+
     # Reminder scheduling (see service/reminders/service.py). Two jobs run on the background
     # scheduler: the pre-service reminder sweep once a day, and the "you have been scheduled"
     # notice frequently enough to feel immediate without polling hard. The notice interval is the

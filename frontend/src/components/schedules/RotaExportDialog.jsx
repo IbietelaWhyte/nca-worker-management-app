@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSubteams } from '@/hooks/useSubteams'
 import { buildRota } from '@/lib/rota'
+import { leadNames } from '@/components/schedules/MonthlyLeadsBanner'
 
 // The exported image is shared outside the app, so it is painted in fixed colours rather than
 // theme tokens — it must look the same whoever produced it, in light mode or dark. The values
@@ -23,6 +24,9 @@ const HIGHLIGHT = '#F8EDCB'
 // saturated of the two so a special date reads apart from the helper rows on the same page.
 // Mirrors --warning by hand, like its five siblings — change them together.
 const SPECIAL_BG = '#ECCE68'
+// A pale tint of HEADER_BG for the monthly-leads line under the title, so it reads as part of
+// the heading rather than as a row of the rota. Mirrors bg-primary/10 by hand.
+const LEADS_BG = '#F0EAF4'
 
 const cell = {
     border: `1px solid ${BORDER}`,
@@ -46,6 +50,7 @@ export default function RotaExportDialog({
     departmentName,
     month,
     schedules,
+    monthlyLeads,
     onClose,
 }) {
     const { subteams } = useSubteams(departmentId)
@@ -55,6 +60,8 @@ export default function RotaExportDialog({
     const sheetRef = useRef(null)
 
     const blocks = useMemo(() => buildRota(schedules, subteams), [schedules, subteams])
+    // "Teacher of the Month: Ada Obi, Sam Lee" — empty when the department does not use it.
+    const leadsLine = monthlyLeads?.title ? leadNames(monthlyLeads.leads ?? []) : ''
 
     const handleDownload = async () => {
         setError(null)
@@ -140,6 +147,25 @@ export default function RotaExportDialog({
                                         {title}
                                     </th>
                                 </tr>
+                                {leadsLine && (
+                                    <tr>
+                                        <th
+                                            colSpan={3}
+                                            style={{
+                                                ...cell,
+                                                textAlign: 'center',
+                                                fontWeight: 400,
+                                                padding: '6px 8px',
+                                                background: LEADS_BG,
+                                            }}
+                                        >
+                                            <span style={{ fontWeight: 700 }}>
+                                                {monthlyLeads.title}:
+                                            </span>{' '}
+                                            {leadsLine}
+                                        </th>
+                                    </tr>
+                                )}
                             </thead>
                             <tbody>
                                 {blocks.map(block => (

@@ -9,6 +9,7 @@ const emptyForm = {
     description: '',
     min_workers_per_slot: 1,
     max_workers_per_slot: 1,
+    monthly_lead_title: '',
 }
 
 export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel }) {
@@ -20,6 +21,7 @@ export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel
         // this replaced used to do.
         min_workers_per_slot: String(initial.min_workers_per_slot ?? 1),
         max_workers_per_slot: String(initial.max_workers_per_slot ?? 1),
+        monthly_lead_title: initial.monthly_lead_title ?? '',
     })
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
@@ -53,6 +55,8 @@ export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel
                 description: form.description.trim() || null,
                 min_workers_per_slot: min,
                 max_workers_per_slot: max,
+                // Always sent, null when blank: an explicit null is what turns monthly leads off.
+                monthly_lead_title: form.monthly_lead_title.trim() || null,
             })
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Something went wrong')
@@ -123,6 +127,23 @@ export default function DepartmentForm({ initial = emptyForm, onSubmit, onCancel
                 <p className="text-xs text-muted-foreground">
                     Workers per service. The rota fills up to the most when enough people are free,
                     and only warns you below the fewest.
+                </p>
+            </div>
+
+            <div className="space-y-2">
+                <Label htmlFor="monthly_lead_title">Monthly lead title</Label>
+                <Input
+                    id="monthly_lead_title"
+                    name="monthly_lead_title"
+                    value={form.monthly_lead_title}
+                    onChange={handleChange}
+                    maxLength={60}
+                    placeholder="e.g. Teacher of the Month"
+                />
+                <p className="text-xs text-muted-foreground">
+                    Optional. Lets the department&apos;s heads name up to 3 people in charge each
+                    month, shown at the top of that month&apos;s schedules. Leave blank to turn it
+                    off.
                 </p>
             </div>
 

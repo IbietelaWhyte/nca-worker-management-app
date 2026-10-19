@@ -37,6 +37,7 @@ def service(
     mock_leave_repo,
     mock_sms_service,
     mock_special_service_service,
+    mock_monthly_lead_service,
 ):
     # Default: workers have no standing role unless a test overrides this.
     mock_department_role_repo.get_role_for_worker_in_department.return_value = None
@@ -50,6 +51,7 @@ def service(
         leave_repo=mock_leave_repo,
         sms_service=mock_sms_service,
         special_service_service=mock_special_service_service,
+        monthly_lead_service=mock_monthly_lead_service,
     )
 
 
@@ -1006,6 +1008,80 @@ class TestLeaveExcludesWorkers:
         assert away in unavailable[date(2026, 10, 11)]
         assert away in unavailable[date(2026, 10, 18)]
         assert away not in unavailable.get(date(2026, 10, 25), set())
+
+
+class TestMonthlyLeadsExcludeWorkers:
+    """A department's leads for a month serve every service, so its rota generation leaves them off."""
+
+    def _generate(self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, dept, workers, when):
+        mock_department_repo.get_by_id.return_value = dept
+        mock_worker_repo.get_department_only_workers.return_value = workers
+        mock_schedule_repo.get_existing_schedule.return_value = None
+        mock_schedule_repo.create.return_value = make_schedule(department_id=dept.id)
+        mock_schedule_repo.bulk_create_assignments.return_value = []
+        mock_schedule_repo.get_with_assignments.return_value = make_schedule(department_id=dept.id)
+        service.generate_schedule(make_generate_request(department_id=dept.id, scheduled_date=when), created_by=uuid4())
+        return {a["worker_id"] for a in mock_schedule_repo.bulk_create_assignments.call_args[0][0]}
+
+    def test_a_lead_is_not_picked_in_their_month(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_monthly_lead_service
+    ):
+        dept = make_department(band=1)
+        # The lead is listed first, so fairness would otherwise take them.
+        lead, other = make_worker(), make_worker()
+        mock_monthly_lead_service.lead_ids_by_month.return_value = {date(2026, 10, 1): {lead.id}}
+
+        picked = self._generate(
+            service, mock_schedule_repo, mock_worker_repo, mock_department_repo, dept, [lead, other], date(2026, 10, 11)
+        )
+
+        assert picked == {str(other.id)}
+        mock_monthly_lead_service.lead_ids_by_month.assert_called_once_with(
+            dept.id, date(2026, 10, 11), date(2026, 10, 11)
+        )
+
+    def test_a_lead_is_picked_as_normal_outside_their_month(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_monthly_lead_service
+    ):
+        # A roster of one, so "was this worker blocked?" has an unambiguous answer.
+        dept = make_department(band=1)
+        lead = make_worker()
+        mock_monthly_lead_service.lead_ids_by_month.return_value = {date(2026, 10, 1): {lead.id}}
+
+        picked = self._generate(
+            service, mock_schedule_repo, mock_worker_repo, mock_department_repo, dept, [lead], date(2026, 11, 8)
+        )
+
+        assert picked == {str(lead.id)}
+
+    def test_adding_a_lead_by_hand_warns_but_goes_through(
+        self, service, edit, mock_schedule_repo, mock_monthly_lead_service
+    ):
+        # Like leave, it is reported rather than refused: a head adding the Teacher of the Month
+        # to a rota has a reason the app cannot see.
+        from datetime import datetime
+
+        from app.schemas.monthly_leads.models import MonthlyLeadResponse, MonthlyLeadsResponse
+
+        worker = edit.spare[0]
+        mock_monthly_lead_service.get_leads.side_effect = lambda department_id, day: MonthlyLeadsResponse(
+            title="Teacher of the Month",
+            month=date(2026, 8, 1),
+            leads=[
+                MonthlyLeadResponse(
+                    id=uuid4(),
+                    department_id=department_id,
+                    worker_id=worker.id,
+                    month=date(2026, 8, 1),
+                    created_at=datetime.now(),
+                )
+            ],
+        )
+
+        result = service.add_assignment(edit.schedule.id, worker.id)
+
+        assert any("is Teacher of the Month for August" in w for w in result.warnings)
+        mock_schedule_repo.create_assignment.assert_called_once()
 
 
 class TestStaffingBandResolution:

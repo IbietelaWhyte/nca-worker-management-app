@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.subteams.models import SubteamResponse
@@ -27,7 +27,23 @@ class Department(BaseModel):
     hod_id: UUID | None = None
     min_workers_per_slot: int
     max_workers_per_slot: int
+    # What this department calls its monthly leads ("Teacher of the Month"); None turns them off.
+    monthly_lead_title: str | None = None
     created_at: datetime
+
+
+def _blank_title_to_none(value: str | None) -> str | None:
+    """Treat a blank monthly-lead title as no title, so clearing the field turns the feature off.
+
+    Args:
+        value: The submitted title.
+
+    Returns:
+        str | None: The trimmed title, or None if it was blank.
+    """
+    if value is None:
+        return None
+    return value.strip() or None
 
 
 class DepartmentCreate(BaseModel):
@@ -36,6 +52,13 @@ class DepartmentCreate(BaseModel):
     hod_id: UUID | None = None
     min_workers_per_slot: int = Field(default=1, ge=1)
     max_workers_per_slot: int = Field(default=1, ge=1)
+    monthly_lead_title: str | None = Field(default=None, max_length=60)
+
+    @field_validator("monthly_lead_title")
+    @classmethod
+    def _normalise_title(cls, value: str | None) -> str | None:
+        """See _blank_title_to_none."""
+        return _blank_title_to_none(value)
 
     @model_validator(mode="after")
     def validate_worker_range(self) -> "DepartmentCreate":
@@ -71,3 +94,12 @@ class DepartmentUpdate(BaseModel):
     # can only be judged against the merged row — DepartmentService.update does that.
     min_workers_per_slot: int | None = Field(default=None, ge=1)
     max_workers_per_slot: int | None = Field(default=None, ge=1)
+    # Unlike the fields above, an explicit null here is meaningful — it turns monthly leads off —
+    # so DepartmentService.update_department writes it whenever it was sent, null included.
+    monthly_lead_title: str | None = Field(default=None, max_length=60)
+
+    @field_validator("monthly_lead_title")
+    @classmethod
+    def _normalise_title(cls, value: str | None) -> str | None:
+        """See _blank_title_to_none."""
+        return _blank_title_to_none(value)
