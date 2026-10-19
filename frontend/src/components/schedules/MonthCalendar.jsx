@@ -11,6 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { summarizeStaffing } from '@/lib/staffing'
+import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
@@ -95,7 +96,7 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
 
                                 <div className="space-y-1">
                                     {daySchedules.map(schedule => {
-                                        const { assigned, max, understaffed, full } =
+                                        const { assigned, max, short, understaffed, full } =
                                             summarizeStaffing(schedule)
                                         return (
                                             <button
@@ -107,7 +108,7 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
                                                 <p className="text-xs font-medium truncate">
                                                     {schedule.title}
                                                 </p>
-                                                <div className="flex items-center gap-1 mt-0.5">
+                                                <div className="flex flex-wrap items-center gap-1 mt-0.5">
                                                     <Badge
                                                         variant={
                                                             understaffed
@@ -119,6 +120,9 @@ export default function MonthCalendar({ month, schedules, onDayClick }) {
                                                     >
                                                         {assigned}/{max}
                                                     </Badge>
+                                                    {understaffed && (
+                                                        <UnderstaffedBadge short={short} compact />
+                                                    )}
                                                     <span className="text-[10px] text-muted-foreground">
                                                         {schedule.start_time?.slice(0, 5)}
                                                     </span>

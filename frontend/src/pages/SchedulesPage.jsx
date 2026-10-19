@@ -31,6 +31,7 @@ import {
 } from 'lucide-react'
 import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
 import { summarizeStaffing } from '@/lib/staffing'
+import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
 
 export default function SchedulesPage() {
     const navigate = useNavigate()
@@ -262,6 +263,7 @@ export default function SchedulesPage() {
                                                         const {
                                                             assigned,
                                                             max,
+                                                            short,
                                                             understaffed,
                                                             full,
                                                         } = summarizeStaffing(schedule)
@@ -306,17 +308,25 @@ export default function SchedulesPage() {
                                                                     {schedule.end_time?.slice(0, 5)}
                                                                 </TableCell>
                                                                 <TableCell>
-                                                                    <Badge
-                                                                        variant={
-                                                                            understaffed
-                                                                                ? 'destructive'
-                                                                                : full
-                                                                                  ? 'default'
-                                                                                  : 'secondary'
-                                                                        }
-                                                                    >
-                                                                        {assigned}/{max} assigned
-                                                                    </Badge>
+                                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                                        <Badge
+                                                                            variant={
+                                                                                understaffed
+                                                                                    ? 'destructive'
+                                                                                    : full
+                                                                                      ? 'default'
+                                                                                      : 'secondary'
+                                                                            }
+                                                                        >
+                                                                            {assigned}/{max}{' '}
+                                                                            assigned
+                                                                        </Badge>
+                                                                        {understaffed && (
+                                                                            <UnderstaffedBadge
+                                                                                short={short}
+                                                                            />
+                                                                        )}
+                                                                    </div>
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
                                                                     <div
@@ -372,7 +382,7 @@ export default function SchedulesPage() {
                                                 b.scheduled_date.localeCompare(a.scheduled_date)
                                             )
                                             .map(schedule => {
-                                                const { assigned, max, understaffed, full } =
+                                                const { assigned, max, short, understaffed, full } =
                                                     summarizeStaffing(schedule)
                                                 return (
                                                     <li key={schedule.id}>
@@ -415,18 +425,24 @@ export default function SchedulesPage() {
                                                                     {' – '}
                                                                     {schedule.end_time?.slice(0, 5)}
                                                                 </p>
-                                                                <Badge
-                                                                    className="mt-2"
-                                                                    variant={
-                                                                        understaffed
-                                                                            ? 'destructive'
-                                                                            : full
-                                                                              ? 'default'
-                                                                              : 'secondary'
-                                                                    }
-                                                                >
-                                                                    {assigned}/{max} assigned
-                                                                </Badge>
+                                                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                                                    <Badge
+                                                                        variant={
+                                                                            understaffed
+                                                                                ? 'destructive'
+                                                                                : full
+                                                                                  ? 'default'
+                                                                                  : 'secondary'
+                                                                        }
+                                                                    >
+                                                                        {assigned}/{max} assigned
+                                                                    </Badge>
+                                                                    {understaffed && (
+                                                                        <UnderstaffedBadge
+                                                                            short={short}
+                                                                        />
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                             <ChevronRight
                                                                 size={18}
