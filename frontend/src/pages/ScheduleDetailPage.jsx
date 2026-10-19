@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
+import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, UserPlus } from 'lucide-react'
 import { isHere, tally } from '@/lib/attendance'
@@ -361,7 +362,7 @@ export default function ScheduleDetailPage() {
                 )}
                 <div className="ml-auto">
                     {staffing.understaffed ? (
-                        <Badge variant="destructive">{staffing.short} short</Badge>
+                        <UnderstaffedBadge short={staffing.short} />
                     ) : staffing.full ? (
                         <Badge>Fully staffed</Badge>
                     ) : (
