@@ -14,6 +14,7 @@ from app.schemas.subteams.models import (
     SubteamResponse,
     SubteamUpdate,
     SubteamWithWorkersResponse,
+    SubteamWorkersAssign,
 )
 from app.service.subteams.service import SubteamService
 
@@ -67,19 +68,21 @@ def delete_subteam(
     service.delete_subteam(subteam_id)
 
 
-@router.post("/{subteam_id}/workers/{worker_id}", response_model=MessageResponse)
-def assign_worker_to_subteam(
+@router.post("/{subteam_id}/workers", response_model=MessageResponse)
+def assign_workers_to_subteam(
     subteam_id: UUID,
-    worker_id: UUID,
+    data: SubteamWorkersAssign,
     _: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
 ) -> MessageResponse:
-    """Assign a worker to a subteam.
+    """Assign several workers to a subteam in one call.
 
-    Requires the worker to already be assigned to the subteam's parent department.
+    Every worker must already be assigned to the subteam's parent department; if any is not,
+    none are assigned.
     """
-    service.assign_worker(subteam_id, worker_id)
-    return MessageResponse(message="Worker assigned to subteam successfully")
+    service.assign_workers(subteam_id, data.worker_ids)
+    count = len(set(data.worker_ids))
+    return MessageResponse(message=f"{count} {'worker' if count == 1 else 'workers'} assigned to subteam")
 
 
 @router.delete(

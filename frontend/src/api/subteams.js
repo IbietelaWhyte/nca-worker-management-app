@@ -13,8 +13,8 @@ export const updateSubteam = (subteamId, data) => apiClient.patch(`/subteams/${s
 
 export const deleteSubteam = subteamId => apiClient.delete(`/subteams/${subteamId}`)
 
-export const assignWorkerToSubteam = (subteamId, workerId) =>
-    apiClient.post(`/subteams/${subteamId}/workers/${workerId}`)
+export const assignWorkersToSubteam = (subteamId, workerIds) =>
+    apiClient.post(`/subteams/${subteamId}/workers`, { worker_ids: workerIds })
 
 export const unassignWorkerFromSubteam = (subteamId, workerId) =>
     apiClient.delete(`/subteams/${subteamId}/workers/${workerId}`)

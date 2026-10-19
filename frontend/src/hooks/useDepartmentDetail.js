@@ -48,6 +48,18 @@ export function useDepartmentDetail(departmentId) {
         setDepartment(response.data)
     }
 
+    // Mirror a subteam change onto the member list after the API call has succeeded, so the
+    // subteam badges stay right without a refetch (which would blank the page while loading).
+    const setMembersSubteam = (workerIds, subteam) => {
+        const ids = new Set(workerIds)
+        setDepartment(prev => ({
+            ...prev,
+            workers: prev.workers.map(w =>
+                ids.has(w.id) ? { ...w, subteam: subteam ?? null } : w
+            ),
+        }))
+    }
+
     const getSubteams = async () => {
         const response = await getDepartmentWithSubteams(departmentId)
         return response.data
@@ -61,6 +73,7 @@ export function useDepartmentDetail(departmentId) {
         addMember,
         removeMember,
         assignHod,
+        setMembersSubteam,
         getSubteams,
     }
 }

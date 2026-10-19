@@ -137,34 +137,38 @@ class SubteamService:
         self.subteam_repo.delete(subteam_id)
         log.info("subteam_deleted")
 
-    def assign_worker(self, subteam_id: UUID, worker_id: UUID) -> None:
-        """Assign a worker to a subteam.
+    def assign_workers(self, subteam_id: UUID, worker_ids: list[UUID]) -> None:
+        """Assign several workers to a subteam at once.
 
-        Validates that the worker is already assigned to the subteam's parent department
-        before allowing the assignment.
+        All-or-nothing: every worker must already be a member of the subteam's parent department,
+        and if any is not, nothing is written. Somebody already in another subteam of the same
+        department moves across, since a worker belongs to one subteam per department.
 
         Args:
             subteam_id: Unique identifier of the subteam.
-            worker_id: Unique identifier of the worker to assign.
+            worker_ids: Unique identifiers of the workers to assign. Duplicates are ignored.
 
         Raises:
-            ValueError: If subteam not found or worker not assigned to parent department.
+            NotFoundError: If the subteam does not exist.
+            BadRequestError: If any worker is not assigned to the parent department.
         """
-        log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
+        log = self.logger.bind(method="assign_workers", subteam_id=str(subteam_id), count=len(worker_ids))
 
-        # Get subteam and validate it exists
         subteam = self.get_subteam(subteam_id)
+        unique_ids = list(dict.fromkeys(worker_ids))
 
-        # Validate worker is assigned to the subteam's parent department
-        worker_subteams = self.department_repo.get_departments_for_worker(worker_id)
-        is_in_department = any(d.id == subteam.department_id for d in worker_subteams)
+        # One read of the department's members rather than one membership lookup per worker.
+        department = self.department_repo.get_with_workers(subteam.department_id)
+        member_ids = {w.id for w in department.workers} if department else set()
+        outsiders = [worker_id for worker_id in unique_ids if worker_id not in member_ids]
+        if outsiders:
+            log.warning("workers_not_in_parent_department", department_id=str(subteam.department_id))
+            raise BadRequestError(
+                f"Workers {', '.join(str(w) for w in outsiders)} are not assigned to department {subteam.department_id}"
+            )
 
-        if not is_in_department:
-            log.warning("worker_not_in_parent_department", department_id=str(subteam.department_id))
-            raise BadRequestError(f"Worker {worker_id} is not assigned to department {subteam.department_id}")
-
-        self.subteam_repo.assign_worker(subteam_id, worker_id)
-        log.info("worker_assigned_to_subteam")
+        self.subteam_repo.assign_workers(subteam.department_id, subteam_id, unique_ids)
+        log.info("workers_assigned_to_subteam", assigned=len(unique_ids))
 
     def unassign_worker(self, subteam_id: UUID, worker_id: UUID) -> None:
         """Remove a worker's assignment from a subteam.

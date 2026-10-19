@@ -122,35 +122,45 @@ class TestDeleteSubteam:
         assert response.status_code == 403
 
 
-class TestAssignWorkerToSubteam:
-    def test_returns_200_on_successful_assignment(self, mock_subteam_service):
+class TestAssignWorkersToSubteam:
+    def test_returns_200_and_passes_every_id(self, mock_subteam_service):
         subteam_id = uuid4()
-        worker_id = uuid4()
+        worker_ids = [uuid4(), uuid4()]
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.post(f"/api/v1/subteams/{subteam_id}/workers/{worker_id}")
+        response = client.post(
+            f"/api/v1/subteams/{subteam_id}/workers",
+            json={"worker_ids": [str(w) for w in worker_ids]},
+        )
         assert response.status_code == 200
-        assert response.json()["message"] == "Worker assigned to subteam successfully"
-        mock_subteam_service.assign_worker.assert_called_once_with(subteam_id, worker_id)
+        assert response.json()["message"] == "2 workers assigned to subteam"
+        mock_subteam_service.assign_workers.assert_called_once_with(subteam_id, worker_ids)
+
+    def test_returns_422_for_an_empty_list(self, mock_subteam_service):
+        client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
+
+        response = client.post(f"/api/v1/subteams/{uuid4()}/workers", json={"worker_ids": []})
+        assert response.status_code == 422
+        mock_subteam_service.assign_workers.assert_not_called()
 
     def test_returns_404_when_subteam_not_found(self, mock_subteam_service):
-        mock_subteam_service.assign_worker.side_effect = NotFoundError("subteam not found")
+        mock_subteam_service.assign_workers.side_effect = NotFoundError("subteam not found")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.post(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
+        response = client.post(f"/api/v1/subteams/{uuid4()}/workers", json={"worker_ids": [str(uuid4())]})
         assert response.status_code == 404
 
     def test_returns_400_when_worker_not_in_parent_department(self, mock_subteam_service):
-        mock_subteam_service.assign_worker.side_effect = BadRequestError("Worker not assigned to department")
+        mock_subteam_service.assign_workers.side_effect = BadRequestError("Workers x are not assigned to department")
         client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
 
-        response = client.post(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
+        response = client.post(f"/api/v1/subteams/{uuid4()}/workers", json={"worker_ids": [str(uuid4())]})
         assert response.status_code == 400
         assert "not assigned to department" in response.json()["detail"].lower()
 
     def test_returns_403_for_worker_role(self, mock_subteam_service):
         client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
-        response = client.post(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
+        response = client.post(f"/api/v1/subteams/{uuid4()}/workers", json={"worker_ids": [str(uuid4())]})
         assert response.status_code == 403
 
 
