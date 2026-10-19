@@ -8,7 +8,13 @@ from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFou
 from app.schemas.models import TokenPayload, UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerContactMatch, WorkerCreate, WorkerUpdate
 from app.service.workers.service import WorkerService
-from tests.unit.services.conftest import make_assignment, make_department, make_worker
+from tests.unit.services.conftest import (
+    make_assignment,
+    make_department,
+    make_department_role,
+    make_subteam,
+    make_worker,
+)
 
 
 def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.com") -> TokenPayload:
@@ -16,12 +22,24 @@ def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.c
 
 
 @pytest.fixture
-def service(mock_worker_repo, mock_department_repo, mock_schedule_repo, mock_supabase_client):
+def service(
+    mock_worker_repo,
+    mock_department_repo,
+    mock_schedule_repo,
+    mock_supabase_client,
+    mock_department_role_repo,
+    mock_subteam_repo,
+):
+    # No roles or subteams by default, so a file without those columns imports as it always did.
+    mock_department_role_repo.get_by_department.return_value = []
+    mock_subteam_repo.get_by_department.return_value = []
     return WorkerService(
         worker_repo=mock_worker_repo,
         department_repo=mock_department_repo,
         schedule_repo=mock_schedule_repo,
         client=mock_supabase_client,
+        department_role_repo=mock_department_role_repo,
+        subteam_repo=mock_subteam_repo,
     )
 
 
@@ -682,6 +700,11 @@ def _csv(rows: str) -> bytes:
     return f"first_name,last_name,email,phone\n{rows}".encode()
 
 
+def _csv_with_placement(rows: str) -> bytes:
+    """Build CSV bytes with the optional role and subteam columns."""
+    return f"first_name,last_name,email,phone,role,subteam\n{rows}".encode()
+
+
 def _contact(worker) -> WorkerContactMatch:
     """Build the contact-index entry the repository would return for an existing worker."""
     return WorkerContactMatch(worker_id=worker.id, is_active=worker.is_active)
@@ -714,7 +737,10 @@ class TestImportWorkers:
         assert [r.worker_id for r in result.results] == [w.id for w in created]
         # Two batched statements for the whole file, not two per row.
         mock_worker_repo.create_many.assert_called_once()
-        mock_department_repo.assign_workers.assert_called_once_with(dept_id, [w.id for w in created])
+        # No role or subteam columns, so every membership lands with neither.
+        mock_department_repo.assign_workers.assert_called_once_with(
+            dept_id, [w.id for w in created], placements={w.id: (None, None) for w in created}
+        )
 
     def test_reports_spreadsheet_line_numbers(self, service, mock_worker_repo):
         # The header is line 1, so the first data row must report as line 2 — otherwise the user is
@@ -891,3 +917,112 @@ class TestImportWorkers:
         csv_bytes = _csv("Ann,Lee,a@example.com,+14165550111")
         with pytest.raises(NotFoundError, match="not found"):
             service.import_workers(csv_bytes, uuid4(), dry_run=False)
+
+
+class TestImportRoleAndSubteam:
+    """The optional role and subteam columns, matched against the department's own by name."""
+
+    @pytest.fixture(autouse=True)
+    def _department(
+        self, service, mock_department_repo, mock_worker_repo, mock_department_role_repo, mock_subteam_repo
+    ):
+        # Takes `service` so it runs after that fixture's empty-roles default, not before it.
+        self.dept = make_department(name="Ushers")
+        mock_department_repo.get_by_id.return_value = self.dept
+        mock_worker_repo.get_contact_index.return_value = {}
+        self.head = make_department_role(name="Head Usher", department_id=self.dept.id)
+        self.door = make_department_role(name="Door Usher", department_id=self.dept.id)
+        self.team_a = make_subteam(name="Team A", department_id=self.dept.id)
+        mock_department_role_repo.get_by_department.return_value = [self.head, self.door]
+        mock_subteam_repo.get_by_department.return_value = [self.team_a]
+
+    def test_matches_names_loosely_and_writes_ids_in_the_one_membership_insert(
+        self, service, mock_worker_repo, mock_department_repo
+    ):
+        ann, bob = make_worker(email="a@example.com"), make_worker(email="b@example.com")
+        mock_worker_repo.create_many.return_value = [ann, bob]
+
+        csv_bytes = _csv_with_placement(
+            "Ann,Lee,a@example.com,+14165550111,  head usher ,TEAM A\nBob,Kim,b@example.com,+14165550112,,"
+        )
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=False)
+
+        assert result.ok is True
+        # The preview shows the department's spelling, not the spreadsheet's.
+        assert (result.results[0].role, result.results[0].subteam) == ("Head Usher", "Team A")
+        assert (result.results[1].role, result.results[1].subteam) == (None, None)
+        mock_department_repo.assign_workers.assert_called_once_with(
+            self.dept.id,
+            [ann.id, bob.id],
+            placements={ann.id: (self.head.id, self.team_a.id), bob.id: (None, None)},
+        )
+
+    def test_dry_run_previews_the_placement(self, service, mock_department_repo):
+        csv_bytes = _csv_with_placement("Ann,Lee,a@example.com,+14165550111,Door Usher,")
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=True)
+
+        assert result.results[0].status == "valid"
+        assert result.results[0].role == "Door Usher"
+        mock_department_repo.assign_workers.assert_not_called()
+
+    def test_an_unknown_role_rejects_the_file_and_lists_the_real_ones(
+        self, service, mock_worker_repo, mock_department_repo
+    ):
+        csv_bytes = _csv_with_placement(
+            "Ann,Lee,a@example.com,+14165550111,Head Ushr,\nBob,Kim,b@example.com,+14165550112,Door Usher,"
+        )
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=False)
+
+        assert result.ok is False
+        bad = result.results[0]
+        assert (bad.status, bad.field, bad.value) == ("error", "role", "Head Ushr")
+        assert bad.error == 'No role called "Head Ushr" in Ushers. Roles: Door Usher, Head Usher'
+        assert result.results[1].status == "valid"
+        mock_worker_repo.create_many.assert_not_called()
+        mock_department_repo.assign_workers.assert_not_called()
+
+    def test_an_unknown_subteam_rejects_the_file(self, service, mock_worker_repo):
+        csv_bytes = _csv_with_placement("Ann,Lee,a@example.com,+14165550111,,Team B")
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=False)
+
+        assert result.ok is False
+        assert result.results[0].field == "subteam"
+        assert result.results[0].error == 'No subteam called "Team B" in Ushers. Subteams: Team A'
+        mock_worker_repo.create_many.assert_not_called()
+
+    def test_a_department_without_roles_says_where_to_add_them(self, service, mock_department_role_repo):
+        mock_department_role_repo.get_by_department.return_value = []
+        csv_bytes = _csv_with_placement("Ann,Lee,a@example.com,+14165550111,Head Usher,")
+
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=True)
+
+        assert result.results[0].error == (
+            "Ushers has no roles yet. Add them on the Roles tab first, or leave this blank"
+        )
+
+    def test_a_file_without_the_columns_still_imports(self, service, mock_worker_repo, mock_department_repo):
+        ann = make_worker(email="a@example.com")
+        mock_worker_repo.create_many.return_value = [ann]
+
+        result = service.import_workers(_csv("Ann,Lee,a@example.com,+14165550111"), self.dept.id, dry_run=False)
+
+        assert result.ok is True
+        assert mock_department_repo.assign_workers.call_args.kwargs["placements"] == {ann.id: (None, None)}
+
+    def test_duplicates_keep_their_existing_placement(self, service, mock_worker_repo, mock_department_repo):
+        # Skipped rows are not touched at all: changing an existing member's role is the Members
+        # tab's job, not something a re-uploaded roster should do behind the head's back.
+        existing = make_worker(email="a@example.com")
+        mock_worker_repo.get_contact_index.return_value = {"a@example.com": _contact(existing)}
+        bob = make_worker(email="b@example.com")
+        mock_worker_repo.create_many.return_value = [bob]
+
+        csv_bytes = _csv_with_placement(
+            "Ann,Lee,a@example.com,+14165550111,Head Usher,Team A\nBob,Kim,b@example.com,+14165550112,Door Usher,"
+        )
+        result = service.import_workers(csv_bytes, self.dept.id, dry_run=False, skip_duplicates=True)
+
+        assert result.results[0].status == "duplicate"
+        mock_department_repo.assign_workers.assert_called_once_with(
+            self.dept.id, [bob.id], placements={bob.id: (self.door.id, None)}
+        )

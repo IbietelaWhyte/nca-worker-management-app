@@ -5,7 +5,7 @@ import pytest
 
 from app.core.phone import normalize_phone
 from app.schemas.workers.models import WorkerImportRow
-from app.service.workers.service import REQUIRED_IMPORT_COLUMNS
+from app.service.workers.service import OPTIONAL_IMPORT_COLUMNS, REQUIRED_IMPORT_COLUMNS
 
 # The template users download from the import dialog. It lives in the frontend's static assets, but
 # the parser that has to accept it lives here, so the drift guard belongs with the parser.
@@ -26,13 +26,20 @@ def test_template_header_matches_required_columns(rows):
     # If someone adds a required column without updating the sample, every user who downloads the
     # template, fills it in and uploads it gets a rejection. Fail here instead.
     assert rows, "template has no example rows"
-    assert set(rows[0]) == set(REQUIRED_IMPORT_COLUMNS)
+    assert list(rows[0]) == [*REQUIRED_IMPORT_COLUMNS, *OPTIONAL_IMPORT_COLUMNS]
+
+
+def test_template_leaves_role_and_subteam_blank(rows):
+    # Roles and subteams belong to each department, so any example name would be refused by every
+    # department that lacks it — a template that fails on upload. The dialog lists the real names.
+    for row in rows:
+        assert all(not row[column] for column in OPTIONAL_IMPORT_COLUMNS)
 
 
 def test_template_rows_pass_validation(rows):
     # The template doubles as the format documentation, so its examples must be genuinely valid.
     for row in rows:
-        WorkerImportRow(**row)
+        WorkerImportRow(**{column: row[column] for column in REQUIRED_IMPORT_COLUMNS})
 
 
 def test_template_phone_numbers_are_already_e164(rows):

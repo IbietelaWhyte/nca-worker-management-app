@@ -1283,6 +1283,8 @@ export default function DepartmentDetailPage() {
                     open={csvImportOpen}
                     onOpenChange={setCsvImportOpen}
                     departmentId={id}
+                    roles={roles}
+                    subteams={subteams}
                     onImported={refetch}
                 />
             )}

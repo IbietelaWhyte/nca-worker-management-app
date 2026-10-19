@@ -22,6 +22,8 @@ class Columns:
 class JunctionColumns:
     WORKER_ID = "worker_id"
     DEPARTMENT_ID = "department_id"
+    DEPARTMENT_ROLE_ID = "department_role_id"
+    SUBTEAM_ID = "subteam_id"
 
 
 class AssistantHodJunctionColumns:
