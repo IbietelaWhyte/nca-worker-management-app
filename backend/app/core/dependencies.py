@@ -12,6 +12,7 @@ from app.repository.availability_prompts.repository import AvailabilityPromptRep
 from app.repository.confirmation_tokens.repository import ConfirmationTokenRepository
 from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
+from app.repository.monthly_leads.repository import MonthlyLeadRepository
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.special_services.repository import SpecialServiceRepository
 from app.repository.subteams.repository import SubteamRepository
@@ -26,6 +27,7 @@ from app.service.confirmation_tokens.service import ConfirmationTokenService
 from app.service.department_roles.service import DepartmentRoleService
 from app.service.departments.service import DepartmentService
 from app.service.feedback.service import FeedbackService
+from app.service.monthly_leads.service import MonthlyLeadService
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
 from app.service.sms.service import SMSService
@@ -110,6 +112,18 @@ def get_availability_prompt_repository(client: Client = Depends(get_db)) -> Avai
         AvailabilityPromptRepository: Repository for scheduled availability prompts.
     """
     return AvailabilityPromptRepository(client)
+
+
+def get_monthly_lead_repository(client: Client = Depends(get_db)) -> MonthlyLeadRepository:
+    """FastAPI dependency that provides a MonthlyLeadRepository instance.
+
+    Args:
+        client: Supabase client dependency.
+
+    Returns:
+        MonthlyLeadRepository: Repository for the workers named to lead a department for a month.
+    """
+    return MonthlyLeadRepository(client)
 
 
 def get_worker_leave_repository(client: Client = Depends(get_db)) -> WorkerLeaveRepository:
@@ -200,6 +214,22 @@ def get_sms_service() -> SMSService:
     return SMSService()
 
 
+def get_monthly_lead_service(
+    lead_repo: MonthlyLeadRepository = Depends(get_monthly_lead_repository),
+    department_repo: DepartmentRepository = Depends(get_department_repository),
+) -> MonthlyLeadService:
+    """FastAPI dependency that provides a MonthlyLeadService instance.
+
+    Args:
+        lead_repo: MonthlyLeadRepository dependency.
+        department_repo: DepartmentRepository dependency, for the title and the member list.
+
+    Returns:
+        MonthlyLeadService: Service for naming a department's leads for a month.
+    """
+    return MonthlyLeadService(lead_repo=lead_repo, department_repo=department_repo)
+
+
 def get_schedule_service(
     schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
     worker_repo: WorkerRepository = Depends(get_worker_repository),
@@ -210,6 +240,7 @@ def get_schedule_service(
     leave_repo: WorkerLeaveRepository = Depends(get_worker_leave_repository),
     sms_service: SMSService = Depends(get_sms_service),
     special_service_service: SpecialServiceService = Depends(get_special_service_service),
+    monthly_lead_service: MonthlyLeadService = Depends(get_monthly_lead_service),
 ) -> ScheduleService:
     """FastAPI dependency that provides a ScheduleService instance.
 
@@ -223,6 +254,7 @@ def get_schedule_service(
         leave_repo: WorkerLeaveRepository dependency, to drop workers who are away.
         sms_service: SMSService dependency, to text both people affected by a rota edit.
         special_service_service: SpecialServiceService dependency, for which dates are special.
+        monthly_lead_service: MonthlyLeadService dependency, to leave each month's leads off the rota.
 
     Returns:
         ScheduleService: Service for schedule business logic operations.
@@ -237,6 +269,7 @@ def get_schedule_service(
         leave_repo=leave_repo,
         sms_service=sms_service,
         special_service_service=special_service_service,
+        monthly_lead_service=monthly_lead_service,
     )
 
 

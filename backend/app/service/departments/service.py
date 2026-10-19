@@ -138,7 +138,11 @@ class DepartmentService:
             method="update_department", department_id=str(department_id), data=data.model_dump(exclude_none=True)
         )
         self.get_department(department_id)
-        updated = self.department_repo.update(department_id, data.model_dump(exclude_none=True))
+        payload = data.model_dump(exclude_none=True)
+        # A null title is an instruction (turn monthly leads off), not an absent field.
+        if "monthly_lead_title" in data.model_fields_set:
+            payload["monthly_lead_title"] = data.monthly_lead_title
+        updated = self.department_repo.update(department_id, payload)
         if not updated:
             log.error("department_update_failed")
             raise AppError(f"Failed to update department {department_id}")

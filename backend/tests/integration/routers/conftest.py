@@ -14,6 +14,7 @@ from app.core.dependencies import (
     get_department_role_service,
     get_department_service,
     get_feedback_service,
+    get_monthly_lead_service,
     get_reminder_service,
     get_schedule_service,
     get_special_service_service,
@@ -130,6 +131,7 @@ def make_client(
     worker_leave_service=None,
     special_service_service=None,
     attendance_service=None,
+    monthly_lead_service=None,
 ) -> TestClient:
     app.dependency_overrides[verify_token] = lambda: make_token_payload(role)
 
@@ -161,6 +163,8 @@ def make_client(
         app.dependency_overrides[get_worker_leave_service] = lambda: worker_leave_service
     if special_service_service:
         app.dependency_overrides[get_special_service_service] = lambda: special_service_service
+    if monthly_lead_service:
+        app.dependency_overrides[get_monthly_lead_service] = lambda: monthly_lead_service
 
     return TestClient(app)
 

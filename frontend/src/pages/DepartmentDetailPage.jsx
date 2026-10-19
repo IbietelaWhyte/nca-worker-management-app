@@ -9,6 +9,7 @@ import SubteamForm from '@/components/subteams/SubteamForm'
 import RoleForm from '@/components/roles/RoleForm'
 import CsvImportDialog from '@/components/departments/CsvImportDialog'
 import AvailabilityPromptDialog from '@/components/departments/AvailabilityPromptDialog'
+import MonthlyLeadsPanel from '@/components/departments/MonthlyLeadsPanel'
 import {
     getSubteamWithWorkers,
     assignWorkersToSubteam,
@@ -119,6 +120,7 @@ export default function DepartmentDetailPage() {
     const [memberRoleLoading, setMemberRoleLoading] = useState(null)
 
     const canManage = isAdmin || isDepartmentHead
+    const showMonthlyLeads = canManage && Boolean(department?.monthly_lead_title)
 
     // Workers not already in this department
     const memberIds = new Set(department?.workers?.map(w => w.id) ?? [])
@@ -392,6 +394,13 @@ export default function DepartmentDetailPage() {
                             </Badge>
                         )}
                     </TabsTrigger>
+                    {/* Only for a department that has turned monthly leads on, by giving them a
+                        title on the department itself. */}
+                    {showMonthlyLeads && (
+                        <TabsTrigger value="monthly-leads">
+                            {department.monthly_lead_title}
+                        </TabsTrigger>
+                    )}
                 </TabsList>
 
                 {/* Members tab */}
@@ -1261,6 +1270,11 @@ export default function DepartmentDetailPage() {
                         )}
                     </div>
                 </TabsContent>
+                {showMonthlyLeads && (
+                    <TabsContent value="monthly-leads" className="mt-4">
+                        <MonthlyLeadsPanel department={department} />
+                    </TabsContent>
+                )}
             </Tabs>
 
             {/* CSV import dialog — gated identically to the Import CSV button that opens it */}

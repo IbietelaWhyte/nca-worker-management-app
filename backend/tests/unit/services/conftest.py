@@ -16,10 +16,12 @@ from app.schemas.availabilities.models import AvailabilityResponse
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
+from app.schemas.monthly_leads.models import MonthlyLeadsResponse
 from app.schemas.schedules.models import AssignmentResponse, ScheduleResponse
 from app.schemas.subteams.models import SubteamResponse, SubteamWithWorkersResponse
 from app.schemas.workers.models import WorkerResponse
 from app.service.authentication.service import AuthenticationService
+from app.service.monthly_leads.service import MonthlyLeadService
 from app.service.sms.service import SMSService
 from app.service.special_services.service import SpecialServiceService
 
@@ -72,6 +74,17 @@ def mock_leave_repo():
     repo.get_by_worker.return_value = []
     repo.get_overlapping.return_value = []
     return repo
+
+
+@pytest.fixture
+def mock_monthly_lead_service():
+    """Nobody leads any department by default, so an existing test never has a worker removed."""
+    service = MagicMock(spec=MonthlyLeadService)
+    service.lead_ids_by_month.return_value = {}
+    service.get_leads.side_effect = lambda department_id, day: MonthlyLeadsResponse(
+        title=None, month=day.replace(day=1), leads=[]
+    )
+    return service
 
 
 @pytest.fixture

@@ -18,6 +18,7 @@ from app.repository.workers.repository import WorkerRepository
 from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
+from app.schemas.monthly_leads.models import first_of_month
 from app.schemas.schedules.models import (
     AssignableWorker,
     AssignmentResponse,
@@ -39,6 +40,7 @@ from app.schemas.schedules.models import (
 )
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker, WorkerResponse
+from app.service.monthly_leads.service import MonthlyLeadService
 from app.service.schedules.planner import ORDINARY, GroupContext, PlanContext, plan_month
 from app.service.sms.service import SMSService
 from app.service.special_services.service import SpecialServiceService
@@ -222,6 +224,7 @@ class ScheduleService:
         leave_repo: WorkerLeaveRepository,
         sms_service: SMSService,
         special_service_service: SpecialServiceService,
+        monthly_lead_service: MonthlyLeadService,
     ) -> None:
         self.schedule_repo = schedule_repo
         self.worker_repo = worker_repo
@@ -238,6 +241,9 @@ class ScheduleService:
         # passed into the context, so a preview and the commit that follows it cannot
         # disagree about which Sundays were special.
         self.special_service_service = special_service_service
+        # A department's leads for a month serve every service in that role, so generation
+        # leaves them off that department's rota for the month.
+        self.monthly_lead_service = monthly_lead_service
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="ScheduleService")
@@ -756,6 +762,11 @@ class ScheduleService:
             # Leave and "cannot serve" are unioned upstream, so this cannot tell them apart.
             warnings.append(f"{name} is marked unavailable or on leave on {when}.")
 
+        leads = self.monthly_lead_service.get_leads(schedule.department_id, schedule.scheduled_date)
+        if leads.title and any(lead.worker_id == worker.id for lead in leads.leads):
+            month = schedule.scheduled_date.strftime("%B")
+            warnings.append(f"{name} is {leads.title} for {month}, so is normally left off this rota.")
+
         # Safe without excluding this schedule: both callers have already established that the
         # worker is not on it, so any hit on the date is a different rota.
         if worker.id in self.schedule_repo.get_workers_scheduled_on_date(schedule.scheduled_date):
@@ -1164,6 +1175,15 @@ class ScheduleService:
         range_start, range_end = min(dates), max(dates)
 
         unavailable = self._build_unavailability_map(worker_ids, dates, range_start, range_end)
+        # Leads are unioned in exactly as leave is: to the planner, somebody leading the
+        # department this month is simply somebody who cannot be picked for its rota. Kept out of
+        # _build_unavailability_map because that is about the person, and this is about the
+        # person *in this department* — a Teacher of the Month can still sing in the choir.
+        leads_by_month = self.monthly_lead_service.lead_ids_by_month(department_id, range_start, range_end)
+        for scheduled_date in dates:
+            leads = leads_by_month.get(first_of_month(scheduled_date), set())
+            if leads:
+                unavailable.setdefault(scheduled_date, set()).update(leads)
         already_scheduled = self.schedule_repo.get_workers_scheduled_in_range(range_start, range_end)
         existing_dates = self._existing_schedule_dates(department_id, scope, subteam_id, range_start, range_end)
 

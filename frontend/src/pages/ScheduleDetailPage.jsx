@@ -9,6 +9,8 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { formatSlotRange, summarizeStaffing } from '@/lib/staffing'
 import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
+import MonthlyLeadsBanner from '@/components/schedules/MonthlyLeadsBanner'
+import { useMonthlyLeads } from '@/hooks/useMonthlyLeads'
 import { Label } from '@/components/ui/label'
 import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, UserPlus } from 'lucide-react'
 import { isHere, tally } from '@/lib/attendance'
@@ -45,6 +47,11 @@ export default function ScheduleDetailPage() {
         reopenAttendance,
         sendRemindersForSchedule,
     } = useScheduleDetail(id)
+    // scheduled_date is "2026-11-17", so its month key is the first seven characters plus "-01".
+    const monthlyLeads = useMonthlyLeads(
+        schedule?.department_id,
+        schedule ? `${schedule.scheduled_date.slice(0, 7)}-01` : null
+    )
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
     const [showEmptySubteams, setShowEmptySubteams] = useState(true)
@@ -333,6 +340,9 @@ export default function ScheduleDetailPage() {
                     )}
                 </div>
             </div>
+
+            {/* Who is in charge this month. Read live by month, not stamped on the schedule. */}
+            <MonthlyLeadsBanner title={monthlyLeads.title} leads={monthlyLeads.leads} />
 
             {/* Stats bar */}
             <div className="flex items-center gap-4 p-4 border rounded-lg bg-muted/30">

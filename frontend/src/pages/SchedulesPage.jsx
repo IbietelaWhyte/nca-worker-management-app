@@ -32,6 +32,9 @@ import {
 import { addMonths, format, startOfMonth, subMonths } from 'date-fns'
 import { summarizeStaffing } from '@/lib/staffing'
 import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
+import MonthlyLeadsBanner from '@/components/schedules/MonthlyLeadsBanner'
+import { useMonthlyLeads } from '@/hooks/useMonthlyLeads'
+import { monthKey } from '@/api/monthlyLeads'
 
 export default function SchedulesPage() {
     const navigate = useNavigate()
@@ -66,6 +69,7 @@ export default function SchedulesPage() {
     } = useSchedules(selectedDepartmentId)
 
     const selectedDepartment = departments.find(d => d.id === selectedDepartmentId)
+    const monthlyLeads = useMonthlyLeads(selectedDepartmentId, monthKey(month))
 
     const handleGenerate = async formData => {
         await createSchedule(formData)
@@ -189,6 +193,8 @@ export default function SchedulesPage() {
                             Today
                         </Button>
                     </div>
+
+                    <MonthlyLeadsBanner title={monthlyLeads.title} leads={monthlyLeads.leads} />
 
                     {loading && (
                         <div className="flex items-center justify-center h-40">
@@ -504,6 +510,7 @@ export default function SchedulesPage() {
                             departmentName={selectedDepartment?.name ?? 'Schedule'}
                             month={month}
                             schedules={schedules}
+                            monthlyLeads={monthlyLeads}
                             onClose={() => setExportOpen(false)}
                         />
                     )}
