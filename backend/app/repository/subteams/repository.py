@@ -188,39 +188,30 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         log.debug("fetched_subteam_for_worker_in_department", subteam_id=None)
         return None
 
-    def assign_worker(self, subteam_id: UUID, worker_id: UUID) -> dict[str, Any]:
+    def assign_workers(self, department_id: UUID, subteam_id: UUID, worker_ids: list[UUID]) -> None:
         """
-        Assign a worker to a subteam.
+        Assign many workers to a subteam in a single update.
 
-        This method updates the existing worker_departments association to add the
-        subteam_id. The worker must already be assigned to the parent department.
+        Sets subteam_id on each worker's existing worker_departments row for the subteam's
+        department, so somebody already in another subteam of that department moves across.
+        One statement, so Postgres applies it atomically — every row moves or none does.
 
         Args:
+            department_id (UUID): The subteam's parent department.
             subteam_id (UUID): The unique identifier of the subteam.
-            worker_id (UUID): The unique identifier of the worker to assign.
-
-        Returns:
-            dict[str, Any]: The updated junction record containing subteam_id and worker_id.
+            worker_ids (list[UUID]): The workers to assign; each must already be a department member.
         """
-        log = self.logger.bind(method="assign_worker", subteam_id=str(subteam_id), worker_id=str(worker_id))
-
-        # Get the subteam to find its department_id
-        subteam_response = (
-            self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.ID, str(subteam_id)).single().execute()
-        )
-        subteam_data = cast(dict[str, Any], subteam_response.data)
-        department_id = subteam_data["department_id"]
-
-        # Update the existing worker_departments row to set the subteam_id
-        response = (
+        if not worker_ids:
+            return
+        log = self.logger.bind(method="assign_workers", subteam_id=str(subteam_id), count=len(worker_ids))
+        (
             self.client.table(q.JUNCTION_TABLE)
             .update({q.JunctionColumns.SUBTEAM_ID: str(subteam_id)})
-            .eq(q.JunctionColumns.WORKER_ID, str(worker_id))
             .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
+            .in_(q.JunctionColumns.WORKER_ID, [str(worker_id) for worker_id in worker_ids])
             .execute()
         )
-        log.info("worker_assigned_to_subteam")
-        return cast(dict[str, Any], response.data[0])
+        log.info("workers_assigned_to_subteam")
 
     def unassign_worker(self, subteam_id: UUID, worker_id: UUID) -> bool:
         """

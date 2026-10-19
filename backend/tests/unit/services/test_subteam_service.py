@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -5,7 +6,7 @@ import pytest
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.schemas.subteams.models import SubteamCreate, SubteamUpdate
 from app.service.subteams.service import SubteamService
-from tests.unit.services.conftest import make_department, make_subteam
+from tests.unit.services.conftest import make_subteam
 
 
 @pytest.fixture
@@ -62,52 +63,64 @@ class TestUpdateSubteam:
             service.update_subteam(uuid4(), SubteamUpdate(name="New Name"))
 
 
-class TestAssignWorker:
-    def test_assigns_successfully_when_worker_in_parent_department(
-        self, service, mock_subteam_repo, mock_department_repo
-    ):
+def _department_with(dept_id, member_ids):
+    """The department-with-members read, reduced to the one field assign_workers looks at."""
+    return SimpleNamespace(id=dept_id, workers=[SimpleNamespace(id=i) for i in member_ids])
+
+
+class TestAssignWorkers:
+    def test_assigns_every_worker_in_one_call(self, service, mock_subteam_repo, mock_department_repo):
         dept_id = uuid4()
         subteam = make_subteam(department_id=dept_id)
-        worker_id = uuid4()
+        worker_ids = [uuid4(), uuid4(), uuid4()]
         mock_subteam_repo.get_by_id.return_value = subteam
+        mock_department_repo.get_with_workers.return_value = _department_with(dept_id, [*worker_ids, uuid4()])
 
-        # Worker is assigned to the parent department
-        mock_department_repo.get_departments_for_worker.return_value = [make_department(id=dept_id)]
+        service.assign_workers(subteam.id, worker_ids)
 
-        service.assign_worker(subteam.id, worker_id)
-        mock_subteam_repo.assign_worker.assert_called_once_with(subteam.id, worker_id)
+        mock_department_repo.get_with_workers.assert_called_once_with(dept_id)
+        mock_subteam_repo.assign_workers.assert_called_once_with(dept_id, subteam.id, worker_ids)
+
+    def test_drops_duplicate_ids(self, service, mock_subteam_repo, mock_department_repo):
+        dept_id = uuid4()
+        subteam = make_subteam(department_id=dept_id)
+        a, b = uuid4(), uuid4()
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_department_repo.get_with_workers.return_value = _department_with(dept_id, [a, b])
+
+        service.assign_workers(subteam.id, [a, b, a])
+
+        mock_subteam_repo.assign_workers.assert_called_once_with(dept_id, subteam.id, [a, b])
 
     def test_raises_when_subteam_not_found(self, service, mock_subteam_repo):
         mock_subteam_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
-            service.assign_worker(uuid4(), uuid4())
+            service.assign_workers(uuid4(), [uuid4()])
+        mock_subteam_repo.assign_workers.assert_not_called()
 
-    def test_raises_when_worker_not_in_parent_department(self, service, mock_subteam_repo, mock_department_repo):
+    def test_writes_nothing_when_any_worker_is_outside_the_department(
+        self, service, mock_subteam_repo, mock_department_repo
+    ):
         dept_id = uuid4()
         subteam = make_subteam(department_id=dept_id)
-        worker_id = uuid4()
+        member, outsider = uuid4(), uuid4()
         mock_subteam_repo.get_by_id.return_value = subteam
+        mock_department_repo.get_with_workers.return_value = _department_with(dept_id, [member])
 
-        # Worker is assigned to a different department
-        other_dept_id = uuid4()
-        mock_department_repo.get_departments_for_worker.return_value = [make_department(id=other_dept_id)]
+        with pytest.raises(BadRequestError, match="not assigned to department") as exc:
+            service.assign_workers(subteam.id, [member, outsider])
+        assert str(outsider) in str(exc.value)
+        assert str(member) not in str(exc.value)
+        mock_subteam_repo.assign_workers.assert_not_called()
+
+    def test_raises_when_department_has_no_members(self, service, mock_subteam_repo, mock_department_repo):
+        subteam = make_subteam()
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_department_repo.get_with_workers.return_value = None
 
         with pytest.raises(BadRequestError, match="not assigned to department"):
-            service.assign_worker(subteam.id, worker_id)
-        mock_subteam_repo.assign_worker.assert_not_called()
-
-    def test_raises_when_worker_not_in_any_department(self, service, mock_subteam_repo, mock_department_repo):
-        dept_id = uuid4()
-        subteam = make_subteam(department_id=dept_id)
-        worker_id = uuid4()
-        mock_subteam_repo.get_by_id.return_value = subteam
-
-        # Worker is not assigned to any department
-        mock_department_repo.get_departments_for_worker.return_value = []
-
-        with pytest.raises(BadRequestError, match="not assigned to department"):
-            service.assign_worker(subteam.id, worker_id)
-        mock_subteam_repo.assign_worker.assert_not_called()
+            service.assign_workers(subteam.id, [uuid4()])
+        mock_subteam_repo.assign_workers.assert_not_called()
 
 
 class TestUnassignWorker:

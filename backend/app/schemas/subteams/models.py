@@ -64,6 +64,10 @@ class SubteamWithWorkersResponse(SubteamResponse):
     worker: Worker | None = None
 
 
+class SubteamWorkersAssign(BaseModel):
+    worker_ids: list[UUID] = Field(min_length=1)
+
+
 class SubteamUpdate(BaseModel):
     name: str | None = None
     description: str | None = None

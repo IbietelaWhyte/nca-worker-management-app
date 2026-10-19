@@ -11,7 +11,7 @@ import CsvImportDialog from '@/components/departments/CsvImportDialog'
 import AvailabilityPromptDialog from '@/components/departments/AvailabilityPromptDialog'
 import {
     getSubteamWithWorkers,
-    assignWorkerToSubteam,
+    assignWorkersToSubteam,
     unassignWorkerFromSubteam,
 } from '@/api/subteams'
 import { assignWorkerRole, unassignWorkerRole } from '@/api/roles'
@@ -34,7 +34,13 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+    Dialog,
+    DialogContent,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog'
 import {
     ArrowLeft,
     UserPlus,
@@ -67,6 +73,7 @@ export default function DepartmentDetailPage() {
         addMember,
         removeMember,
         assignHod,
+        setMembersSubteam,
         refetch,
     } = useDepartmentDetail(id)
     const { workers } = useWorkers()
@@ -101,6 +108,9 @@ export default function DepartmentDetailPage() {
     const [addSubteamMemberOpen, setAddSubteamMemberOpen] = useState(false)
     const [selectedSubteam, setSelectedSubteam] = useState(null)
     const [subteamMemberActionLoading, setSubteamMemberActionLoading] = useState(null)
+    // Workers picked in the add-member dialog, assigned together on Submit
+    const [pendingSubteamWorkerIds, setPendingSubteamWorkerIds] = useState([])
+    const [submittingSubteamMembers, setSubteamMembersSubmitting] = useState(false)
 
     // Role dialog + inline assignment state
     const [roleDialogOpen, setRoleDialogOpen] = useState(false)
@@ -199,42 +209,59 @@ export default function DepartmentDetailPage() {
         }
     }
 
+    const reloadExpandedSubteamWorkers = async () => {
+        if (!expandedSubteamId) return
+        const response = await getSubteamWithWorkers(expandedSubteamId)
+        setSubteamWorkers(response.data || [])
+    }
+
     const handleOpenAddSubteamMember = subteam => {
         setSelectedSubteam(subteam)
+        setPendingSubteamWorkerIds([])
         setAddSubteamMemberOpen(true)
     }
 
-    const handleAddSubteamMember = async workerId => {
-        if (!selectedSubteam) return
-        setSubteamMemberActionLoading(workerId)
+    const handleAddSubteamMemberOpenChange = open => {
+        setAddSubteamMemberOpen(open)
+        if (!open) setPendingSubteamWorkerIds([])
+    }
+
+    const togglePendingSubteamWorker = workerId => {
+        setPendingSubteamWorkerIds(prev =>
+            prev.includes(workerId) ? prev.filter(id => id !== workerId) : [...prev, workerId]
+        )
+    }
+
+    const handleSubmitSubteamMembers = async () => {
+        if (!selectedSubteam || pendingSubteamWorkerIds.length === 0) return
+        setSubteamMembersSubmitting(true)
         try {
-            await assignWorkerToSubteam(selectedSubteam.id, workerId)
-            // Refresh subteam workers list
-            const response = await getSubteamWithWorkers(selectedSubteam.id)
-            setSubteamWorkers(response.data || [])
-            setAddSubteamMemberOpen(false)
+            await assignWorkersToSubteam(selectedSubteam.id, pendingSubteamWorkerIds)
+            setMembersSubteam(pendingSubteamWorkerIds, selectedSubteam)
+            // The expanded row may be this subteam or one somebody just moved out of; either way
+            // its member list has changed.
+            await reloadExpandedSubteamWorkers()
+            handleAddSubteamMemberOpenChange(false)
         } catch (error) {
-            console.error('Failed to add worker to subteam:', error)
-            alert(error.response?.data?.detail || 'Failed to add worker to subteam')
+            console.error('Failed to add workers to subteam:', error)
+            alert(error.response?.data?.detail || 'Failed to add workers to subteam')
         } finally {
-            setSubteamMemberActionLoading(null)
+            setSubteamMembersSubmitting(false)
         }
     }
 
-    const handleRemoveSubteamMember = async worker => {
-        if (!selectedSubteam) return
+    const handleRemoveSubteamMember = async (subteam, worker) => {
         if (
             !confirm(
-                `Remove ${worker.first_name} ${worker.last_name} from subteam "${selectedSubteam.name}"?`
+                `Remove ${worker.first_name} ${worker.last_name} from subteam "${subteam.name}"?`
             )
         )
             return
         setSubteamMemberActionLoading(worker.id)
         try {
-            await unassignWorkerFromSubteam(selectedSubteam.id, worker.id)
-            // Refresh subteam workers list
-            const response = await getSubteamWithWorkers(selectedSubteam.id)
-            setSubteamWorkers(response.data || [])
+            await unassignWorkerFromSubteam(subteam.id, worker.id)
+            setMembersSubteam([worker.id], null)
+            await reloadExpandedSubteamWorkers()
         } catch (error) {
             console.error('Failed to remove worker from subteam:', error)
             alert(error.response?.data?.detail || 'Failed to remove worker from subteam')
@@ -949,6 +976,7 @@ export default function DepartmentDetailPage() {
                                                                                                                         }
                                                                                                                         onClick={() =>
                                                                                                                             handleRemoveSubteamMember(
+                                                                                                                                subteam,
                                                                                                                                 worker
                                                                                                                             )
                                                                                                                         }
@@ -1061,6 +1089,7 @@ export default function DepartmentDetailPage() {
                                                                             }
                                                                             onClick={() =>
                                                                                 handleRemoveSubteamMember(
+                                                                                    subteam,
                                                                                     worker
                                                                                 )
                                                                             }
@@ -1292,12 +1321,12 @@ export default function DepartmentDetailPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Add worker to subteam dialog */}
-            <Dialog open={addSubteamMemberOpen} onOpenChange={setAddSubteamMemberOpen}>
+            {/* Add workers to subteam dialog */}
+            <Dialog open={addSubteamMemberOpen} onOpenChange={handleAddSubteamMemberOpenChange}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>
-                            Add Member to {selectedSubteam?.name ?? 'Subteam'}
+                            Add Members to {selectedSubteam?.name ?? 'Subteam'}
                         </DialogTitle>
                         <p className="text-sm text-muted-foreground mt-2">
                             Only showing members of {department?.name ?? 'this department'}.
@@ -1306,13 +1335,10 @@ export default function DepartmentDetailPage() {
                         </p>
                     </DialogHeader>
                     {(() => {
-                        // Get workers already in this subteam
-                        const subteamWorkerIds = new Set(
-                            subteamWorkers.filter(w => w.worker).map(w => w.worker.id)
-                        )
-                        // Filter to department members not in subteam
+                        // Read membership off the department, not subteamWorkers: that list
+                        // belongs to whichever subteam is expanded, which need not be this one.
                         const availableSubteamWorkers = (department?.workers ?? []).filter(
-                            w => !subteamWorkerIds.has(w.id)
+                            w => w.subteam?.id !== selectedSubteam?.id
                         )
 
                         if (availableSubteamWorkers.length === 0) {
@@ -1325,43 +1351,80 @@ export default function DepartmentDetailPage() {
 
                         return (
                             <div className="space-y-2 max-h-80 overflow-y-auto">
-                                {availableSubteamWorkers.map(worker => (
-                                    <div
-                                        key={worker.id}
-                                        className="flex items-center justify-between gap-3 p-3 border rounded-md hover:bg-accent transition-colors"
-                                    >
-                                        <div className="min-w-0">
-                                            <p className="text-sm font-medium">
-                                                {worker.first_name} {worker.last_name}
-                                            </p>
-                                            <p className="truncate text-xs text-muted-foreground">
-                                                {worker.email}
-                                            </p>
+                                {availableSubteamWorkers.map(worker => {
+                                    const isPending = pendingSubteamWorkerIds.includes(worker.id)
+                                    return (
+                                        <div
+                                            key={worker.id}
+                                            className={`flex items-center justify-between gap-3 p-3 border rounded-md transition-colors ${
+                                                isPending
+                                                    ? 'border-primary bg-primary/5'
+                                                    : 'hover:bg-accent'
+                                            }`}
+                                        >
+                                            <div className="min-w-0">
+                                                <p className="text-sm font-medium">
+                                                    {worker.first_name} {worker.last_name}
+                                                </p>
+                                                <p className="truncate text-xs text-muted-foreground">
+                                                    {worker.email}
+                                                </p>
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                {/* Gold, because adding them is a move rather than
+                                                    an addition and the head should see it coming.
+                                                    Not destructive — it is reversible and routine. */}
+                                                {worker.subteam ? (
+                                                    <Badge variant="warning">
+                                                        In {worker.subteam.name}
+                                                    </Badge>
+                                                ) : (
+                                                    <Badge variant="secondary">No subteam</Badge>
+                                                )}
+                                                <Button
+                                                    size="sm"
+                                                    variant={isPending ? 'outline' : 'default'}
+                                                    disabled={submittingSubteamMembers}
+                                                    onClick={() =>
+                                                        togglePendingSubteamWorker(worker.id)
+                                                    }
+                                                >
+                                                    {isPending
+                                                        ? 'Remove'
+                                                        : worker.subteam
+                                                          ? 'Move'
+                                                          : 'Add'}
+                                                </Button>
+                                            </div>
                                         </div>
-                                        <div className="flex shrink-0 items-center gap-2">
-                                            {/* Gold, because adding them is a move rather than
-                                                an addition and the head should see it coming.
-                                                Not destructive — it is reversible and routine. */}
-                                            {worker.subteam ? (
-                                                <Badge variant="warning">
-                                                    In {worker.subteam.name}
-                                                </Badge>
-                                            ) : (
-                                                <Badge variant="secondary">No subteam</Badge>
-                                            )}
-                                            <Button
-                                                size="sm"
-                                                disabled={subteamMemberActionLoading === worker.id}
-                                                onClick={() => handleAddSubteamMember(worker.id)}
-                                            >
-                                                {worker.subteam ? 'Move' : 'Add'}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                ))}
+                                    )
+                                })}
                             </div>
                         )
                     })()}
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            disabled={submittingSubteamMembers}
+                            onClick={() => handleAddSubteamMemberOpenChange(false)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            disabled={
+                                pendingSubteamWorkerIds.length === 0 || submittingSubteamMembers
+                            }
+                            onClick={handleSubmitSubteamMembers}
+                        >
+                            {submittingSubteamMembers
+                                ? 'Adding...'
+                                : pendingSubteamWorkerIds.length === 0
+                                  ? 'Add members'
+                                  : `Add ${pendingSubteamWorkerIds.length} ${
+                                        pendingSubteamWorkerIds.length === 1 ? 'member' : 'members'
+                                    }`}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
