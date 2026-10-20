@@ -1,12 +1,14 @@
 import { Fragment, useMemo, useRef, useState } from 'react'
 import { format } from 'date-fns'
-import { Download } from 'lucide-react'
+import { ArrowUpDown, Download } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSubteams } from '@/hooks/useSubteams'
-import { buildRota } from '@/lib/rota'
+import { buildRota, rotaGroups } from '@/lib/rota'
+import { loadRotaOrder, saveRotaOrder } from '@/lib/rotaOrder'
+import RotaOrderDialog from '@/components/schedules/RotaOrderDialog'
 import { leadNames } from '@/components/schedules/MonthlyLeadsBanner'
 
 // The exported image is shared outside the app, so it is painted in fixed colours rather than
@@ -58,8 +60,25 @@ export default function RotaExportDialog({
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState(null)
     const sheetRef = useRef(null)
+    // The head's own subteam order, remembered per department on this device.
+    const [order, setOrder] = useState(() => loadRotaOrder(departmentId))
+    const [orderOpen, setOrderOpen] = useState(false)
 
-    const blocks = useMemo(() => buildRota(schedules, subteams), [schedules, subteams])
+    const blocks = useMemo(
+        () => buildRota(schedules, subteams, order),
+        [schedules, subteams, order]
+    )
+    // The same groups the image will show, in the same order — what the order dialog lists.
+    const groups = useMemo(
+        () => rotaGroups(schedules, subteams, order),
+        [schedules, subteams, order]
+    )
+
+    const handleSaveOrder = keys => {
+        setOrder(keys)
+        saveRotaOrder(departmentId, keys)
+        setOrderOpen(false)
+    }
     // "Teacher of the Month: Ada Obi, Sam Lee" — empty when the department does not use it.
     const leadsLine = monthlyLeads?.title ? leadNames(monthlyLeads.leads ?? []) : ''
 
@@ -91,15 +110,32 @@ export default function RotaExportDialog({
 
     return (
         <div className="space-y-4">
-            <div className="space-y-2">
-                <Label htmlFor="rota-title">Title</Label>
-                <Input
-                    id="rota-title"
-                    value={title}
-                    onChange={e => setTitle(e.target.value)}
-                    placeholder="Title shown at the top of the image"
-                />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1 space-y-2">
+                    <Label htmlFor="rota-title">Title</Label>
+                    <Input
+                        id="rota-title"
+                        value={title}
+                        onChange={e => setTitle(e.target.value)}
+                        placeholder="Title shown at the top of the image"
+                    />
+                </div>
+                {/* Nothing to arrange with a single group. */}
+                {groups.length > 1 && blocks.length > 0 && (
+                    <Button variant="outline" onClick={() => setOrderOpen(true)} disabled={busy}>
+                        <ArrowUpDown size={16} className="mr-2" />
+                        Subteam order
+                    </Button>
+                )}
             </div>
+
+            {orderOpen && (
+                <RotaOrderDialog
+                    groups={groups}
+                    onSave={handleSaveOrder}
+                    onClose={() => setOrderOpen(false)}
+                />
+            )}
 
             {error && (
                 <Alert variant="destructive">
