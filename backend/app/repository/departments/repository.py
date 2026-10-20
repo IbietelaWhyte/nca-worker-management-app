@@ -207,28 +207,41 @@ class DepartmentRepository(BaseRepository[DepartmentResponse]):
         log.info("worker_assigned_to_department")
         return cast(dict[str, Any], response.data[0])
 
-    def assign_workers(self, department_id: UUID, worker_ids: list[UUID]) -> None:
+    def assign_workers(
+        self,
+        department_id: UUID,
+        worker_ids: list[UUID],
+        placements: dict[UUID, tuple[UUID | None, UUID | None]] | None = None,
+    ) -> None:
         """Assign many workers to a department in a single insert.
 
         Batched counterpart to assign_worker. One statement, so Postgres applies it atomically —
         either every membership row lands or none does.
 
+        Role and subteam are both columns on the membership row, so a placement rides along in the
+        same insert rather than costing a write of its own.
+
         Args:
             department_id: The unique identifier of the department.
             worker_ids: The unique identifiers of the workers to assign.
+            placements: Optional worker id -> (department_role_id, subteam_id). A worker absent from
+                it, or a None in either position, gets no role or no subteam.
         """
         if not worker_ids:
             return
         log = self.logger.bind(method="assign_workers", department_id=str(department_id), count=len(worker_ids))
-        self.client.table(q.JUNCTION_TABLE).insert(
-            [
-                {
-                    q.JunctionColumns.DEPARTMENT_ID: str(department_id),
-                    q.JunctionColumns.WORKER_ID: str(worker_id),
-                }
-                for worker_id in worker_ids
-            ]
-        ).execute()
+        placements = placements or {}
+
+        def membership(worker_id: UUID) -> dict[str, str | None]:
+            role_id, subteam_id = placements.get(worker_id, (None, None))
+            return {
+                q.JunctionColumns.DEPARTMENT_ID: str(department_id),
+                q.JunctionColumns.WORKER_ID: str(worker_id),
+                q.JunctionColumns.DEPARTMENT_ROLE_ID: str(role_id) if role_id else None,
+                q.JunctionColumns.SUBTEAM_ID: str(subteam_id) if subteam_id else None,
+            }
+
+        self.client.table(q.JUNCTION_TABLE).insert([membership(worker_id) for worker_id in worker_ids]).execute()
         log.info("workers_assigned_to_department")
 
     def unassign_worker(self, department_id: UUID, worker_id: UUID) -> bool:

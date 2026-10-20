@@ -25,6 +25,18 @@ import { AlertTriangle, Check, CheckCircle2, Copy, Download, Upload } from 'luci
 
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
+/** "Teacher · Toddlers", "Teacher", "Toddlers" or an em dash — where an imported row will land. */
+const placement = row => [row.role, row.subteam].filter(Boolean).join(' · ') || '—'
+
+/** The names a role or subteam cell has to match, or a note that there are none yet. */
+const namesOrNone = (items, tab) =>
+    items.length > 0
+        ? items
+              .map(item => item.name)
+              .sort((a, b) => a.localeCompare(b))
+              .join(', ')
+        : `none yet — add them on the ${tab} tab first`
+
 /** Rows that block the import and must be fixed in the spreadsheet before re-uploading. */
 function ErrorReport({ rows }) {
     const [copied, setCopied] = useState(false)
@@ -139,6 +151,7 @@ function ReadyReport({ rows, committed, blocked }) {
                             <TableHead className="w-16">Line</TableHead>
                             <TableHead>Name</TableHead>
                             <TableHead>Email</TableHead>
+                            <TableHead>Role / subteam</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -151,6 +164,7 @@ function ReadyReport({ rows, committed, blocked }) {
                                 <TableCell className="text-muted-foreground">
                                     {row.email ?? '—'}
                                 </TableCell>
+                                <TableCell>{placement(row)}</TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
@@ -160,7 +174,14 @@ function ReadyReport({ rows, committed, blocked }) {
     )
 }
 
-export default function CsvImportDialog({ open, onOpenChange, departmentId, onImported }) {
+export default function CsvImportDialog({
+    open,
+    onOpenChange,
+    departmentId,
+    roles = [],
+    subteams = [],
+    onImported,
+}) {
     const [file, setFile] = useState(null)
     const [preview, setPreview] = useState(null)
     const [committed, setCommitted] = useState(null)
@@ -244,6 +265,27 @@ export default function CsvImportDialog({ open, onOpenChange, departmentId, onIm
                         numbers can be written any way you like.
                     </DialogDescription>
                 </DialogHeader>
+
+                {/* Spelled out here rather than in the sample file: the names belong to this
+                    department, so any example in the template would be wrong for most of them. */}
+                <div className="space-y-1 rounded-md border bg-muted/30 p-3 text-sm">
+                    <p>
+                        Optional: <code>role</code> and <code>subteam</code> columns place each new
+                        worker straight away. Leave a cell blank for none. Names must match this
+                        department&apos;s (capitals don&apos;t matter):
+                    </p>
+                    <p className="text-muted-foreground">
+                        <span className="font-medium text-foreground">Roles:</span>{' '}
+                        {namesOrNone(roles, 'Roles')}
+                    </p>
+                    <p className="text-muted-foreground">
+                        <span className="font-medium text-foreground">Subteams:</span>{' '}
+                        {namesOrNone(subteams, 'Subteams')}
+                    </p>
+                    <p className="text-muted-foreground">
+                        People already in the system keep their current role and subteam.
+                    </p>
+                </div>
 
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-2">

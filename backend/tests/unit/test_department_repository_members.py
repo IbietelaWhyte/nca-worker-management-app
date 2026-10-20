@@ -87,3 +87,36 @@ class TestGetWithWorkers:
         assert department.workers[0].department_role is not None
         assert department.workers[0].department_role.name == "Head Usher"
         assert department.workers[0].subteam is not None
+
+
+class TestAssignWorkersPlacements:
+    """The CSV import's role and subteam ride in the one membership insert, not a write of their own."""
+
+    def test_placements_go_in_the_same_single_insert(self):
+        client = MagicMock()
+        dept_id, ann, bob, role_id, subteam_id = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+
+        DepartmentRepository(client).assign_workers(dept_id, [ann, bob], placements={ann: (role_id, subteam_id)})
+
+        client.table.return_value.insert.assert_called_once()
+        rows = client.table.return_value.insert.call_args.args[0]
+        assert rows == [
+            {
+                "department_id": str(dept_id),
+                "worker_id": str(ann),
+                "department_role_id": str(role_id),
+                "subteam_id": str(subteam_id),
+            },
+            {"department_id": str(dept_id), "worker_id": str(bob), "department_role_id": None, "subteam_id": None},
+        ]
+
+    def test_without_placements_every_row_has_neither(self):
+        client = MagicMock()
+        dept_id, ann = uuid4(), uuid4()
+
+        DepartmentRepository(client).assign_workers(dept_id, [ann])
+
+        rows = client.table.return_value.insert.call_args.args[0]
+        assert rows == [
+            {"department_id": str(dept_id), "worker_id": str(ann), "department_role_id": None, "subteam_id": None}
+        ]

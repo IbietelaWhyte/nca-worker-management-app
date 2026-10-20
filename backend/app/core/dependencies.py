@@ -317,6 +317,8 @@ def get_worker_service(
     department_repo: DepartmentRepository = Depends(get_department_repository),
     schedule_repo: ScheduleRepository = Depends(get_schedule_repository),
     client: Client = Depends(get_db),
+    department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
+    subteam_repo: SubteamRepository = Depends(get_subteam_repository),
 ) -> WorkerService:
     """FastAPI dependency that provides a WorkerService instance.
 
@@ -326,6 +328,8 @@ def get_worker_service(
         schedule_repo: ScheduleRepository dependency, used to check a worker's remaining
             commitments before deleting their profile.
         client: Supabase client (service-role) for syncing roles into auth app_metadata.
+        department_role_repo: DepartmentRoleRepository dependency, for the CSV import's role column.
+        subteam_repo: SubteamRepository dependency, for the CSV import's subteam column.
 
     Returns:
         WorkerService: Service for worker business logic operations.
@@ -335,6 +339,8 @@ def get_worker_service(
         department_repo=department_repo,
         schedule_repo=schedule_repo,
         client=client,
+        department_role_repo=department_role_repo,
+        subteam_repo=subteam_repo,
     )
 
 

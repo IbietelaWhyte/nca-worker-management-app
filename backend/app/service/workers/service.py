@@ -11,11 +11,15 @@ from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.core.logging import get_logger
 from app.core.redaction import mask_email
+from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
+from app.repository.subteams.repository import SubteamRepository
 from app.repository.workers.repository import WorkerRepository
+from app.schemas.department_roles.models import DepartmentRoleResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import TokenPayload, UserRole, WorkerStatus, highest_role
+from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import (
     WorkerCreate,
     WorkerImportResult,
@@ -30,6 +34,10 @@ logger = get_logger(__name__)
 # Columns a CSV must provide for a bulk worker import. Email is required (it is the dedup key
 # and the DB declares workers.email NOT NULL UNIQUE); phone is required for SMS reminders.
 REQUIRED_IMPORT_COLUMNS = ("first_name", "last_name", "email", "phone")
+# Columns a CSV may provide. Each names something the department already has — a role, a subteam —
+# matched case-insensitively. A name it does not have is a row error, never created on the fly, so
+# a typo like "Techer" cannot become a junk role. Blank means none.
+OPTIONAL_IMPORT_COLUMNS = ("role", "subteam")
 
 # Pydantic's own messages are written for developers. These are the ones a volunteer fixing a
 # spreadsheet sees, keyed by the error "type" Pydantic reports.
@@ -38,6 +46,45 @@ _VALIDATION_MESSAGES = {
     "string_too_long": "Is too long (maximum 100 characters)",
     "value_error": "",  # Our own validators already raise a readable message; use it verbatim.
 }
+
+
+Placement = tuple[UUID | None, UUID | None]  # (department_role_id, subteam_id) for one imported worker
+
+
+def _match_by_name(
+    value: str,
+    options: dict[str, DepartmentRoleResponse] | dict[str, SubteamResponse],
+    *,
+    kind: str,
+    kinds: str,
+    tab: str,
+    department_name: str,
+) -> DepartmentRoleResponse | SubteamResponse | None:
+    """Resolve a role or subteam named in a CSV cell against the department's own.
+
+    Args:
+        value: The trimmed cell. Blank means none.
+        options: The department's roles or subteams, keyed by lowercased name.
+        kind: "role" or "subteam", for the message.
+        kinds: The plural, for the message.
+        tab: The department tab where they are created, for the message.
+        department_name: The department, for the message.
+
+    Returns:
+        The matching role or subteam, or None for a blank cell.
+
+    Raises:
+        ValueError: With a message for a volunteer fixing a spreadsheet, naming the real options.
+    """
+    if not value:
+        return None
+    match = options.get(value.lower())
+    if match:
+        return match
+    if not options:
+        raise ValueError(f"{department_name} has no {kinds} yet. Add them on the {tab} tab first, or leave this blank")
+    names = ", ".join(sorted(option.name for option in options.values()))
+    raise ValueError(f'No {kind} called "{value}" in {department_name}. {kinds.capitalize()}: {names}')
 
 
 def _describe_validation_error(exc: ValidationError) -> tuple[str, str]:
@@ -71,6 +118,8 @@ class WorkerService:
         department_repo: DepartmentRepository,
         schedule_repo: ScheduleRepository,
         client: Client,
+        department_role_repo: DepartmentRoleRepository,
+        subteam_repo: SubteamRepository,
     ) -> None:
         """Initialize the WorkerService with required repositories.
 
@@ -80,11 +129,15 @@ class WorkerService:
             schedule_repo: Repository for schedule operations, used to check a worker's
                 remaining commitments before deleting their profile.
             client: Supabase client (service-role) for syncing roles into auth app_metadata.
+            department_role_repo: Repository for department roles, to match the CSV import's role column.
+            subteam_repo: Repository for subteams, to match the CSV import's subteam column.
         """
         self.worker_repo = worker_repo
         self.department_repo = department_repo
         self.schedule_repo = schedule_repo
         self.client = client
+        self.department_role_repo = department_role_repo
+        self.subteam_repo = subteam_repo
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="WorkerService")
@@ -270,12 +323,16 @@ class WorkerService:
         log = self.logger.bind(method="import_workers", department_id=str(department_id), dry_run=dry_run)
 
         # Fail fast on a bad target department before processing any rows.
-        if not self.department_repo.get_by_id(department_id):
+        department = self.department_repo.get_by_id(department_id)
+        if not department:
             log.warning("import_department_not_found")
             raise NotFoundError(f"Department {department_id} not found")
 
         rows = self._parse_import_rows(file_bytes)
-        results, validated = self._validate_import_rows(rows)
+        # One read each for the whole file, whatever the file names.
+        roles = {r.name.strip().lower(): r for r in self.department_role_repo.get_by_department(department_id)}
+        subteams = {t.name.strip().lower(): t for t in self.subteam_repo.get_by_department(department_id)}
+        results, validated, placements = self._validate_import_rows(rows, department.name, roles, subteams)
 
         errors = sum(1 for r in results if r.status == "error")
         duplicates = sum(1 for r in results if r.status == "duplicate")
@@ -288,7 +345,7 @@ class WorkerService:
         committed = ok and not dry_run
 
         if committed:
-            self._commit_import(valid, validated, department_id)
+            self._commit_import(valid, validated, placements, department_id)
 
         result = WorkerImportResult(
             dry_run=dry_run,
@@ -356,8 +413,12 @@ class WorkerService:
         return rows
 
     def _validate_import_rows(
-        self, rows: list[dict[str, str]]
-    ) -> tuple[list[WorkerImportRowResult], dict[int, WorkerImportRow]]:
+        self,
+        rows: list[dict[str, str]],
+        department_name: str,
+        roles: dict[str, DepartmentRoleResponse],
+        subteams: dict[str, SubteamResponse],
+    ) -> tuple[list[WorkerImportRowResult], dict[int, WorkerImportRow], dict[int, Placement]]:
         """Validate every parsed row against the schema, the rest of the file, and existing workers.
 
         Runs in full even once a row has failed, so the user sees every problem in one pass rather
@@ -365,10 +426,13 @@ class WorkerService:
 
         Args:
             rows: Parsed CSV rows from _parse_import_rows.
+            department_name: The target department, for messages about its roles and subteams.
+            roles: The department's roles keyed by lowercased name, for the optional role column.
+            subteams: The department's subteams keyed by lowercased name, for the subteam column.
 
         Returns:
-            tuple: The per-row results in file order, and the validated rows keyed by line number
-                (only for rows that came out ``valid``).
+            tuple: The per-row results in file order, the validated rows keyed by line number, and
+                each of those rows' (role id, subteam id) — both only for rows that came out ``valid``.
         """
         # One query for the whole file instead of one per row.
         contact_index = self.worker_repo.get_contact_index()
@@ -376,6 +440,7 @@ class WorkerService:
         seen_phones: dict[str, int] = {}
         results: list[WorkerImportRowResult] = []
         validated: dict[int, WorkerImportRow] = {}
+        placements: dict[int, Placement] = {}
 
         for offset, row in enumerate(rows):
             # Line 1 of the spreadsheet is the header, so the first data row is line 2. Reporting the
@@ -418,6 +483,28 @@ class WorkerService:
                         error=message,
                     )
                 )
+                continue
+
+            # Role and subteam are optional, but a name the department does not have is as much a
+            # bad cell as a bad email: refusing it is what keeps a typo from becoming a role.
+            try:
+                role = _match_by_name(
+                    row.get("role", ""), roles, kind="role", kinds="roles", tab="Roles", department_name=department_name
+                )
+            except ValueError as exc:
+                results.append(self._import_error(line_number, name, email, "role", row.get("role"), str(exc)))
+                continue
+            try:
+                subteam = _match_by_name(
+                    row.get("subteam", ""),
+                    subteams,
+                    kind="subteam",
+                    kinds="subteams",
+                    tab="Subteams",
+                    department_name=department_name,
+                )
+            except ValueError as exc:
+                results.append(self._import_error(line_number, name, email, "subteam", row.get("subteam"), str(exc)))
                 continue
 
             # A repeat within the same file is a mistake in the file, not an already-imported worker.
@@ -473,14 +560,46 @@ class WorkerService:
                 continue
 
             validated[line_number] = data
-            results.append(WorkerImportRowResult(line_number=line_number, status="valid", name=name, email=data.email))
+            placements[line_number] = (role.id if role else None, subteam.id if subteam else None)
+            results.append(
+                WorkerImportRowResult(
+                    line_number=line_number,
+                    status="valid",
+                    name=name,
+                    email=data.email,
+                    role=role.name if role else None,
+                    subteam=subteam.name if subteam else None,
+                )
+            )
 
-        return results, validated
+        return results, validated, placements
+
+    @staticmethod
+    def _import_error(
+        line_number: int, name: str | None, email: str | None, field: str, value: str | None, error: str
+    ) -> WorkerImportRowResult:
+        """An error row for one bad cell.
+
+        Args:
+            line_number: The row's line in the spreadsheet.
+            name: The row's name, if it had one.
+            email: The row's email, if it had one.
+            field: The offending column.
+            value: The offending value, echoed back so the user can find it.
+            error: What is wrong with it.
+
+        Returns:
+            WorkerImportRowResult: The error row.
+        """
+        return WorkerImportRowResult(
+            line_number=line_number, status="error", name=name, email=email, field=field, value=value, error=error
+        )
 
     def _commit_import(
         self,
         valid: list[WorkerImportRowResult],
         validated: dict[int, WorkerImportRow],
+        placements: dict[int, Placement],
         department_id: UUID,
     ) -> None:
         """Create the validated workers, assign them to the department, and mark the rows created.
@@ -492,6 +611,8 @@ class WorkerService:
         Args:
             valid: The rows that passed validation, mutated in place to ``created``.
             validated: The validated row data, keyed by line number.
+            placements: Each valid row's (role id, subteam id), keyed by line number. Written in the
+                same membership insert, so they cost no extra statement and roll back with it.
             department_id: Department to assign the new workers to.
 
         Raises:
@@ -502,8 +623,17 @@ class WorkerService:
         created = self.worker_repo.create_many([validated[r.line_number].model_dump() for r in valid])
         created_by_email = {worker.email.lower(): worker for worker in created}
 
+        # Created workers come back keyed by email; placements are keyed by line number.
+        placement_by_worker: dict[UUID, Placement] = {}
+        for result in valid:
+            worker = created_by_email.get((result.email or "").lower())
+            if worker:
+                placement_by_worker[worker.id] = placements.get(result.line_number, (None, None))
+
         try:
-            self.department_repo.assign_workers(department_id, [worker.id for worker in created])
+            self.department_repo.assign_workers(
+                department_id, [worker.id for worker in created], placements=placement_by_worker
+            )
         except Exception as exc:
             log.error("import_assign_failed_rolling_back", error=str(exc))
             try:

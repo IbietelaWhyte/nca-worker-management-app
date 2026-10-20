@@ -68,7 +68,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Can I add my whole team at once?',
-                answer: 'Yes. Open the department and choose to import a CSV. Download the sample file, fill it in and upload it — you get a row-by-row preview before anything is saved. One bad row stops the whole import, and people already on your roster are flagged as duplicates rather than errors, so re-uploading a roster is safe.',
+                answer: 'Yes. Open the department and choose to import a CSV. Download the sample file, fill it in and upload it — you get a row-by-row preview before anything is saved. One bad row stops the whole import, and people already on your roster are flagged as duplicates rather than errors, so re-uploading a roster is safe. You can also fill in the optional role and subteam columns to place each new worker straight away — the names must match ones the department already has, and the import dialog lists them.',
             },
             {
                 question: 'Can I name who is in charge each month, like a Teacher of the Month?',

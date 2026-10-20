@@ -134,6 +134,9 @@ class WorkerImportRowResult(BaseModel):
     value: str | None = None  # The offending value, echoed back so the user can find it.
     error: str | None = None
     worker_id: UUID | None = None
+    # The department role and subteam the row will land in, as the department spells them.
+    role: str | None = None
+    subteam: str | None = None
 
 
 class WorkerImportResult(BaseModel):
