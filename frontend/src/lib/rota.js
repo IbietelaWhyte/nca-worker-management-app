@@ -10,13 +10,16 @@
  *   would shuffle between reloads unless sorted explicitly.
  * - **Rows are fixed for the whole month.** Every group gets a row on every date, blank where
  *   nobody is assigned, so the columns line up down the page.
+ * - **Group order is the head's choice, with a default.** `order` lists group keys to put first;
+ *   anything it does not name — no saved order, or a subteam created since — follows
+ *   alphabetically with the Department group last. See `lib/rotaOrder.js` for where it is kept.
  */
 
 import { format, parseISO } from 'date-fns'
 
 // Assignments belonging to no subteam (a department-only schedule) collect under this label.
 const DEPARTMENT_GROUP_LABEL = 'Department'
-const DEPARTMENT_GROUP_KEY = ''
+export const DEPARTMENT_GROUP_KEY = ''
 
 const normalize = value => (value ?? '').trim().toLowerCase()
 
@@ -39,14 +42,31 @@ const bySurname = (a, b) =>
 
 const namesFor = assignments => assignments.slice().sort(bySurname).map(workerName).join(', ')
 
+// The default: subteams alphabetically, with the catch-all department group last.
+const alphabetical = (a, b) => {
+    if (a.key === DEPARTMENT_GROUP_KEY) return 1
+    if (b.key === DEPARTMENT_GROUP_KEY) return -1
+    return a.label.localeCompare(b.label)
+}
+
 /**
- * Group a month's schedules into one block of rows per date.
+ * Put groups in a saved order: the keys `order` names first, in that order, then everything else
+ * by the default. Keys for groups that no longer exist (a deleted subteam) are simply skipped.
  *
- * @param {Array} schedules - ScheduleResponse[] for the month, assignments embedded.
- * @param {Array} subteams - The department's subteams, so unstaffed groups still get a row.
- * @returns {Array} [{ date, label, specialName, rows: [{ key, label, names, indented, highlighted }] }]
+ * @param {Array} groups - [{ key, label, ... }]
+ * @param {Array<string>} order - Group keys to lead with.
+ * @returns {Array} The same groups, ordered.
  */
-export function buildRota(schedules, subteams) {
+export function orderGroups(groups, order = []) {
+    const byKey = new Map(groups.map(group => [group.key, group]))
+    const leading = order.filter(key => byKey.has(key)).map(key => byKey.get(key))
+    const named = new Set(leading.map(group => group.key))
+    const rest = groups.filter(group => !named.has(group.key)).sort(alphabetical)
+    return [...leading, ...rest]
+}
+
+// Merge the month's schedules by date: one list of assignments, and any special-service name.
+const byDate = schedules => {
     const assignmentsByDate = new Map()
     const specialByDate = new Map()
     for (const schedule of schedules ?? []) {
@@ -58,7 +78,10 @@ export function buildRota(schedules, subteams) {
             specialByDate.set(schedule.scheduled_date, schedule.special_service_name)
         }
     }
+    return { assignmentsByDate, specialByDate }
+}
 
+const discoverGroups = (assignmentsByDate, subteams) => {
     const groups = new Map()
     const ensureGroup = (key, label) => {
         if (!groups.has(key)) groups.set(key, { key, label, helperRoles: new Map() })
@@ -66,7 +89,7 @@ export function buildRota(schedules, subteams) {
     }
 
     // Seed from the department's own subteams so a group with nobody on it all month still shows.
-    for (const subteam of [...(subteams ?? [])].sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const subteam of subteams ?? []) {
         ensureGroup(subteam.id, subteam.name)
     }
 
@@ -83,13 +106,34 @@ export function buildRota(schedules, subteams) {
             }
         }
     }
+    return [...groups.values()]
+}
 
-    // Subteams alphabetically, with the catch-all department group last.
-    const ordered = [...groups.values()].sort((a, b) => {
-        if (a.key === DEPARTMENT_GROUP_KEY) return 1
-        if (b.key === DEPARTMENT_GROUP_KEY) return -1
-        return a.label.localeCompare(b.label)
-    })
+/**
+ * The groups a month's rota will show, in the order it will show them.
+ *
+ * What the order dialog lists, so it offers exactly the rows the image will have.
+ *
+ * @param {Array} schedules - ScheduleResponse[] for the month, assignments embedded.
+ * @param {Array} subteams - The department's subteams, so unstaffed groups still appear.
+ * @param {Array<string>} order - Saved group keys to lead with.
+ * @returns {Array} [{ key, label, helperRoles }]
+ */
+export function rotaGroups(schedules, subteams, order = []) {
+    return orderGroups(discoverGroups(byDate(schedules).assignmentsByDate, subteams), order)
+}
+
+/**
+ * Group a month's schedules into one block of rows per date.
+ *
+ * @param {Array} schedules - ScheduleResponse[] for the month, assignments embedded.
+ * @param {Array} subteams - The department's subteams, so unstaffed groups still get a row.
+ * @param {Array<string>} order - Saved group keys to lead with; see `orderGroups`.
+ * @returns {Array} [{ date, label, specialName, rows: [{ key, label, names, indented, highlighted }] }]
+ */
+export function buildRota(schedules, subteams, order = []) {
+    const { assignmentsByDate, specialByDate } = byDate(schedules)
+    const ordered = orderGroups(discoverGroups(assignmentsByDate, subteams), order)
 
     return [...assignmentsByDate.keys()].sort().map(date => {
         const assignments = assignmentsByDate.get(date)
