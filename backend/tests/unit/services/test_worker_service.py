@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from supabase_auth.errors import AuthApiError
@@ -18,7 +18,7 @@ from tests.unit.services.conftest import (
 
 
 def _token(role: UserRole = UserRole.HOD, email: str | None = "manager@example.com") -> TokenPayload:
-    return TokenPayload(sub="sub-123", role=role, email=email)
+    return TokenPayload(sub=str(uuid4()), role=role, email=email)
 
 
 @pytest.fixture
@@ -391,17 +391,34 @@ class TestCanManageWorker:
 
 
 class TestGetWorkerForToken:
-    def test_returns_worker(self, service, mock_worker_repo):
+    def test_returns_the_worker_linked_to_the_login(self, service, mock_worker_repo):
         worker = make_worker()
-        mock_worker_repo.get_by_email.return_value = worker
-        assert service.get_worker_for_token(_token()) == worker
+        mock_worker_repo.get_by_auth_user_id.return_value = worker
+        token = _token()
 
-    def test_raises_bad_request_when_no_email(self, service):
-        with pytest.raises(BadRequestError, match="Email not found"):
-            service.get_worker_for_token(_token(email=None))
+        assert service.get_worker_for_token(token) == worker
+        mock_worker_repo.get_by_auth_user_id.assert_called_once_with(UUID(token.sub))
+
+    def test_does_not_match_on_email(self, service, mock_worker_repo):
+        # A login registered under a worker's address, or a worker whose email a head edited,
+        # must not become that worker: only the admin-written auth_user_id link counts.
+        mock_worker_repo.get_by_auth_user_id.return_value = None
+        mock_worker_repo.get_by_email.return_value = make_worker()
+
+        with pytest.raises(NotFoundError):
+            service.get_worker_for_token(_token())
+        mock_worker_repo.get_by_email.assert_not_called()
+
+    def test_does_not_need_an_email_on_the_token(self, service, mock_worker_repo):
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
+        service.get_worker_for_token(_token(email=None))  # no raise
+
+    def test_raises_bad_request_for_a_subject_that_is_not_a_login_id(self, service):
+        with pytest.raises(BadRequestError, match="Invalid user id"):
+            service.get_worker_for_token(TokenPayload(sub="not-a-uuid", role=UserRole.HOD, email="x@example.com"))
 
     def test_raises_not_found_when_no_profile(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = None
+        mock_worker_repo.get_by_auth_user_id.return_value = None
         with pytest.raises(NotFoundError, match="Worker profile not found"):
             service.get_worker_for_token(_token())
 
@@ -421,7 +438,7 @@ def _setup_can_manage(mock_worker_repo, mock_department_repo, *, overlap: bool):
     """Configure mocks so can_manage_worker resolves to the requested overlap result."""
     actor = make_worker()
     managed_dept = make_department()
-    mock_worker_repo.get_by_email.return_value = actor
+    mock_worker_repo.get_by_auth_user_id.return_value = actor
     mock_department_repo.get_departments_by_hod.return_value = [managed_dept]
     mock_department_repo.get_assistant_hod_department_ids.return_value = []
     worker_dept = managed_dept if overlap else make_department()
@@ -432,7 +449,7 @@ def _setup_can_manage(mock_worker_repo, mock_department_repo, *, overlap: bool):
 class TestAuthorizeManageWorker:
     def test_admin_bypasses_lookup(self, service, mock_worker_repo):
         service.authorize_manage_worker(_token(role=UserRole.ADMIN), uuid4())
-        mock_worker_repo.get_by_email.assert_not_called()
+        mock_worker_repo.get_by_auth_user_id.assert_not_called()
 
     def test_allows_when_manager_oversees_worker(self, service, mock_worker_repo, mock_department_repo):
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
@@ -474,7 +491,7 @@ class TestAuthorizeManageWorker:
 class TestAuthorizeUpdateWorker:
     def test_admin_bypasses(self, service, mock_worker_repo):
         service.authorize_update_worker(_token(role=UserRole.ADMIN), uuid4(), WorkerUpdate(first_name="J"))
-        mock_worker_repo.get_by_email.assert_not_called()
+        mock_worker_repo.get_by_auth_user_id.assert_not_called()
 
     def test_denies_assigning_restricted_role(self, service, mock_worker_repo, mock_department_repo):
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
@@ -512,18 +529,18 @@ class TestAuthorizeUpdateWorker:
 class TestAuthorizeCreateAssignment:
     def test_admin_bypasses(self, service, mock_worker_repo):
         service.authorize_create_assignment(_token(role=UserRole.ADMIN), uuid4())
-        mock_worker_repo.get_by_email.assert_not_called()
+        mock_worker_repo.get_by_auth_user_id.assert_not_called()
 
     def test_allows_managed_department(self, service, mock_worker_repo, mock_department_repo):
         actor = make_worker()
         managed_dept = make_department()
-        mock_worker_repo.get_by_email.return_value = actor
+        mock_worker_repo.get_by_auth_user_id.return_value = actor
         mock_department_repo.get_departments_by_hod.return_value = [managed_dept]
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
         service.authorize_create_assignment(_token(), managed_dept.id)  # no raise
 
     def test_denies_unmanaged_department(self, service, mock_worker_repo, mock_department_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         mock_department_repo.get_departments_by_hod.return_value = []
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
         with pytest.raises(PermissionDeniedError):
@@ -569,7 +586,7 @@ class TestListVisibleWorkers:
         actor = make_worker()
         managed_dept = make_department()
         w1, w2 = make_worker(), make_worker()
-        mock_worker_repo.get_by_email.return_value = actor
+        mock_worker_repo.get_by_auth_user_id.return_value = actor
         mock_department_repo.get_departments_by_hod.return_value = [managed_dept]
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
         mock_worker_repo.search.return_value = ([w1, w2], 2)
@@ -587,7 +604,7 @@ class TestListVisibleWorkers:
         self, service, mock_worker_repo, mock_department_repo
     ):
         headed, assisted = make_department(), uuid4()
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         mock_department_repo.get_departments_by_hod.return_value = [headed]
         mock_department_repo.get_assistant_hod_department_ids.return_value = [assisted]
         mock_worker_repo.search.return_value = ([], 0)
@@ -597,7 +614,7 @@ class TestListVisibleWorkers:
         assert mock_worker_repo.search.call_args.kwargs["department_ids"] == [assisted]
 
     def test_hod_filtering_by_unmanaged_department_sees_none(self, service, mock_worker_repo, mock_department_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         mock_department_repo.get_departments_by_hod.return_value = [make_department()]
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
 
@@ -605,7 +622,7 @@ class TestListVisibleWorkers:
         mock_worker_repo.search.assert_not_called()
 
     def test_hod_with_no_departments_sees_none(self, service, mock_worker_repo, mock_department_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         mock_department_repo.get_departments_by_hod.return_value = []
         mock_department_repo.get_assistant_hod_department_ids.return_value = []
         assert service.list_visible_workers(_token(role=UserRole.HOD)) == ([], 0)
@@ -613,7 +630,7 @@ class TestListVisibleWorkers:
 
     def test_worker_sees_only_self(self, service, mock_worker_repo):
         me = make_worker()
-        mock_worker_repo.get_by_email.return_value = me
+        mock_worker_repo.get_by_auth_user_id.return_value = me
         mock_worker_repo.get_roles_for_workers.return_value = {me.id: [UserRole.WORKER]}
 
         result, total = service.list_visible_workers(_token(role=UserRole.WORKER))
@@ -628,7 +645,7 @@ class TestListVisibleWorkers:
 class TestAuthorizeViewWorker:
     def test_admin_bypasses_lookup(self, service, mock_worker_repo):
         service.authorize_view_worker(_token(role=UserRole.ADMIN), uuid4())  # no raise
-        mock_worker_repo.get_by_email.assert_not_called()
+        mock_worker_repo.get_by_auth_user_id.assert_not_called()
 
     def test_manager_allowed_for_managed_worker(self, service, mock_worker_repo, mock_department_repo):
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
@@ -641,11 +658,11 @@ class TestAuthorizeViewWorker:
 
     def test_worker_allowed_for_own_record(self, service, mock_worker_repo):
         me = make_worker()
-        mock_worker_repo.get_by_email.return_value = me
+        mock_worker_repo.get_by_auth_user_id.return_value = me
         service.authorize_view_worker(_token(role=UserRole.WORKER), me.id)  # no raise
 
     def test_worker_denied_for_other_record(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         with pytest.raises(PermissionDeniedError, match="your own worker record"):
             service.authorize_view_worker(_token(role=UserRole.WORKER), uuid4())
 
@@ -666,7 +683,7 @@ class TestAuthorizeManageAvailability:
 
     def test_admin_bypasses_lookup(self, service, mock_worker_repo):
         service.authorize_manage_availability(_token(role=UserRole.ADMIN), uuid4())  # no raise
-        mock_worker_repo.get_by_email.assert_not_called()
+        mock_worker_repo.get_by_auth_user_id.assert_not_called()
 
     def test_manager_allowed_for_managed_worker(self, service, mock_worker_repo, mock_department_repo):
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
@@ -679,11 +696,11 @@ class TestAuthorizeManageAvailability:
 
     def test_worker_allowed_for_own_availability(self, service, mock_worker_repo):
         me = make_worker()
-        mock_worker_repo.get_by_email.return_value = me
+        mock_worker_repo.get_by_auth_user_id.return_value = me
         service.authorize_manage_availability(_token(role=UserRole.WORKER), me.id)  # no raise
 
     def test_worker_denied_for_someone_elses_availability(self, service, mock_worker_repo):
-        mock_worker_repo.get_by_email.return_value = make_worker()
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker()
         with pytest.raises(PermissionDeniedError, match="your own availability"):
             service.authorize_manage_availability(_token(role=UserRole.WORKER), uuid4())
 

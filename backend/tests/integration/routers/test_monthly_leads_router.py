@@ -22,9 +22,9 @@ def mock_lead_service():
 
 
 class TestGetMonthlyLeads:
-    def test_any_signed_in_user_can_read(self, mock_lead_service):
+    def test_a_head_of_the_department_can_read(self, mock_lead_service):
         dept_id = uuid4()
-        client = make_client(role=UserRole.WORKER, monthly_lead_service=mock_lead_service)
+        client = make_client(role=UserRole.HOD, monthly_lead_service=mock_lead_service)
 
         response = client.get(f"/api/v1/departments/{dept_id}/monthly-leads", params={"month": "2026-11-17"})
 
@@ -32,14 +32,30 @@ class TestGetMonthlyLeads:
         assert response.json()["title"] == "Teacher of the Month"
         mock_lead_service.get_leads.assert_called_once_with(dept_id, date(2026, 11, 17))
 
+    def test_a_plain_worker_cannot_read(self, mock_lead_service):
+        # Each lead embeds the worker's phone and email; the names are only shown to heads.
+        client = make_client(role=UserRole.WORKER, monthly_lead_service=mock_lead_service)
+        response = client.get(f"/api/v1/departments/{uuid4()}/monthly-leads", params={"month": "2026-11-01"})
+        assert response.status_code == 403
+        mock_lead_service.get_leads.assert_not_called()
+
+    def test_a_head_of_another_department_cannot_read(self, mock_lead_service, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, worker_service=mock_worker_service, monthly_lead_service=mock_lead_service
+        )
+        response = client.get(f"/api/v1/departments/{uuid4()}/monthly-leads", params={"month": "2026-11-01"})
+        assert response.status_code == 403
+        mock_lead_service.get_leads.assert_not_called()
+
     def test_requires_a_month(self, mock_lead_service):
-        client = make_client(monthly_lead_service=mock_lead_service)
+        client = make_client(role=UserRole.HOD, monthly_lead_service=mock_lead_service)
         response = client.get(f"/api/v1/departments/{uuid4()}/monthly-leads")
         assert response.status_code == 422
 
     def test_returns_404_for_unknown_department(self, mock_lead_service):
         mock_lead_service.get_leads.side_effect = NotFoundError("Department not found")
-        client = make_client(monthly_lead_service=mock_lead_service)
+        client = make_client(role=UserRole.HOD, monthly_lead_service=mock_lead_service)
         response = client.get(f"/api/v1/departments/{uuid4()}/monthly-leads", params={"month": "2026-11-01"})
         assert response.status_code == 404
 

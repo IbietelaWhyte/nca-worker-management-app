@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 
 from app.core.dependencies import (
+    AdminUser,
     CurrentUser,
     HODUser,
     get_reminder_service,
@@ -36,20 +37,29 @@ def list_schedules_by_department(
     department_id: UUID,
     from_date: date | None = Query(None, alias="from", description="Inclusive lower bound on scheduled_date"),
     to_date: date | None = Query(None, alias="to", description="Inclusive upper bound on scheduled_date"),
-    _: TokenPayload = CurrentUser,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[ScheduleResponse]:
-    """List a department's schedules, optionally bounded to a date range (e.g. one month)."""
+    """List a department's schedules, optionally bounded to a date range (e.g. one month).
+
+    For that department's heads: every assignment embeds the worker's phone and email. A plain
+    worker reads their own duties through /schedules/workers/{id}/assignments instead.
+    """
+    worker_service.authorize_create_assignment(token, department_id)
     return service.get_schedules_by_department(department_id, from_date, to_date)
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)
 def get_schedule(
     schedule_id: UUID,
-    _: TokenPayload = CurrentUser,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> ScheduleResponse:
-    return service.get_schedule(schedule_id)
+    schedule = service.get_schedule(schedule_id)
+    worker_service.authorize_create_assignment(token, schedule.department_id)
+    return schedule
 
 
 @router.post(
@@ -61,11 +71,13 @@ def generate_schedule(
     data: ScheduleCreate,
     token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> ScheduleResponse:
     """
     Generates a schedule for a single event using round-robin assignment.
     Requires HOD or admin role.
     """
+    worker_service.authorize_create_assignment(token, data.department_id)
     if token.email is None:
         raise BadRequestError("User email is required to create schedule")
     schedule = service.generate_schedule(data, created_by=token.email)
@@ -77,8 +89,9 @@ def generate_schedule(
 @router.post("/generate-month/preview", response_model=MonthlySchedulePreview)
 def preview_monthly_schedule(
     data: MonthlySchedulePreviewRequest,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MonthlySchedulePreview:
     """
     Plan a whole month's rota without saving anything.
@@ -86,6 +99,7 @@ def preview_monthly_schedule(
     Expands the chosen weekdays across the month and balances assignments over every
     date, so nobody serves twice before everyone has served once. Requires HOD or admin.
     """
+    worker_service.authorize_create_assignment(token, data.department_id)
     return service.preview_monthly_schedule(data)
 
 
@@ -98,6 +112,7 @@ def generate_monthly_schedule(
     data: MonthlyScheduleCommitRequest,
     token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MonthlyScheduleResult:
     """
     Save the month reviewed via the preview endpoint.
@@ -106,6 +121,7 @@ def generate_monthly_schedule(
     Dates that gained a schedule since the preview come back as skipped rather than
     failing the run. Requires HOD or admin role.
     """
+    worker_service.authorize_create_assignment(token, data.department_id)
     if token.email is None:
         raise BadRequestError("User email is required to create schedule")
     return service.commit_monthly_schedule(data, created_by=token.email)
@@ -187,9 +203,11 @@ def remove_assignment(
 @router.delete("/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_schedule(
     schedule_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> None:
+    worker_service.authorize_create_assignment(token, service.get_schedule(schedule_id).department_id)
     service.delete_schedule(schedule_id)
 
 
@@ -216,16 +234,20 @@ def get_worker_assignments(
 def update_assignment_role(
     assignment_id: UUID,
     department_role_id: UUID | None = None,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> AssignmentResponse:
     """Override the department role on an assignment (omit department_role_id to clear)."""
+    assignment = service.get_assignment(assignment_id)
+    worker_service.authorize_create_assignment(token, service.get_schedule(assignment.schedule_id).department_id)
     return service.update_assignment_role(assignment_id, department_role_id)
 
 
 @router.post("/reminders/trigger", response_model=MessageResponse)
 def trigger_reminders(
-    _: TokenPayload = HODUser,
+    # Church-wide: it sweeps every department's due reminders, so it is not one head's to run.
+    _: TokenPayload = AdminUser,
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Manually trigger the reminder job — useful for testing."""
@@ -237,7 +259,7 @@ def trigger_reminders(
 
 @router.post("/notices/trigger", response_model=MessageResponse)
 def trigger_notices(
-    _: TokenPayload = HODUser,
+    _: TokenPayload = AdminUser,
     reminder_service: ReminderService = Depends(get_reminder_service),
 ) -> MessageResponse:
     """Send any outstanding "you have been scheduled" notices now, rather than waiting for the job."""
@@ -248,9 +270,12 @@ def trigger_notices(
 @router.post("/{schedule_id}/reminders/trigger", response_model=MessageResponse)
 def send_reminders_for_schedule(
     schedule_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     reminder_service: ReminderService = Depends(get_reminder_service),
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MessageResponse:
-    """Manually trigger reminders for a specific schedule."""
+    """Manually trigger reminders for a specific schedule. Rate-limited per schedule; see SMSService."""
+    worker_service.authorize_create_assignment(token, service.get_schedule(schedule_id).department_id)
     reminded = reminder_service.trigger_for_schedule(schedule_id)
     return MessageResponse(message=f"Reminded {reminded} worker(s) for schedule {schedule_id}")

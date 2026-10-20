@@ -300,3 +300,20 @@ class TestImportWorkers:
         response = client.post(f"/api/v1/departments/{uuid4()}/workers/import", files=_csv_upload())
         assert response.status_code == 403
         mock_worker_service.import_workers.assert_not_called()
+
+
+class TestMemberListScope:
+    """The member list carries every member's phone and email, so it is for the department's heads."""
+
+    def test_a_plain_worker_cannot_list_members(self, mock_department_service):
+        client = make_client(role=UserRole.WORKER, department_service=mock_department_service)
+        assert client.get(f"/api/v1/departments/{uuid4()}/workers").status_code == 403
+        mock_department_service.get_department_with_workers.assert_not_called()
+
+    def test_a_head_of_another_department_cannot_list_members(self, mock_department_service, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
+        assert client.get(f"/api/v1/departments/{uuid4()}/workers").status_code == 403
+        mock_department_service.get_department_with_workers.assert_not_called()

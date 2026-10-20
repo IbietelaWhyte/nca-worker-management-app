@@ -1,6 +1,8 @@
 from datetime import date
 from uuid import uuid4
 
+import pytest
+
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from app.schemas.schedules.models import (
@@ -21,7 +23,7 @@ class TestListSchedulesByDepartment:
         dept_id = uuid4()
         schedules = [make_schedule(department_id=dept_id)]
         mock_schedule_service.get_schedules_by_department.return_value = schedules
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
 
         response = client.get(f"/api/v1/schedules/departments/{dept_id}")
         assert response.status_code == 200
@@ -32,14 +34,14 @@ class TestGetSchedule:
     def test_returns_200_when_found(self, mock_schedule_service):
         schedule = make_schedule()
         mock_schedule_service.get_schedule.return_value = schedule
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
 
         response = client.get(f"/api/v1/schedules/{schedule.id}")
         assert response.status_code == 200
 
     def test_returns_404_when_not_found(self, mock_schedule_service):
         mock_schedule_service.get_schedule.side_effect = NotFoundError("not found")
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
 
         response = client.get(f"/api/v1/schedules/{uuid4()}")
         assert response.status_code == 404
@@ -248,13 +250,22 @@ class TestTriggerReminders:
     def test_returns_200_with_sent_count(self, mock_reminder_service):
         mock_reminder_service.trigger_manually.return_value = 5
         client = make_client(
-            role=UserRole.HOD,
+            role=UserRole.ADMIN,
             reminder_service=mock_reminder_service,
         )
 
         response = client.post("/api/v1/schedules/reminders/trigger")
         assert response.status_code == 200
         assert "5" in response.json()["message"]
+
+    def test_church_wide_sweeps_are_admin_only(self, mock_reminder_service):
+        # They text every department's due workers, so they are not one head's to run.
+        client = make_client(role=UserRole.HOD, reminder_service=mock_reminder_service)
+
+        assert client.post("/api/v1/schedules/reminders/trigger").status_code == 403
+        assert client.post("/api/v1/schedules/notices/trigger").status_code == 403
+        mock_reminder_service.trigger_manually.assert_not_called()
+        mock_reminder_service.trigger_notices.assert_not_called()
 
     def test_returns_403_for_worker_role(self, mock_reminder_service):
         client = make_client(
@@ -281,7 +292,7 @@ class TestListSchedulesByDepartmentRange:
     def test_passes_date_range_to_service(self, mock_schedule_service):
         dept_id = uuid4()
         mock_schedule_service.get_schedules_by_department.return_value = []
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
 
         response = client.get(
             f"/api/v1/schedules/departments/{dept_id}",
@@ -294,7 +305,7 @@ class TestListSchedulesByDepartmentRange:
         )
 
     def test_returns_422_for_a_malformed_date(self, mock_schedule_service):
-        client = make_client(schedule_service=mock_schedule_service)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
         response = client.get(f"/api/v1/schedules/departments/{uuid4()}", params={"from": "not-a-date"})
         assert response.status_code == 422
 
@@ -650,3 +661,69 @@ class TestRemoveAssignment:
         response = client.delete(f"/api/v1/schedules/assignments/{uuid4()}")
         assert response.status_code == 403
         mock_schedule_service.remove_assignment.assert_not_called()
+
+
+class TestDepartmentScope:
+    """Every rota read and write is for that department's heads (and admins), nobody else's."""
+
+    @pytest.fixture
+    def outsider(self, mock_worker_service):
+        # A head, but of a different department: the scope check refuses.
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        return mock_worker_service
+
+    def test_a_plain_worker_cannot_read_rotas(self, mock_schedule_service):
+        # Each assignment embeds the worker's phone and email. Workers read their own duties
+        # through /schedules/workers/{id}/assignments.
+        client = make_client(role=UserRole.WORKER, schedule_service=mock_schedule_service)
+
+        assert client.get(f"/api/v1/schedules/departments/{uuid4()}").status_code == 403
+        assert client.get(f"/api/v1/schedules/{uuid4()}").status_code == 403
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("get", "/api/v1/schedules/departments/{id}", None),
+            ("get", "/api/v1/schedules/{id}", None),
+            ("delete", "/api/v1/schedules/{id}", None),
+            ("patch", "/api/v1/schedules/assignments/{id}/role", None),
+            ("post", "/api/v1/schedules/{id}/reminders/trigger", None),
+        ],
+    )
+    def test_a_head_of_another_department_is_refused(
+        self, mock_schedule_service, mock_reminder_service, outsider, method, path, body
+    ):
+        mock_schedule_service.get_schedule.return_value = make_schedule()
+        mock_schedule_service.get_assignment.return_value = make_assignment()
+        client = make_client(
+            role=UserRole.HOD,
+            schedule_service=mock_schedule_service,
+            reminder_service=mock_reminder_service,
+            worker_service=outsider,
+        )
+
+        response = getattr(client, method)(path.format(id=uuid4()))
+
+        assert response.status_code == 403
+        mock_schedule_service.delete_schedule.assert_not_called()
+        mock_schedule_service.update_assignment_role.assert_not_called()
+        mock_reminder_service.trigger_for_schedule.assert_not_called()
+
+    def test_generation_is_scoped_to_the_requested_department(self, mock_schedule_service, outsider):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service, worker_service=outsider)
+
+        response = client.post(
+            "/api/v1/schedules/generate",
+            json={
+                "department_id": str(uuid4()),
+                "scope": "department_only",
+                "title": "Sunday",
+                "scheduled_date": "2026-11-01",
+                "start_time": "09:00:00",
+                "end_time": "11:00:00",
+                "reminder_days_before": [1],
+            },
+        )
+
+        assert response.status_code == 403
+        mock_schedule_service.generate_schedule.assert_not_called()

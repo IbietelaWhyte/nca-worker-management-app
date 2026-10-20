@@ -103,19 +103,25 @@ def get_department(
 @router.get("/{department_id}/workers", response_model=DepartmentWithWorkersResponse)
 def get_department_with_workers(
     department_id: UUID,
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> DepartmentWithWorkersResponse:
-    """Retrieve a department with all assigned workers embedded.
+    """Retrieve a department with all assigned workers embedded (admin/HOD of the department).
+
+    Scoped because every member carries their phone and email: open to any signed-in user, this
+    handed a whole department's contact details to anybody who could guess its id.
 
     Args:
         department_id: Unique identifier of the department.
-        _: Current authenticated user token.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
         service: Department service dependency.
+        worker_service: Worker service dependency, for the department scope check.
 
     Returns:
         DepartmentWithWorkersResponse: Department with worker details.
     """
+    worker_service.authorize_create_assignment(current_user, department_id)
     return service.get_department_with_workers(department_id)
 
 
@@ -214,22 +220,26 @@ async def import_workers(
 def get_monthly_leads(
     department_id: UUID,
     month: date = Query(description="Any date in the month; normalised to the 1st"),
-    _: TokenPayload = CurrentUser,
+    current_user: TokenPayload = HODUser,
+    worker_service: WorkerService = Depends(get_worker_service),
     lead_service: MonthlyLeadService = Depends(get_monthly_lead_service),
 ) -> MonthlyLeadsResponse:
     """A department's monthly leads ("Teacher of the Month") for the month a date falls in.
 
-    Open to every signed-in user: the names are shown at the top of schedules workers can see.
+    For the department's heads, like the schedules the names are shown on: each lead embeds the
+    worker's contact details.
 
     Args:
         department_id: The department.
         month: Any date in the month.
-        _: Any authenticated user.
+        current_user: Admin or HOD/Assistant HOD token; non-admins must manage the department.
+        worker_service: Worker service dependency, for the department scope check.
         lead_service: Monthly lead service dependency.
 
     Returns:
         MonthlyLeadsResponse: What the department calls its leads, and who they are that month.
     """
+    worker_service.authorize_create_assignment(current_user, department_id)
     return lead_service.get_leads(department_id, month)
 
 
@@ -352,7 +362,7 @@ def delete_availability_prompt(
         prompt_service: Availability prompt service dependency.
     """
     worker_service.authorize_create_assignment(current_user, department_id)
-    prompt_service.delete_prompt(prompt_id)
+    prompt_service.delete_prompt(prompt_id, department_id)
 
 
 @router.post("/{department_id}/workers/{worker_id}", response_model=MessageResponse)

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.availabilities.models import AvailabilityConfig, PublicAvailabilityResponse
-from app.schemas.models import AvailabilityType, DayOfWeek
+from app.schemas.models import AvailabilityType, DayOfWeek, UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_availability
 
@@ -213,3 +213,18 @@ class TestPublicLinkEndpoints:
         response = client.get(f"/api/v1/availability/link/{uuid4()}")
         assert response.status_code == 200
         assert response.json()["editable_from"] == "2026-09-17"
+
+
+class TestAvailabilityByDay:
+    """Church-wide, with every worker's contact details embedded; nothing in the app reads it."""
+
+    def test_is_admin_only(self, mock_availability_service):
+        for role in (UserRole.WORKER, UserRole.HOD, UserRole.ASSISTANT_HOD):
+            client = make_client(role=role, availability_service=mock_availability_service)
+            assert client.get("/api/v1/availability/day/sunday").status_code == 403
+        mock_availability_service.get_available_workers_on_day.assert_not_called()
+
+    def test_an_admin_can_read(self, mock_availability_service):
+        mock_availability_service.get_available_workers_on_day.return_value = []
+        client = make_client(role=UserRole.ADMIN, availability_service=mock_availability_service)
+        assert client.get("/api/v1/availability/day/sunday").status_code == 200

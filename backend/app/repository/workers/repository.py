@@ -28,6 +28,27 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         super().__init__(client, q.TABLE, WorkerResponse)
         self.logger = logger.bind(repository="WorkerRepository")
 
+    def get_by_auth_user_id(self, auth_user_id: UUID) -> WorkerResponse | None:
+        """Retrieve the worker linked to a Supabase login.
+
+        `auth_user_id` is unique and only ever written when an admin grants a worker an account,
+        so this is the link between a login and a profile that the login cannot influence.
+
+        Args:
+            auth_user_id: The login's id — the `sub` claim of its token.
+
+        Returns:
+            WorkerResponse | None: The linked worker, or None if the login has no profile.
+        """
+        response = (
+            self.client.table(q.TABLE)
+            .select(q.SELECT_ALL)
+            .eq(q.Columns.AUTH_USER_ID, str(auth_user_id))
+            .maybe_single()
+            .execute()
+        )
+        return self._to_model(response.data) if response else None
+
     def get_by_email(self, email: str) -> WorkerResponse | None:
         """
         Retrieve a worker by their email address.

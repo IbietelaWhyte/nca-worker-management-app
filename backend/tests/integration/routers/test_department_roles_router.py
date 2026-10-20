@@ -1,6 +1,8 @@
 from uuid import uuid4
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+import pytest
+
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_department_role
@@ -114,3 +116,44 @@ class TestUnassignWorkerRole:
         client = make_client(role=UserRole.WORKER, department_role_service=mock_department_role_service)
         response = client.delete(f"/api/v1/roles/{uuid4()}/workers/{uuid4()}")
         assert response.status_code == 403
+
+
+class TestDepartmentScope:
+    """Department roles belong to one department; only its heads (and admins) change them."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("patch", "/api/v1/roles/{id}", {"name": "Renamed"}),
+            ("delete", "/api/v1/roles/{id}", None),
+            ("post", "/api/v1/roles/{id}/workers/{w}", None),
+            ("delete", "/api/v1/roles/{id}/workers/{w}", None),
+        ],
+    )
+    def test_a_head_of_another_department_is_refused(
+        self, mock_department_role_service, mock_worker_service, method, path, body
+    ):
+        mock_department_role_service.get_role.return_value = make_department_role()
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, department_role_service=mock_department_role_service, worker_service=mock_worker_service
+        )
+
+        response = client.request(method.upper(), path.format(id=uuid4(), w=uuid4()), json=body)
+
+        assert response.status_code == 403
+        mock_department_role_service.update_role.assert_not_called()
+        mock_department_role_service.delete_role.assert_not_called()
+        mock_department_role_service.assign_worker.assert_not_called()
+        mock_department_role_service.unassign_worker.assert_not_called()
+
+    def test_creating_in_another_department_is_refused(self, mock_department_role_service, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, department_role_service=mock_department_role_service, worker_service=mock_worker_service
+        )
+
+        response = client.post("/api/v1/roles", json={"department_id": str(uuid4()), "name": "Teacher"})
+
+        assert response.status_code == 403
+        mock_department_role_service.create_role.assert_not_called()

@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 
 from app.core.dependencies import (
+    AdminUser,
     CurrentUser,
     get_availability_service,
     get_confirmation_token_service,
@@ -110,7 +111,8 @@ def get_availability_by_day(
 @router.get("/day/{day_of_week}", response_model=list[AvailabilityResponse])
 def get_available_workers_on_day(
     day_of_week: DayOfWeek,
-    _: TokenPayload = CurrentUser,
+    # Church-wide and embeds every worker's contact details; nothing in the app reads it.
+    _: TokenPayload = AdminUser,
     service: AvailabilityService = Depends(get_availability_service),
 ) -> list[AvailabilityResponse]:
     return service.get_available_workers_on_day(day_of_week)

@@ -137,8 +137,11 @@ def make_client(
 
     if attendance_service:
         app.dependency_overrides[get_attendance_service] = lambda: attendance_service
-    if worker_service:
-        app.dependency_overrides[get_worker_service] = lambda: worker_service
+    # Almost every write is scoped through a WorkerService.authorize_* call, which a real service
+    # could only answer by querying the database. A permissive mock stands in unless the test
+    # supplies its own — a test about scoping passes one with a side_effect.
+    scoped_by = worker_service or MagicMock(spec=WorkerService)
+    app.dependency_overrides[get_worker_service] = lambda: scoped_by
     if department_service:
         app.dependency_overrides[get_department_service] = lambda: department_service
     if schedule_service:

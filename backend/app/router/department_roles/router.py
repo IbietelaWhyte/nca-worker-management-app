@@ -6,6 +6,7 @@ from app.core.dependencies import (
     CurrentUser,
     HODUser,
     get_department_role_service,
+    get_worker_service,
 )
 from app.schemas.department_roles.models import (
     DepartmentRoleCreate,
@@ -14,6 +15,7 @@ from app.schemas.department_roles.models import (
 )
 from app.schemas.models import MessageResponse, TokenPayload
 from app.service.department_roles.service import DepartmentRoleService
+from app.service.workers.service import WorkerService
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -30,9 +32,11 @@ def get_role(
 @router.post("", response_model=DepartmentRoleResponse, status_code=status.HTTP_201_CREATED)
 def create_role(
     data: DepartmentRoleCreate,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: DepartmentRoleService = Depends(get_department_role_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> DepartmentRoleResponse:
+    worker_service.authorize_create_assignment(token, data.department_id)
     return service.create_role(data)
 
 
@@ -40,18 +44,22 @@ def create_role(
 def update_role(
     role_id: UUID,
     data: DepartmentRoleUpdate,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: DepartmentRoleService = Depends(get_department_role_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> DepartmentRoleResponse:
+    worker_service.authorize_create_assignment(token, service.get_role(role_id).department_id)
     return service.update_role(role_id, data)
 
 
 @router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_role(
     role_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: DepartmentRoleService = Depends(get_department_role_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> None:
+    worker_service.authorize_create_assignment(token, service.get_role(role_id).department_id)
     service.delete_role(role_id)
 
 
@@ -59,13 +67,15 @@ def delete_role(
 def assign_worker_role(
     role_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: DepartmentRoleService = Depends(get_department_role_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MessageResponse:
     """Assign a department role to a worker.
 
     Requires the worker to already be assigned to the role's parent department.
     """
+    worker_service.authorize_create_assignment(token, service.get_role(role_id).department_id)
     service.assign_worker(role_id, worker_id)
     return MessageResponse(message="Role assigned to worker successfully")
 
@@ -77,8 +87,10 @@ def assign_worker_role(
 def unassign_worker_role(
     role_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: DepartmentRoleService = Depends(get_department_role_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> None:
     """Clear a worker's department role."""
+    worker_service.authorize_create_assignment(token, service.get_role(role_id).department_id)
     service.unassign_worker(role_id, worker_id)

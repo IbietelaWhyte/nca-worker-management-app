@@ -1,6 +1,8 @@
 from uuid import uuid4
 
-from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+import pytest
+
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_subteam
@@ -185,3 +187,52 @@ class TestUnassignWorkerFromSubteam:
         client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
         response = client.delete(f"/api/v1/subteams/{uuid4()}/workers/{uuid4()}")
         assert response.status_code == 403
+
+
+class TestDepartmentScope:
+    """Every subteam write, and the member list, is for the parent department's heads."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            ("get", "/api/v1/subteams/{id}/workers", None),
+            ("patch", "/api/v1/subteams/{id}", {"name": "Renamed"}),
+            ("post", "/api/v1/subteams/{id}/workers", {"worker_ids": ["{w}"]}),
+            ("delete", "/api/v1/subteams/{id}/workers/{w}", None),
+        ],
+    )
+    def test_a_head_of_another_department_is_refused(
+        self, mock_subteam_service, mock_worker_service, method, path, body
+    ):
+        mock_subteam_service.get_subteam.return_value = make_subteam()
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, subteam_service=mock_subteam_service, worker_service=mock_worker_service
+        )
+        worker_id = str(uuid4())
+        url = path.format(id=uuid4(), w=worker_id)
+        kwargs = {"json": {k: ([worker_id] if k == "worker_ids" else v) for k, v in body.items()}} if body else {}
+
+        response = client.request(method.upper(), url, **kwargs)
+
+        assert response.status_code == 403
+        mock_subteam_service.update_subteam.assert_not_called()
+        mock_subteam_service.assign_workers.assert_not_called()
+        mock_subteam_service.unassign_worker.assert_not_called()
+        mock_subteam_service.get_subteam_with_workers.assert_not_called()
+
+    def test_creating_in_another_department_is_refused(self, mock_subteam_service, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, subteam_service=mock_subteam_service, worker_service=mock_worker_service
+        )
+
+        response = client.post("/api/v1/subteams", json={"department_id": str(uuid4()), "name": "Toddlers"})
+
+        assert response.status_code == 403
+        mock_subteam_service.create_subteam.assert_not_called()
+
+    def test_a_plain_worker_cannot_list_members(self, mock_subteam_service):
+        # Each member embeds their phone and email.
+        client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
+        assert client.get(f"/api/v1/subteams/{uuid4()}/workers").status_code == 403

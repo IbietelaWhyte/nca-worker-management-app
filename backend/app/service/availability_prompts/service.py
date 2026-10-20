@@ -97,17 +97,21 @@ class AvailabilityPromptService:
         log.info("prompt_created", prompt_id=str(prompt.id))
         return prompt
 
-    def delete_prompt(self, prompt_id: UUID) -> None:
-        """Remove a prompt.
+    def delete_prompt(self, prompt_id: UUID, department_id: UUID) -> None:
+        """Remove a prompt from a department.
 
         Args:
             prompt_id: The prompt to delete.
+            department_id: The department named in the request, whose scope the caller was checked
+                against. A prompt from any other department reads as not found, so that check
+                cannot be satisfied with one department's id and spent on another's prompt.
 
         Raises:
-            NotFoundError: If the prompt does not exist.
+            NotFoundError: If the prompt does not exist in that department.
         """
         log = self.logger.bind(method="delete_prompt", prompt_id=str(prompt_id))
-        if not self.prompt_repo.get_by_id(prompt_id):
+        prompt = self.prompt_repo.get_by_id(prompt_id)
+        if not prompt or prompt.department_id != department_id:
             log.warning("prompt_not_found")
             raise NotFoundError(f"Availability prompt {prompt_id} not found")
         self.prompt_repo.delete(prompt_id)
@@ -132,6 +136,7 @@ class AvailabilityPromptService:
         department = self.department_repo.get_by_id(department_id)
         if not department:
             raise NotFoundError(f"Department {department_id} not found")
+        self.sms_service.claim_manual_send(f"prompt:{department_id}")
         return self._prompt_department(department_id, department.name)
 
     def send_due_prompts(self, today: date | None = None) -> int:

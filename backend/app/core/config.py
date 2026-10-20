@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     # Per-worker cap, counted in memory over a rolling hour. One frustrated volunteer holding down
     # Send should not be able to fill a public tracker.
     feedback_max_per_hour: int = Field(default=5, ge=1)
+
+    # Texts a head sends by hand — "remind this rota now", "prompt my department now" — can repeat
+    # once per this many minutes for the same rota or department. Both re-text everybody every
+    # time, so without it one held-down button is a Twilio bill and a dozen buzzing phones.
+    manual_send_cooldown_minutes: int = Field(default=15, ge=0)
     # GitHub is a third party on a request thread, so the call is bounded rather than left to hang
     # onto a worker thread until the client gives up.
     feedback_timeout_seconds: float = Field(default=10.0, gt=0)
