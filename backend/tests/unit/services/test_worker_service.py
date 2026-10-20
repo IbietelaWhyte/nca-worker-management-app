@@ -443,6 +443,33 @@ class TestAuthorizeManageWorker:
         with pytest.raises(PermissionDeniedError):
             service.authorize_manage_worker(_token(), uuid4())
 
+    @pytest.mark.parametrize("held", [UserRole.ADMIN, UserRole.HOD])
+    def test_protect_heads_refuses_a_head_acting_on_an_admin_or_hod(
+        self, service, mock_worker_repo, mock_department_repo, held
+    ):
+        # Deactivate and delete pass protect_heads: sharing a department with the church admin
+        # must not let its head remove them.
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.WORKER, held]
+        with pytest.raises(PermissionDeniedError, match="Only an administrator"):
+            service.authorize_manage_worker(_token(), uuid4(), protect_heads=True)
+
+    def test_protect_heads_still_allows_acting_on_ordinary_members(
+        self, service, mock_worker_repo, mock_department_repo
+    ):
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.WORKER, UserRole.ASSISTANT_HOD]
+        service.authorize_manage_worker(_token(), uuid4(), protect_heads=True)  # no raise
+
+    def test_without_protect_heads_a_head_can_still_manage_a_fellow_head(
+        self, service, mock_worker_repo, mock_department_repo
+    ):
+        # Everyday actions — recording leave for a fellow head who sings in the choir — are unchanged.
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.HOD]
+        service.authorize_manage_worker(_token(), uuid4())  # no raise
+        mock_worker_repo.get_worker_roles.assert_not_called()
+
 
 class TestAuthorizeUpdateWorker:
     def test_admin_bypasses(self, service, mock_worker_repo):
@@ -453,6 +480,20 @@ class TestAuthorizeUpdateWorker:
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
         with pytest.raises(PermissionDeniedError, match="worker and assistant_hod"):
             service.authorize_update_worker(_token(), uuid4(), WorkerUpdate(roles=[UserRole.ADMIN]))
+
+    @pytest.mark.parametrize("held", [UserRole.ADMIN, UserRole.HOD])
+    def test_denies_changing_the_roles_of_an_admin_or_hod(self, service, mock_worker_repo, mock_department_repo, held):
+        # Granting admin/hod was always blocked; removing it was not, so a head could demote an
+        # admin who served in their department.
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        mock_worker_repo.get_worker_roles.return_value = [held]
+        with pytest.raises(PermissionDeniedError, match="Only an administrator"):
+            service.authorize_update_worker(_token(), uuid4(), WorkerUpdate(roles=[UserRole.WORKER]))
+
+    def test_other_fields_of_a_head_can_still_be_edited(self, service, mock_worker_repo, mock_department_repo):
+        _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)
+        mock_worker_repo.get_worker_roles.return_value = [UserRole.HOD]
+        service.authorize_update_worker(_token(), uuid4(), WorkerUpdate(first_name="J"))  # no raise
 
     def test_denies_assistant_hod_for_unmanaged_department(self, service, mock_worker_repo, mock_department_repo):
         _setup_can_manage(mock_worker_repo, mock_department_repo, overlap=True)

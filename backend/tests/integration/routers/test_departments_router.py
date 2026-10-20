@@ -105,19 +105,63 @@ class TestCreateDepartment:
 
 
 class TestAssignWorker:
-    def test_returns_200_on_assign(self, mock_department_service):
+    def test_returns_200_on_assign(self, mock_department_service, mock_worker_service):
         dept = make_department()
         worker_id = uuid4()
         mock_department_service.get_department.return_value = dept
-        client = make_client(role=UserRole.HOD, department_service=mock_department_service)
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
 
         response = client.post(f"/api/v1/departments/{dept.id}/workers/{worker_id}")
         assert response.status_code == 200
+        mock_department_service.assign_worker.assert_called_once_with(dept.id, worker_id)
 
     def test_returns_403_for_worker_role(self, mock_department_service):
         client = make_client(role=UserRole.WORKER, department_service=mock_department_service)
         response = client.post(f"/api/v1/departments/{uuid4()}/workers/{uuid4()}")
         assert response.status_code == 403
+
+    def test_a_head_cannot_add_people_to_a_department_they_do_not_manage(
+        self, mock_department_service, mock_worker_service
+    ):
+        # The first link of the escalation chain: pulling an admin into your own department made
+        # them "a worker you manage", whom you could then demote, deactivate or delete.
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
+
+        response = client.post(f"/api/v1/departments/{uuid4()}/workers/{uuid4()}")
+
+        assert response.status_code == 403
+        mock_department_service.assign_worker.assert_not_called()
+
+
+class TestUnassignWorker:
+    def test_a_head_cannot_remove_people_from_a_department_they_do_not_manage(
+        self, mock_department_service, mock_worker_service
+    ):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("not yours")
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
+
+        response = client.delete(f"/api/v1/departments/{uuid4()}/workers/{uuid4()}")
+
+        assert response.status_code == 403
+        mock_department_service.unassign_worker.assert_not_called()
+
+    def test_returns_204_when_in_scope(self, mock_department_service, mock_worker_service):
+        dept_id, worker_id = uuid4(), uuid4()
+        client = make_client(
+            role=UserRole.HOD, department_service=mock_department_service, worker_service=mock_worker_service
+        )
+
+        response = client.delete(f"/api/v1/departments/{dept_id}/workers/{worker_id}")
+
+        assert response.status_code == 204
+        mock_department_service.unassign_worker.assert_called_once_with(dept_id, worker_id)
 
 
 class TestSetHod:

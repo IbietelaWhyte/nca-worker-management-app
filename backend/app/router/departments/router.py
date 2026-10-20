@@ -359,9 +359,13 @@ def delete_availability_prompt(
 def assign_worker(
     department_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = HODUser,
+    current_user: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MessageResponse:
+    # Scoped like every other department write: without it a head could pull anybody — an admin
+    # included — into their own department and then manage them as a member.
+    worker_service.authorize_create_assignment(current_user, department_id)
     service.assign_worker(department_id, worker_id)
     return MessageResponse(message="Worker assigned successfully")
 
@@ -373,9 +377,11 @@ def assign_worker(
 def unassign_worker(
     department_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = HODUser,
+    current_user: TokenPayload = HODUser,
     service: DepartmentService = Depends(get_department_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> None:
+    worker_service.authorize_create_assignment(current_user, department_id)
     service.unassign_worker(department_id, worker_id)
 
 
