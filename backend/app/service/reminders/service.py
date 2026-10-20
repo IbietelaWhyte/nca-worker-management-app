@@ -324,6 +324,9 @@ class ReminderService:
         if not schedule:
             log.warning("schedule_not_found")
             return 0
+        # Re-texts everybody every time and records nothing, so the cooldown is the only thing
+        # standing between a repeated tap and a phone buzzing for each one.
+        self.sms_service.claim_manual_send(f"schedule:{schedule_id}")
 
         department_names: dict[UUID, str] = {}
         sent = 0

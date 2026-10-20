@@ -912,16 +912,22 @@ class WorkerService:
         Args:
             token: The verified token payload of the requesting user.
 
+        Matched on the login's id (`sub` against `workers.auth_user_id`), not its email. An email
+        is a value people can change — a head edits a worker's, and a login can be registered
+        under any address — so matching on it let the wrong login become a worker, or lose one.
+
         Returns:
-            WorkerResponse: The worker record matching the token's email.
+            WorkerResponse: The worker record linked to the token's login.
 
         Raises:
-            BadRequestError: If the token carries no email.
-            NotFoundError: If no worker profile exists for the token's email.
+            BadRequestError: If the token's subject is not a login id.
+            NotFoundError: If no worker profile is linked to that login.
         """
-        if not token.email:
-            raise BadRequestError("Email not found in authentication token")
-        worker = self.worker_repo.get_by_email(token.email)
+        try:
+            auth_user_id = UUID(token.sub)
+        except ValueError as exc:
+            raise BadRequestError("Invalid user id in authentication token") from exc
+        worker = self.worker_repo.get_by_auth_user_id(auth_user_id)
         if not worker:
             raise NotFoundError("Worker profile not found for authenticated user")
         return worker

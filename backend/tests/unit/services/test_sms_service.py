@@ -2,6 +2,8 @@ from unittest.mock import patch
 
 import pytest
 
+import app.service.sms.service as sms_module
+from app.core.exceptions import TooManyRequestsError
 from app.service.sms.service import SMSService
 
 PROMPT_URL = "https://app.example.com/availability/abc"
@@ -221,3 +223,43 @@ class TestAvailabilityPromptBody:
             url="https://rota.example.ca/availability/" + "0" * 36,
         )
         assert len(body) <= 160, f"{len(body)} characters spills into a second segment: {body}"
+
+
+class TestManualSendCooldown:
+    """A head's "send now" can repeat only once per cooldown for the same rota or department."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh(self):
+        sms_module._manual_sends.clear()
+        yield
+        sms_module._manual_sends.clear()
+
+    def test_the_first_send_goes_through_and_a_repeat_is_refused(self, service):
+        service.claim_manual_send("schedule:a")
+        with pytest.raises(TooManyRequestsError, match="again in 15 minutes"):
+            service.claim_manual_send("schedule:a")
+
+    def test_different_rotas_do_not_share_a_cooldown(self, service):
+        service.claim_manual_send("schedule:a")
+        service.claim_manual_send("schedule:b")  # no raise
+        service.claim_manual_send("prompt:a")  # no raise
+
+    def test_a_send_after_the_cooldown_goes_through(self, service):
+        with patch("app.service.sms.service.time.monotonic", return_value=1_000.0):
+            service.claim_manual_send("schedule:a")
+        with patch("app.service.sms.service.time.monotonic", return_value=1_000.0 + 15 * 60):
+            service.claim_manual_send("schedule:a")  # no raise
+
+    def test_reports_the_minutes_left(self, service):
+        with patch("app.service.sms.service.time.monotonic", return_value=1_000.0):
+            service.claim_manual_send("schedule:a")
+        with (
+            patch("app.service.sms.service.time.monotonic", return_value=1_000.0 + 14 * 60 + 1),
+            pytest.raises(TooManyRequestsError, match="again in 1 minute\\."),
+        ):
+            service.claim_manual_send("schedule:a")
+
+    def test_a_cooldown_of_zero_turns_it_off(self, service, monkeypatch):
+        monkeypatch.setattr(sms_module.settings, "manual_send_cooldown_minutes", 0)
+        service.claim_manual_send("schedule:a")
+        service.claim_manual_send("schedule:a")  # no raise

@@ -1,10 +1,21 @@
+import math
+import threading
+import time
+
 from twilio.rest import Client as TwilioClient
 
 from app.core.config import settings
+from app.core.exceptions import TooManyRequestsError
 from app.core.logging import get_logger
 from app.core.redaction import mask_phone
 
 logger = get_logger(__name__)
+
+# When each manual bulk send last went out, keyed by what it texted. Module-level because the
+# service is built per request; per-process and lost on restart, like the feedback limiter — a
+# guard against a repeated button, not an audit trail.
+_manual_sends: dict[str, float] = {}
+_manual_sends_lock = threading.Lock()
 
 
 class SMSService:
@@ -22,6 +33,28 @@ class SMSService:
 
         # bind the logger to the service name for structured logging
         self.logger = logger.bind(service="SMSService")
+
+    def claim_manual_send(self, key: str) -> None:
+        """Refuse a hand-triggered bulk send repeated within the cooldown; otherwise record it.
+
+        Args:
+            key: What is being texted, e.g. "schedule:<id>" or "prompt:<department id>".
+
+        Raises:
+            TooManyRequestsError: If the same send went out less than
+                `settings.manual_send_cooldown_minutes` ago.
+        """
+        window = settings.manual_send_cooldown_minutes * 60
+        now = time.monotonic()
+        with _manual_sends_lock:
+            last = _manual_sends.get(key)
+            if last is not None and now - last < window:
+                minutes = math.ceil((window - (now - last)) / 60)
+                raise TooManyRequestsError(
+                    f"These texts went out a few minutes ago. You can send them again in {minutes} "
+                    f"minute{'s' if minutes != 1 else ''}."
+                )
+            _manual_sends[key] = now
 
     def send_sms(self, to: str, body: str) -> bool:
         """Send an SMS message to a phone number.

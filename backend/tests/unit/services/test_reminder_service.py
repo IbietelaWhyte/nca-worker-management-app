@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.core.exceptions import TooManyRequestsError
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
@@ -362,3 +363,18 @@ class TestSchedulerLifecycle:
     def test_stop_is_a_noop_when_never_started(self, service):
         service.stop()  # must not raise — request-scoped instances never start a scheduler
         assert service.scheduler is None
+
+
+class TestTriggerForScheduleCooldown:
+    def test_claims_the_schedule_cooldown_before_texting(self, service, mock_schedule_repo, mock_sms_service):
+        schedule_id = uuid4()
+        schedule = make_due_assignment().schedules
+        schedule.schedule_assignments = [make_due_assignment()]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+        mock_sms_service.claim_manual_send.side_effect = TooManyRequestsError("again in 5 minutes")
+
+        with pytest.raises(TooManyRequestsError):
+            service.trigger_for_schedule(schedule_id)
+
+        mock_sms_service.claim_manual_send.assert_called_once_with(f"schedule:{schedule_id}")
+        mock_sms_service.send_reminder.assert_not_called()

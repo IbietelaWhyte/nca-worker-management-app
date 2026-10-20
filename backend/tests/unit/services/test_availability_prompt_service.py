@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, TooManyRequestsError
 from app.repository.availability_prompts.repository import AvailabilityPromptRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.workers.repository import WorkerRepository
@@ -269,3 +269,35 @@ class TestLeaveSuppressesThePrompt:
 
         result = service.send_now(uuid4())
         assert (result.sent, result.skipped_on_leave) == (0, 0)
+
+
+class TestManualSendAndDeleteScope:
+    def test_send_now_claims_the_department_cooldown_before_texting(
+        self, service, mock_department_repo, mock_sms_service
+    ):
+        dept_id = uuid4()
+        mock_sms_service.claim_manual_send.side_effect = TooManyRequestsError("again in 5 minutes")
+
+        with pytest.raises(TooManyRequestsError):
+            service.send_now(dept_id)
+
+        mock_sms_service.claim_manual_send.assert_called_once_with(f"prompt:{dept_id}")
+        mock_sms_service.send_availability_prompt.assert_not_called()
+
+    def test_deleting_another_departments_prompt_reads_as_not_found(self, service, mock_prompt_repo):
+        # The router checks the caller manages the department in the URL; the prompt must belong
+        # to that department, or the check could be passed with one id and spent on another.
+        mock_prompt_repo.get_by_id.return_value = make_prompt(department_id=uuid4())
+
+        with pytest.raises(NotFoundError):
+            service.delete_prompt(uuid4(), uuid4())
+        mock_prompt_repo.delete.assert_not_called()
+
+    def test_deletes_a_prompt_in_the_named_department(self, service, mock_prompt_repo):
+        dept_id = uuid4()
+        prompt = make_prompt(department_id=dept_id)
+        mock_prompt_repo.get_by_id.return_value = prompt
+
+        service.delete_prompt(prompt.id, dept_id)
+
+        mock_prompt_repo.delete.assert_called_once_with(prompt.id)

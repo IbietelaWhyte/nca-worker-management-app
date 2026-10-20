@@ -7,6 +7,7 @@ from app.core.dependencies import (
     CurrentUser,
     HODUser,
     get_subteam_service,
+    get_worker_service,
 )
 from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.subteams.models import (
@@ -17,6 +18,7 @@ from app.schemas.subteams.models import (
     SubteamWorkersAssign,
 )
 from app.service.subteams.service import SubteamService
+from app.service.workers.service import WorkerService
 
 router = APIRouter(prefix="/subteams", tags=["subteams"])
 
@@ -33,19 +35,23 @@ def get_subteam(
 @router.get("/{subteam_id}/workers", response_model=list[SubteamWithWorkersResponse])
 def get_subteam_with_workers(
     subteam_id: UUID,
-    _: TokenPayload = CurrentUser,
+    token: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> list[SubteamWithWorkersResponse]:
-    """Get subteam with all assigned workers."""
+    """Get subteam with all assigned workers (their contact details included), for its department's heads."""
+    worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
     return service.get_subteam_with_workers(subteam_id)
 
 
 @router.post("", response_model=SubteamResponse, status_code=status.HTTP_201_CREATED)
 def create_subteam(
     data: SubteamCreate,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> SubteamResponse:
+    worker_service.authorize_create_assignment(token, data.department_id)
     return service.create_subteam(data)
 
 
@@ -53,9 +59,11 @@ def create_subteam(
 def update_subteam(
     subteam_id: UUID,
     data: SubteamUpdate,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> SubteamResponse:
+    worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
     return service.update_subteam(subteam_id, data)
 
 
@@ -72,14 +80,16 @@ def delete_subteam(
 def assign_workers_to_subteam(
     subteam_id: UUID,
     data: SubteamWorkersAssign,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> MessageResponse:
     """Assign several workers to a subteam in one call.
 
     Every worker must already be assigned to the subteam's parent department; if any is not,
     none are assigned.
     """
+    worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
     service.assign_workers(subteam_id, data.worker_ids)
     count = len(set(data.worker_ids))
     return MessageResponse(message=f"{count} {'worker' if count == 1 else 'workers'} assigned to subteam")
@@ -92,8 +102,10 @@ def assign_workers_to_subteam(
 def unassign_worker_from_subteam(
     subteam_id: UUID,
     worker_id: UUID,
-    _: TokenPayload = HODUser,
+    token: TokenPayload = HODUser,
     service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
 ) -> None:
     """Remove a worker's assignment from a subteam."""
+    worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
     service.unassign_worker(subteam_id, worker_id)

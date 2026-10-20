@@ -27,6 +27,7 @@ class Columns:
     LAST_NAME = "last_name"
     EMAIL = "email"
     PHONE = "phone"
+    AUTH_USER_ID = "auth_user_id"
     IS_ACTIVE = "is_active"
 
 
