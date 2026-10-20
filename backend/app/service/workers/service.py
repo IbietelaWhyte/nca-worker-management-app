@@ -48,6 +48,9 @@ _VALIDATION_MESSAGES = {
 }
 
 
+# Roles only an administrator may grant, remove, or act destructively against.
+_HEAD_ROLES = frozenset({UserRole.ADMIN, UserRole.HOD})
+
 Placement = tuple[UUID | None, UUID | None]  # (department_role_id, subteam_id) for one imported worker
 
 
@@ -923,7 +926,7 @@ class WorkerService:
             raise NotFoundError("Worker profile not found for authenticated user")
         return worker
 
-    def authorize_manage_worker(self, token: TokenPayload, worker_id: UUID) -> None:
+    def authorize_manage_worker(self, token: TokenPayload, worker_id: UUID, *, protect_heads: bool = False) -> None:
         """Ensure the requesting user may manage the given worker.
 
         Admins are always allowed. Other users must manage a department the worker belongs to.
@@ -931,9 +934,14 @@ class WorkerService:
         Args:
             token: The verified token payload of the requesting user.
             worker_id: The worker being acted upon.
+            protect_heads: For destructive actions (deactivate, delete). A non-admin may not take
+                them against an admin or HOD even when that person serves in a department they
+                manage — sharing a choir with the church admin must not let its head remove them.
+                Off for everyday actions like recording leave, which heads do for each other.
 
         Raises:
-            PermissionDeniedError: If a non-admin does not manage the worker.
+            PermissionDeniedError: If a non-admin does not manage the worker, or `protect_heads` is
+                set and the worker is an admin or HOD.
             BadRequestError/NotFoundError: If the actor's worker profile cannot be resolved.
         """
         if token.role == UserRole.ADMIN:
@@ -941,6 +949,8 @@ class WorkerService:
         actor = self.get_worker_for_token(token)
         if not self.can_manage_worker(actor.id, worker_id):
             raise PermissionDeniedError("You can only manage workers in departments you manage")
+        if protect_heads and _HEAD_ROLES & set(self.worker_repo.get_worker_roles(worker_id)):
+            raise PermissionDeniedError("Only an administrator can do this to an admin or head of department")
 
     def authorize_update_worker(self, token: TokenPayload, worker_id: UUID, data: WorkerUpdate) -> None:
         """Authorize a worker update, including role and assistant-HOD-department restrictions.
@@ -961,8 +971,13 @@ class WorkerService:
         actor = self.get_worker_for_token(token)
         if not self.can_manage_worker(actor.id, worker_id):
             raise PermissionDeniedError("You can only update workers in departments you manage")
-        if data.roles is not None and any(role in {UserRole.ADMIN, UserRole.HOD} for role in data.roles):
-            raise PermissionDeniedError("HODs can only assign worker and assistant_hod roles")
+        if data.roles is not None:
+            if _HEAD_ROLES & set(data.roles):
+                raise PermissionDeniedError("HODs can only assign worker and assistant_hod roles")
+            # Granting was always blocked; removing was not, so a head could demote an admin or a
+            # fellow HOD who happened to serve in their department. Their roles are an admin's call.
+            if _HEAD_ROLES & set(self.worker_repo.get_worker_roles(worker_id)):
+                raise PermissionDeniedError("Only an administrator can change an admin or head of department's roles")
         if data.assistant_hod_departments is not None:
             managed = self.get_managed_department_ids(actor.id)
             if not set(data.assistant_hod_departments) <= managed:

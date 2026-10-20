@@ -181,7 +181,7 @@ def deactivate_worker(
         current_user: Admin or HOD user token required.
         service: Worker service dependency.
     """
-    service.authorize_manage_worker(current_user, worker_id)
+    service.authorize_manage_worker(current_user, worker_id, protect_heads=True)
     service.deactivate_worker(worker_id)
 
 
@@ -202,7 +202,7 @@ def delete_worker(
         current_user: Admin or HOD user token required.
         service: Worker service dependency.
     """
-    service.authorize_manage_worker(current_user, worker_id)
+    service.authorize_manage_worker(current_user, worker_id, protect_heads=True)
     service.delete_worker(worker_id)
 
 

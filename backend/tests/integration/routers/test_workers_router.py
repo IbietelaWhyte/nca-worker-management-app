@@ -249,6 +249,16 @@ class TestDeactivateWorker:
         assert response.status_code == 403
         mock_worker_service.deactivate_worker.assert_not_called()
 
+    def test_protects_admins_and_heads(self, mock_worker_service):
+        # Dropping this flag would let a head deactivate the church admin who sings in their choir.
+        worker_id = uuid4()
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        client.delete(f"/api/v1/workers/{worker_id}")
+
+        assert mock_worker_service.authorize_manage_worker.call_args.args[1] == worker_id
+        assert mock_worker_service.authorize_manage_worker.call_args.kwargs == {"protect_heads": True}
+
 
 class TestDeleteWorker:
     def test_returns_204_on_delete(self, mock_worker_service):
@@ -281,6 +291,14 @@ class TestDeleteWorker:
         response = client.delete(f"/api/v1/workers/{uuid4()}/permanent")
         assert response.status_code == 403
         mock_worker_service.delete_worker.assert_not_called()
+
+    def test_protects_admins_and_heads(self, mock_worker_service):
+        worker_id = uuid4()
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        client.delete(f"/api/v1/workers/{worker_id}/permanent")
+
+        assert mock_worker_service.authorize_manage_worker.call_args.kwargs == {"protect_heads": True}
 
     def test_returns_409_when_worker_has_upcoming_assignments(self, mock_worker_service):
         mock_worker_service.delete_worker.side_effect = ConflictError(
