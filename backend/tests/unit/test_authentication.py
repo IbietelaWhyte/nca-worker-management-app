@@ -8,8 +8,9 @@ from app.core import authentication as auth
 
 @pytest.fixture(autouse=True)
 def reset_jwks_cache(monkeypatch):
-    # Each test starts with an empty module-level JWKS cache.
+    # Each test starts with an empty module-level JWKS cache, last fetched long ago.
     monkeypatch.setattr(auth, "_jwks_cache", None)
+    monkeypatch.setattr(auth, "_jwks_fetched_at", 0.0)
 
 
 def _creds(token: str = "tok") -> HTTPAuthorizationCredentials:
@@ -33,7 +34,7 @@ class TestGetJwks:
         assert second == first
         assert calls["n"] == 1  # second call served from cache
 
-    async def test_force_refresh_refetches(self, monkeypatch):
+    async def test_force_refresh_refetches_once_the_cooldown_has_passed(self, monkeypatch):
         calls = {"n": 0}
 
         async def fake_fetch():
@@ -43,8 +44,24 @@ class TestGetJwks:
         monkeypatch.setattr(auth, "_fetch_jwks", fake_fetch)
 
         await auth.get_jwks()
+        monkeypatch.setattr(auth, "_jwks_fetched_at", auth.time.monotonic() - 61)
         await auth.get_jwks(force_refresh=True)
         assert calls["n"] == 2
+
+    async def test_force_refresh_within_the_cooldown_serves_the_cache(self, monkeypatch):
+        # A made-up kid on every request must not become a Supabase call on every request.
+        calls = {"n": 0}
+
+        async def fake_fetch():
+            calls["n"] += 1
+            return {"keys": []}
+
+        monkeypatch.setattr(auth, "_fetch_jwks", fake_fetch)
+
+        await auth.get_jwks()
+        for _ in range(5):
+            await auth.get_jwks(force_refresh=True)
+        assert calls["n"] == 1
 
 
 class TestVerifyToken:
@@ -57,6 +74,9 @@ class TestVerifyToken:
             return {"keys": [{"kid": "new"}]} if calls["n"] > 1 else {"keys": [{"kid": "old"}]}
 
         monkeypatch.setattr(auth, "_fetch_jwks", fake_fetch)
+        # The cached set was fetched a while ago, so an unknown kid is allowed to refresh it.
+        await auth.get_jwks()
+        monkeypatch.setattr(auth, "_jwks_fetched_at", auth.time.monotonic() - 61)
         monkeypatch.setattr(auth.jwt, "get_unverified_header", lambda token: {"kid": "new"})
         monkeypatch.setattr(
             auth.jwt,

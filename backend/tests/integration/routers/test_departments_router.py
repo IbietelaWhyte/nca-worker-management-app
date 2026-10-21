@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+from app.core.config import settings
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
 from app.schemas.models import UserRole
 from app.schemas.workers.models import WorkerImportResult, WorkerImportRowResult
@@ -209,6 +210,20 @@ class TestImportWorkers:
         response = client.post(f"/api/v1/departments/{uuid4()}/workers/import", files=_csv_upload())
         assert response.status_code == 403
         mock_worker_service.import_workers.assert_not_called()
+
+    def test_reads_no_more_than_one_byte_past_the_limit(self, mock_worker_service, monkeypatch):
+        # A huge upload is recognised as too large without being read into memory whole.
+        monkeypatch.setattr(settings, "max_import_file_bytes", 10)
+        mock_worker_service.import_workers.return_value = _result(dry_run=True, ok=False)
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        client.post(
+            f"/api/v1/departments/{uuid4()}/workers/import?dry_run=true",
+            files={"file": ("big.csv", b"x" * 5000, "text/csv")},
+        )
+
+        file_bytes = mock_worker_service.import_workers.call_args.args[0]
+        assert len(file_bytes) == 11
 
     def test_dry_run_previews_without_writing(self, mock_worker_service):
         dept_id = uuid4()

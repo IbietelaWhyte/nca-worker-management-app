@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from supabase_auth.errors import AuthApiError
 
-from app.core.exceptions import BadRequestError
+from app.core.exceptions import AppError, BadRequestError
 from app.schemas.account.models import AccountProfileUpdate
 from app.schemas.models import TokenPayload, UserRole
 from app.schemas.workers.models import WorkerUpdate
@@ -94,6 +94,23 @@ class TestChangePassword:
                 service.change_password(token, "wrong-password", "new-password-123")
 
         mock_client.auth.admin.update_user_by_id.assert_not_called()
+
+    def test_a_password_the_policy_rejects_is_explained_in_supabases_words(self, service, mock_client):
+        mock_client.auth.admin.update_user_by_id.side_effect = AuthApiError(
+            "Password should be at least 10 characters.", 422, "weak_password"
+        )
+        with patch(f"{MODULE}.create_client", return_value=MagicMock()):
+            with pytest.raises(BadRequestError, match="at least 10 characters"):
+                service.change_password(make_token(), "old-password", "short")
+
+    def test_any_other_failure_is_generic(self, service, mock_client):
+        # A server-side auth failure is logged, not returned: its text is not the user's to read.
+        mock_client.auth.admin.update_user_by_id.side_effect = AuthApiError("database is locked", 500, None)
+        with patch(f"{MODULE}.create_client", return_value=MagicMock()):
+            with pytest.raises(AppError) as raised:
+                service.change_password(make_token(), "old-password", "new-password-123")
+        assert "database" not in raised.value.detail
+        assert not isinstance(raised.value, BadRequestError)
 
     def test_raises_when_token_has_no_email(self, service):
         token = make_token(email=None)

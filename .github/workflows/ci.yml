@@ -80,8 +80,15 @@ jobs:
         with:
           node-version: '20'
 
+      # npm ci installs exactly what package-lock.json pins and fails if the two disagree, where
+      # npm install would quietly resolve newer versions than the ones that were reviewed.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      # Only what ships to the browser, and only high or worse: dev-only tooling (the dev server,
+      # the shadcn CLI) is Dependabot's to raise as reviewable PRs, not a reason to block a merge.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Run linting
         run: npm run lint

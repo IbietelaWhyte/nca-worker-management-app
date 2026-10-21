@@ -58,7 +58,7 @@ class AuthenticationService:
                 error=str(e),
             )
             self._cleanup_auth_user(auth_user_id)
-            raise AppError(f"Failed to create worker record: {e}") from e
+            raise AppError("Failed to create the worker record. Please try again.") from e
 
         logger.info(
             "worker_registration_completed",
@@ -91,7 +91,11 @@ class AuthenticationService:
             logger.warning("auth_user_creation_failed", email=mask_email(email), error=str(e))
             if "already registered" in str(e).lower():
                 raise ConflictError(f"Email {email} is already registered") from e
-            raise AppError(f"Failed to create auth user: {e}") from e
+            # Supabase's own message for an input problem (a password the policy rejects) is
+            # the one the admin can act on; anything else is logged above and kept generic.
+            if 400 <= (e.status or 0) < 500:
+                raise BadRequestError(e.message) from e
+            raise AppError("Failed to create the login. Please try again.") from e
 
     def create_account_for_worker(self, worker_id: UUID, data: GrantAccountRequest) -> RegisterResponse:
         """Give an existing worker profile a Supabase login account. Admin only.
@@ -143,7 +147,7 @@ class AuthenticationService:
         except Exception as e:
             log.error("account_link_failed", auth_user_id=str(auth_user_id), error=str(e))
             self._cleanup_auth_user(auth_user_id)
-            raise AppError(f"Failed to link account to worker: {e}") from e
+            raise AppError("Failed to link the login to the worker. Please try again.") from e
 
         log.info("account_created_for_worker", auth_user_id=str(auth_user_id), role=data.role)
         return RegisterResponse(

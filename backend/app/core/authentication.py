@@ -1,3 +1,5 @@
+import asyncio
+import time
 from typing import Any, cast
 
 import httpx
@@ -12,8 +14,11 @@ from app.schemas.models import TokenPayload, UserRole
 bearer_scheme = HTTPBearer()
 logger = get_logger(__name__)
 
-# The full JWKS document ({"keys": [...]}) cached at module level.
+# The full JWKS document ({"keys": [...]}) cached at module level, with when it was fetched.
 _jwks_cache: dict[str, Any] | None = None
+_jwks_fetched_at: float = 0.0
+# One fetch at a time: concurrent requests that all miss share the first one's result.
+_jwks_lock = asyncio.Lock()
 
 
 async def _fetch_jwks() -> dict[str, Any]:
@@ -25,7 +30,7 @@ async def _fetch_jwks() -> dict[str, Any]:
     Raises:
         httpx.HTTPStatusError: If the request to fetch JWKS fails.
     """
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=settings.jwks_fetch_timeout_seconds) as client:
         response = await client.get(f"{settings.supabase_url}/auth/v1/.well-known/jwks.json")
         response.raise_for_status()
         return cast(dict[str, Any], response.json())
@@ -38,8 +43,11 @@ async def get_jwks(force_refresh: bool = False) -> dict[str, Any]:
     key signed a token and survives Supabase publishing multiple keys.
 
     Args:
-        force_refresh: If True, re-fetch from Supabase even when a cached copy exists (used to pick up
-            rotated signing keys).
+        force_refresh: Re-fetch even when a cached copy exists, to pick up rotated signing keys.
+            Honoured at most once per `settings.jwks_refresh_cooldown_seconds`: the trigger is a
+            token naming an unknown key id, which anybody can send, so an unlimited refresh let a
+            caller make the API hit Supabase on every request. A genuinely rotated key is still
+            picked up within the cooldown.
 
     Returns:
         dict[str, Any]: The cached JWKS document (``{"keys": [...]}``).
@@ -47,10 +55,13 @@ async def get_jwks(force_refresh: bool = False) -> dict[str, Any]:
     Raises:
         httpx.HTTPStatusError: If the request to fetch JWKS fails.
     """
-    global _jwks_cache
-    if _jwks_cache is None or force_refresh:
-        _jwks_cache = await _fetch_jwks()
-    return _jwks_cache
+    global _jwks_cache, _jwks_fetched_at
+    async with _jwks_lock:
+        stale = time.monotonic() - _jwks_fetched_at >= settings.jwks_refresh_cooldown_seconds
+        if _jwks_cache is None or (force_refresh and stale):
+            _jwks_cache = await _fetch_jwks()
+            _jwks_fetched_at = time.monotonic()
+        return _jwks_cache
 
 
 def _kid_in_jwks(jwks: dict[str, Any], kid: str) -> bool:

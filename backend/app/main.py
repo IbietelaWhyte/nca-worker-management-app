@@ -104,8 +104,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Church Worker Scheduler API",
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    # The interactive docs and the schema behind them map every route for whoever asks. Useful
+    # locally; in production they only help someone probing the API.
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
     lifespan=lifespan,
 )
 
@@ -113,9 +116,11 @@ app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Auth travels in the Authorization header, never a cookie, so the browser has no
+    # credentials to send — and naming what the SPA uses beats allowing everything.
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
     expose_headers=[TOTAL_COUNT_HEADER],
 )
 

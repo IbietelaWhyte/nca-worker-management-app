@@ -8,6 +8,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = structlog.get_logger(__name__)
 
+# The API returns JSON for a browser client on another origin. Nothing here is meant to be
+# framed, sniffed into another type, or kept in a shared cache — most responses carry people's
+# phone numbers and emails.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",
+}
+
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
@@ -15,6 +25,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     - request_id (injected into structlog context for the duration of the request)
     - method, path, status code, duration
     Skips /health endpoints to avoid log noise.
+
+    Also stamps the API's security headers on every response it logs, beside X-Request-ID, so
+    there is one place that decorates outgoing responses rather than two middlewares in a row.
     """
 
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -53,4 +66,5 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         )
 
         response.headers["X-Request-ID"] = request_id
+        response.headers.update(_SECURITY_HEADERS)
         return response

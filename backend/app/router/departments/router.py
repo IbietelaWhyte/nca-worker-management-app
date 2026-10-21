@@ -3,6 +3,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
+from app.core.config import settings
 from app.core.dependencies import (
     AdminUser,
     CurrentUser,
@@ -212,7 +213,9 @@ async def import_workers(
         WorkerImportResult: Per-row outcomes and aggregate counts.
     """
     worker_service.authorize_create_assignment(current_user, department_id)
-    file_bytes = await file.read()
+    # One byte past the limit is enough to know a file is too big, without reading all of it into
+    # memory first; the service turns that byte into the "too large" message.
+    file_bytes = await file.read(settings.max_import_file_bytes + 1)
     return worker_service.import_workers(file_bytes, department_id, dry_run=dry_run, skip_duplicates=skip_duplicates)
 
 

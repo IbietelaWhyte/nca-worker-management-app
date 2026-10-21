@@ -167,7 +167,7 @@ class WorkerService:
             self.client.auth.admin.update_user_by_id(str(worker.auth_user_id), {"app_metadata": {"role": role}})
         except AuthApiError as exc:
             log.error("auth_role_sync_failed", error=str(exc))
-            raise AppError(f"Failed to sync role to auth account: {exc}") from exc
+            raise AppError("Failed to sync the role to their login. Please try again.") from exc
         log.info("auth_role_synced")
 
     def get_worker(self, worker_id: UUID) -> WorkerResponse:
@@ -389,10 +389,8 @@ class WorkerService:
                 or exceeds the configured row limit.
         """
         if len(file_bytes) > settings.max_import_file_bytes:
-            raise BadRequestError(
-                f"CSV file is too large ({len(file_bytes) // 1024} KB); "
-                f"the limit is {settings.max_import_file_bytes // 1024} KB"
-            )
+            # The router reads at most one byte past the limit, so the real size is unknown here.
+            raise BadRequestError(f"CSV file is too large; the limit is {settings.max_import_file_bytes // 1024} KB")
 
         try:
             text = file_bytes.decode("utf-8-sig")  # utf-8-sig tolerates the BOM Excel exports add
@@ -805,7 +803,7 @@ class WorkerService:
                 self.client.auth.admin.delete_user(str(worker.auth_user_id))
             except AuthApiError as exc:
                 log.error("worker_login_revocation_failed", error=str(exc))
-                raise AppError(f"Failed to revoke the worker's login: {exc}") from exc
+                raise AppError("Failed to revoke the worker's login. Please try again.") from exc
             log.info("worker_login_revoked")
 
         if not self.worker_repo.delete(worker_id):
