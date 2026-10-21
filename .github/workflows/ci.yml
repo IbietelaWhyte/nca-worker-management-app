@@ -30,7 +30,7 @@ jobs:
         working-directory: ./backend
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v4
 
       - name: Run linting
         run: cd backend && uv run ruff check . --fix
