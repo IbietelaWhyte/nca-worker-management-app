@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_role_key: str
     supabase_jwt_secret: str
+    # Verification keys (JWKS). A token naming an unknown key id triggers a re-fetch, so it is
+    # rate-limited: otherwise any request with a made-up `kid` made the API call Supabase, and a
+    # stream of them was a free way to slow every request down.
+    jwks_refresh_cooldown_seconds: int = Field(default=60, ge=0)
+    jwks_fetch_timeout_seconds: float = Field(default=5.0, gt=0)
 
     # Twilio
     twilio_account_sid: str

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '@/lib/supabaseClient'
+import { openedFromRecoveryLink, supabase } from '@/lib/supabaseClient'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -20,16 +20,22 @@ export default function ResetPasswordPage() {
     const [saving, setSaving] = useState(false)
 
     useEffect(() => {
-        // supabase-js parses the recovery token from the URL and emits PASSWORD_RECOVERY.
+        // Only a session that arrived through a reset link may set a password here without the
+        // current one. Any signed-in session used to be enough, so somebody at an unattended,
+        // signed-in browser could take the account over; changing a password while signed in is
+        // the Account page's job, which asks for the current password.
         const {
             data: { subscription },
         } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === 'PASSWORD_RECOVERY' || session) setStatus('ready')
+            if (event === 'PASSWORD_RECOVERY' || (session && openedFromRecoveryLink))
+                setStatus('ready')
         })
 
         // Cover the case where the URL was already processed before we subscribed.
         supabase.auth.getSession().then(({ data: { session } }) => {
-            setStatus(prev => (prev === 'ready' ? prev : session ? 'ready' : 'no-session'))
+            setStatus(prev =>
+                prev === 'ready' ? prev : session && openedFromRecoveryLink ? 'ready' : 'no-session'
+            )
         })
 
         return () => subscription.unsubscribe()
@@ -82,7 +88,8 @@ export default function ResetPasswordPage() {
                         <Alert variant="destructive">
                             <AlertDescription>
                                 This password reset link is invalid or has expired. Please request a
-                                new one.
+                                new one. To change your password while signed in, use your Account
+                                page.
                             </AlertDescription>
                         </Alert>
                         <Button

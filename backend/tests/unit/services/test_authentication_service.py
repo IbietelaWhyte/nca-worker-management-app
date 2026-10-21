@@ -49,9 +49,11 @@ class TestRegisterWorker:
         mock_supabase_client.auth.admin.create_user.return_value = make_auth_user(auth_user_id)
         mock_worker_repo.create.side_effect = Exception("DB error")
 
-        with pytest.raises(AppError, match="Failed to create worker record"):
+        with pytest.raises(AppError, match="Failed to create the worker record") as raised:
             service.register_worker(make_register_request())
 
+        # The database's own error text is logged, never returned to the client.
+        assert "DB error" not in raised.value.detail
         mock_supabase_client.auth.admin.delete_user.assert_called_once_with(auth_user_id)
 
     def test_continues_if_cleanup_also_fails(self, service, mock_supabase_client, mock_worker_repo):
@@ -62,8 +64,9 @@ class TestRegisterWorker:
         mock_supabase_client.auth.admin.delete_user.side_effect = Exception("Cleanup failed")
 
         # Should still raise the original error, not the cleanup error
-        with pytest.raises(AppError, match="Failed to create worker record"):
+        with pytest.raises(AppError, match="Failed to create the worker record") as raised:
             service.register_worker(make_register_request())
+        assert "Cleanup failed" not in raised.value.detail
 
     def test_email_confirm_is_true_for_admin_created_accounts(self, service, mock_supabase_client, mock_worker_repo):
         """Admin-created accounts should skip email confirmation."""
@@ -190,7 +193,8 @@ class TestCreateAccountForWorker:
         mock_supabase_client.auth.admin.create_user.return_value = make_auth_user(auth_user_id)
         mock_worker_repo.update.side_effect = Exception("DB error")
 
-        with pytest.raises(AppError, match="Failed to link account"):
+        with pytest.raises(AppError, match="Failed to link the login") as raised:
             service.create_account_for_worker(worker.id, GrantAccountRequest(password="securepass1"))
+        assert "DB error" not in raised.value.detail
 
         mock_supabase_client.auth.admin.delete_user.assert_called_once_with(auth_user_id)

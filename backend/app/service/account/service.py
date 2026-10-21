@@ -103,7 +103,11 @@ class AccountService:
             self.client.auth.admin.update_user_by_id(token.sub, {"password": new_password})
         except AuthApiError as exc:
             log.error("password_update_failed", error=str(exc))
-            raise AppError(f"Failed to update password: {exc}") from exc
+            # A password the auth policy rejects is the user's to fix, in Supabase's words;
+            # anything else is logged above and kept generic.
+            if 400 <= (exc.status or 0) < 500:
+                raise BadRequestError(exc.message) from exc
+            raise AppError("Failed to update your password. Please try again.") from exc
         log.info("password_changed")
 
     def delete_account(self, token: TokenPayload) -> None:
@@ -130,5 +134,5 @@ class AccountService:
             self.client.auth.admin.delete_user(token.sub)
         except AuthApiError as exc:
             log.error("auth_user_deletion_failed", error=str(exc))
-            raise AppError(f"Failed to delete account login: {exc}") from exc
+            raise AppError("Failed to remove your login. Please try again.") from exc
         log.info("account_deleted")
