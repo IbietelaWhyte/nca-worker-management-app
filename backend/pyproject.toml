@@ -17,7 +17,7 @@ dependencies = [
     "python-dotenv>=1.2.4",
     "structlog>=26.1.0",
     "twilio-stubs>=0.2.0",
-    "types-python-jose>=3.5.0.20250531",
+    "types-python-jose>=3.5.0.20260408",
     "email-validator>=2.3.0",
     "python-multipart>=0.0.32",
 ]
