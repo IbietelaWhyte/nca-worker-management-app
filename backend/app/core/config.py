@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Anything that is not exactly "production" is development, matching the strict equality
 # is_production uses. CI sets APP_ENV=test and so reads the development file, which is
 # harmless: real environment variables take precedence over a dotenv file, and CI passes all
-# eight required ones. A missing file is not an error either, so nothing breaks where neither
+# seven required ones. A missing file is not an error either, so nothing breaks where neither
 # exists.
 #
 # Resolved from this module's own path rather than the process CWD. `env_file=".env"` only
@@ -25,13 +25,17 @@ _ENV_FILE = _BACKEND_ROOT / f".env.{_ENV_NAME}"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+    # hide_input_in_errors: a failed validator otherwise prints the whole settings dict into the
+    # start-up crash, secret key and Twilio token included, and that lands in the host's logs.
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore", hide_input_in_errors=True)
 
-    # Supabase
+    # Supabase. The new-style API keys, not the legacy anon/service_role JWTs Supabase is
+    # retiring — _check_supabase_keys refuses those. The secret key bypasses RLS and is the
+    # backend's only database credential; the publishable key is what the SPA ships, and the
+    # backend uses it only to check a password the way the SPA would.
     supabase_url: str
-    supabase_anon_key: str
-    supabase_service_role_key: str
-    supabase_jwt_secret: str
+    supabase_publishable_key: str
+    supabase_secret_key: str
     # Verification keys (JWKS). A token naming an unknown key id triggers a re-fetch, so it is
     # rate-limited: otherwise any request with a made-up `kid` made the API call Supabase, and a
     # stream of them was a free way to slow every request down.
@@ -176,6 +180,35 @@ class Settings(BaseSettings):
                 "request_thread_pool_size must be <= db_max_connections "
                 f"(got {self.request_thread_pool_size} > {self.db_max_connections})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _check_supabase_keys(self) -> "Settings":
+        """Fail fast on a legacy API key, or on the two keys in each other's places.
+
+        Supabase accepts either generation of key, so neither mistake errors where it is made. A
+        legacy JWT keeps working until the day it is disabled in the dashboard, and then takes
+        the whole API down at once. A publishable key in the secret slot gives a client bound by
+        RLS, which this app grants almost nothing, so every query comes back empty or refused
+        far from the cause.
+
+        Raises:
+            ValueError: If either key lacks its sb_ prefix.
+        """
+        for name, value, prefix in (
+            ("SUPABASE_SECRET_KEY", self.supabase_secret_key, "sb_secret_"),
+            ("SUPABASE_PUBLISHABLE_KEY", self.supabase_publishable_key, "sb_publishable_"),
+        ):
+            if value.startswith(prefix):
+                continue
+            if value.startswith("eyJ"):
+                hint = "this is a legacy JWT key (anon or service_role)"
+            elif value.startswith(("sb_secret_", "sb_publishable_")):
+                hint = "the publishable and secret keys look swapped"
+            else:
+                hint = "this is not a Supabase API key"
+            # Never echo the value: one of these is the database's master credential.
+            raise ValueError(f"{name} must start with {prefix} — {hint}. See Supabase → Settings → API Keys.")
         return self
 
     @model_validator(mode="after")

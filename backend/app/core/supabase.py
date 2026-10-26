@@ -10,7 +10,7 @@ _client: Client | None = None
 def get_supabase() -> Client:
     """
     FastAPI dependency that returns a singleton Supabase client.
-    Uses the service role key for full DB access from the backend.
+    Uses the secret key, which bypasses RLS: authorization is the app's job (see CLAUDE.md).
     Inject via: client: Client = Depends(get_supabase)
 
     The connection budget is sized in tandem with the request thread pool (see
@@ -37,7 +37,7 @@ def get_supabase() -> Client:
 
         _client = create_client(
             settings.supabase_url,
-            settings.supabase_service_role_key,
+            settings.supabase_secret_key,
             options=SyncClientOptions(
                 httpx_client=httpx_client,
             ),

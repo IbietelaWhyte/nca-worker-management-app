@@ -69,8 +69,8 @@ class AccountService:
     def change_password(self, token: TokenPayload, current_password: str, new_password: str) -> None:
         """Change the authenticated user's password after verifying the current one.
 
-        The current password is verified by attempting a sign-in with a short-lived anon-key
-        client (the service-role client is for admin operations, not credential checks). On
+        The current password is verified by attempting a sign-in with a short-lived client on the
+        publishable key (the secret-key client is for admin operations, not credential checks). On
         success the password is updated via the Supabase admin API.
 
         Args:
@@ -86,8 +86,8 @@ class AccountService:
             raise BadRequestError("Email not found in authentication token")
         log = self.logger.bind(method="change_password", email=mask_email(token.email))
 
-        # Verify the current password without mutating the live (service-role) client's session.
-        verifier = create_client(settings.supabase_url, settings.supabase_anon_key)
+        # Verify the current password without mutating the live (secret-key) client's session.
+        verifier = create_client(settings.supabase_url, settings.supabase_publishable_key)
         try:
             verifier.auth.sign_in_with_password({"email": token.email, "password": current_password})
         except AuthApiError as exc:

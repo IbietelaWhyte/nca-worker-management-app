@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// The publishable key (sb_publishable_...), which maps to the anon role: RLS is what limits it.
+const supabasePublishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
 // Whether this page load came from a password-reset email. Read before createClient, which
 // strips the token fragment (#access_token=...&type=recovery) once it has processed it — after
@@ -10,4 +11,4 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 export const openedFromRecoveryLink =
     new URLSearchParams(window.location.hash.slice(1)).get('type') === 'recovery'
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(supabaseUrl, supabasePublishableKey)

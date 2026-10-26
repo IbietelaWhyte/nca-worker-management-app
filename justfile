@@ -89,3 +89,7 @@ install-frontend:
 # Build frontend
 build-frontend:
     cd frontend && npm run build
+
+# Run frontend
+run-frontend:
+    cd frontend && npx vite --mode production
