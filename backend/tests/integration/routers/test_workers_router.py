@@ -9,6 +9,13 @@ from app.schemas.models import UserRole, WorkerStatus
 from tests.integration.routers.conftest import make_client
 from tests.unit.services.conftest import make_worker
 
+_NEW_WORKER = {
+    "first_name": "John",
+    "last_name": "Doe",
+    "email": "john.doe@example.com",
+    "phone": "+14165550101",
+}
+
 
 class TestListWorkers:
     def test_returns_200_with_workers(self, mock_worker_service):
@@ -135,6 +142,35 @@ class TestCreateWorker:
             },
         )
         assert response.status_code == 409
+
+    def test_hod_creates_into_a_managed_department(self, mock_worker_service, mock_department_service):
+        worker = make_worker()
+        dept_id = uuid4()
+        mock_worker_service.create_worker.return_value = worker
+        client = make_client(
+            role=UserRole.HOD, worker_service=mock_worker_service, department_service=mock_department_service
+        )
+
+        response = client.post(f"/api/v1/workers?department_id={dept_id}", json=_NEW_WORKER)
+        assert response.status_code == 201
+        mock_worker_service.authorize_create_assignment.assert_called_once()
+        mock_department_service.assign_worker.assert_called_once_with(dept_id, worker.id)
+
+    def test_hod_without_a_department_is_refused_before_creating(self, mock_worker_service):
+        # The worker would land outside every department the head can see, reachable only by an admin.
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        response = client.post("/api/v1/workers", json=_NEW_WORKER)
+        assert response.status_code == 400
+        mock_worker_service.create_worker.assert_not_called()
+
+    def test_hod_outside_the_department_is_refused_before_creating(self, mock_worker_service):
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("nope")
+        client = make_client(role=UserRole.HOD, worker_service=mock_worker_service)
+
+        response = client.post(f"/api/v1/workers?department_id={uuid4()}", json=_NEW_WORKER)
+        assert response.status_code == 403
+        mock_worker_service.create_worker.assert_not_called()
 
     def test_returns_403_for_non_admin(self, mock_worker_service):
         client = make_client(role=UserRole.WORKER, worker_service=mock_worker_service)

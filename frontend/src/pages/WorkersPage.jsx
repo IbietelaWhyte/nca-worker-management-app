@@ -324,11 +324,11 @@ export default function WorkersPage() {
         setEditingWorker(null)
     }
 
-    const handleSubmit = async formData => {
+    const handleSubmit = async (formData, departmentId) => {
         if (editingWorker) {
             await editWorker(editingWorker.id, formData)
         } else {
-            await addWorker(formData)
+            await addWorker(formData, departmentId)
         }
         handleClose()
         // The list is one filtered, sorted page, so a patched-in row may not belong on it.
@@ -581,6 +581,8 @@ export default function WorkersPage() {
                     </DialogHeader>
                     <WorkerForm
                         initial={editingWorker ?? undefined}
+                        departments={editingWorker ? undefined : departments}
+                        requireDepartment={!isAdmin}
                         onSubmit={handleSubmit}
                         onCancel={handleClose}
                     />

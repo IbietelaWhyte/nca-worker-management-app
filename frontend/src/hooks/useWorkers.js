@@ -43,8 +43,8 @@ export function useWorkers(params) {
         fetchWorkers()
     }, [fetchWorkers])
 
-    const addWorker = async data => {
-        const response = await createWorker(data)
+    const addWorker = async (data, departmentId) => {
+        const response = await createWorker(data, departmentId)
         setWorkers(prev => [...prev, response.data])
         return response.data
     }

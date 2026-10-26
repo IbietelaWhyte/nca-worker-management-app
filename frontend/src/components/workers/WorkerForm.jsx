@@ -3,6 +3,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 
 const emptyForm = {
     first_name: '',
@@ -11,8 +18,26 @@ const emptyForm = {
     phone: '',
 }
 
-export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) {
+// Radix Select cannot hold an empty value, so "no department" needs a sentinel of its own.
+const NO_DEPARTMENT = 'none'
+
+/**
+ * Pass `departments` only when creating: the new worker is placed in the chosen one. A head of
+ * department must choose (`requireDepartment`), because a worker in none of their departments is
+ * invisible to them; an admin may leave it empty.
+ */
+export default function WorkerForm({
+    initial = emptyForm,
+    departments,
+    requireDepartment = false,
+    onSubmit,
+    onCancel,
+}) {
     const [form, setForm] = useState(initial)
+    // A head with one department has nothing to choose.
+    const [departmentId, setDepartmentId] = useState(
+        requireDepartment && departments?.length === 1 ? departments[0].id : ''
+    )
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
 
@@ -24,17 +49,24 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
     const handleSubmit = async e => {
         e?.preventDefault()
         setError(null)
+        if (departments && requireDepartment && !departmentId) {
+            setError('Choose the department to add this worker to')
+            return
+        }
         setLoading(true)
         try {
             // Only submit editable profile fields. Sending the full worker object
             // (e.g. roles: []) would 422 against WorkerUpdate and clobber roles,
             // which are managed separately by RoleEditor.
-            await onSubmit({
-                first_name: form.first_name,
-                last_name: form.last_name,
-                email: form.email,
-                phone: form.phone,
-            })
+            await onSubmit(
+                {
+                    first_name: form.first_name,
+                    last_name: form.last_name,
+                    email: form.email,
+                    phone: form.phone,
+                },
+                departmentId || undefined
+            )
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Something went wrong')
         } finally {
@@ -96,6 +128,30 @@ export default function WorkerForm({ initial = emptyForm, onSubmit, onCancel }) 
                     placeholder="+1 (555) 000-0000"
                 />
             </div>
+
+            {departments && (
+                <div className="space-y-2">
+                    <Label htmlFor="department">Department</Label>
+                    <Select
+                        value={departmentId || (requireDepartment ? '' : NO_DEPARTMENT)}
+                        onValueChange={v => setDepartmentId(v === NO_DEPARTMENT ? '' : v)}
+                    >
+                        <SelectTrigger id="department" className="w-full">
+                            <SelectValue placeholder="Choose a department" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {!requireDepartment && (
+                                <SelectItem value={NO_DEPARTMENT}>No department</SelectItem>
+                            )}
+                            {departments.map(d => (
+                                <SelectItem key={d.id} value={d.id}>
+                                    {d.name}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
                 <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
