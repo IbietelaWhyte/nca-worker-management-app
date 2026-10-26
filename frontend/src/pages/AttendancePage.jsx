@@ -16,19 +16,13 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { absenceRate, isRepeatAbsentee, toAbsenceCsv, workerName } from '@/lib/attendance'
-import { downloadCsv, toCsv } from '@/lib/csv'
+import { downloadCsv, slug, toCsv } from '@/lib/csv'
 
 const RANGES = [
     { key: 'month', label: 'This month' },
     { key: 'quarter', label: 'Last 3 months' },
     { key: 'half', label: 'Last 6 months' },
 ]
-
-const slug = text =>
-    text
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
 
 const percent = row => `${Math.round(absenceRate(row) * 100)}%`
 

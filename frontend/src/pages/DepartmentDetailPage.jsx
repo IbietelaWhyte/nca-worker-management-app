@@ -55,8 +55,12 @@ import {
     ChevronDown,
     Upload,
     CalendarClock,
+    Download,
 } from 'lucide-react'
 import { formatSlotRange } from '@/lib/staffing'
+import { downloadCsv, slug, toCsv } from '@/lib/csv'
+import { toMemberCsv } from '@/lib/workerExport'
+import { format } from 'date-fns'
 
 // Radix Select disallows an empty-string value, so use a sentinel for "no role".
 const NO_ROLE = '__none__'
@@ -127,6 +131,14 @@ export default function DepartmentDetailPage() {
     const availableWorkers = workers.filter(w => !memberIds.has(w.id) && w.is_active)
 
     // Member handlers
+    const handleExportMembers = () => {
+        const { headers, rows } = toMemberCsv(department, department.workers)
+        downloadCsv(
+            `${slug(department.name)}-members-${format(new Date(), 'yyyy-MM-dd')}.csv`,
+            toCsv(headers, rows)
+        )
+    }
+
     const handleAddMember = async workerId => {
         setMemberActionLoading(workerId)
         try {
@@ -411,6 +423,15 @@ export default function DepartmentDetailPage() {
                                 {department.workers?.length ?? 0} workers in this department
                             </p>
                             <div className="flex flex-wrap items-center gap-2">
+                                {canManage && department.workers?.length > 0 && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleExportMembers}
+                                    >
+                                        <Download size={16} className="mr-2" /> Export CSV
+                                    </Button>
+                                )}
                                 {canManage && (
                                     <Button
                                         variant="outline"

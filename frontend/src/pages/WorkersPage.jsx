@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { format } from 'date-fns'
 import { useWorkers } from '@/hooks/useWorkers'
 import { useDepartments } from '@/hooks/useDepartments'
 import { useListParams } from '@/hooks/useListParams'
@@ -10,6 +11,9 @@ import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
 import DeleteWorkerDialog from '@/components/workers/DeleteWorkerDialog'
 import WorkerLeaveDialog from '@/components/workers/WorkerLeaveDialog'
 import { getCurrentLeave } from '@/api/leave'
+import { getWorkers } from '@/api/workers'
+import { downloadCsv, slug, toCsv } from '@/lib/csv'
+import { toWorkerCsv } from '@/lib/workerExport'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -42,6 +46,7 @@ import {
     Trash2,
     MoreVertical,
     CalendarOff,
+    Download,
     Search,
     X,
 } from 'lucide-react'
@@ -64,6 +69,8 @@ const roleVariant = role =>
 const roleLabel = role => ROLE_LABELS[role] ?? role.charAt(0).toUpperCase() + role.slice(1)
 
 const PAGE_SIZE = 25
+// The most GET /workers returns in one request (its `limit` is capped at 500).
+const EXPORT_PAGE_SIZE = 500
 // Radix Select cannot hold an empty value, so "no filter" needs a sentinel of its own.
 const ALL = 'all'
 const ROLE_OPTIONS = ['admin', 'hod', 'assistant_hod', 'worker']
@@ -215,6 +222,12 @@ export default function WorkersPage() {
     const { isAdmin, isDepartmentHead, role } = useAuth()
     const list = useListParams(['department', 'role', 'status'])
     const { department, role: roleFilter, status } = list.filters
+    const filterParams = {
+        search: list.q || undefined,
+        department_id: department || undefined,
+        role: roleFilter || undefined,
+        status: status || undefined,
+    }
     const {
         workers,
         total,
@@ -226,10 +239,7 @@ export default function WorkersPage() {
         destroyWorker,
         refetch,
     } = useWorkers({
-        search: list.q || undefined,
-        department_id: department || undefined,
-        role: roleFilter || undefined,
-        status: status || undefined,
+        ...filterParams,
         limit: PAGE_SIZE,
         offset: (list.page - 1) * PAGE_SIZE,
     })
@@ -314,6 +324,36 @@ export default function WorkersPage() {
         setAccountWorker(null)
     }
 
+    const [exporting, setExporting] = useState(false)
+
+    // Everyone matching the search and filters, not just the page on screen — what is on screen
+    // is the preview. Fetched in the API's largest pages rather than with a new endpoint.
+    const handleExport = async () => {
+        setExporting(true)
+        try {
+            const all = []
+            for (;;) {
+                const response = await getWorkers({
+                    ...filterParams,
+                    limit: EXPORT_PAGE_SIZE,
+                    offset: all.length,
+                })
+                all.push(...response.data)
+                if (response.data.length < EXPORT_PAGE_SIZE) break
+            }
+            const { headers, rows } = toWorkerCsv(all, leaveByWorker)
+            const scope = departments.find(d => d.id === department)?.name
+            downloadCsv(
+                `${scope ? `${slug(scope)}-` : ''}workers-${format(new Date(), 'yyyy-MM-dd')}.csv`,
+                toCsv(headers, rows)
+            )
+        } catch {
+            alert('Could not export the worker list. Please try again.')
+        } finally {
+            setExporting(false)
+        }
+    }
+
     const handleOpenCreate = () => {
         setEditingWorker(null)
         setDialogOpen(true)
@@ -371,6 +411,10 @@ export default function WorkersPage() {
                     </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleExport} variant="outline" disabled={exporting || !total}>
+                        <Download size={16} className="mr-2" />
+                        {exporting ? 'Exporting…' : 'Export CSV'}
+                    </Button>
                     {isAdmin && (
                         <Button onClick={handleRegisterNewUser} variant="default">
                             <UserPlus size={16} className="mr-2" />

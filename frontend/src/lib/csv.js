@@ -24,6 +24,13 @@ const cell = value => {
     return NEEDS_QUOTES.test(text) ? `"${text.replace(/"/g, '""')}"` : text
 }
 
+/** A name as a filename fragment: "Children's Church" -> "children-s-church". */
+export const slug = text =>
+    text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+
 /** Rows as a CSV string. CRLF because that is what every spreadsheet writes. */
 export const toCsv = (headers, rows) =>
     [headers, ...rows].map(row => row.map(cell).join(',')).join('\r\n')
