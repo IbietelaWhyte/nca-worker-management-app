@@ -1,7 +1,7 @@
 # Running the app locally
 
 A fresh clone needs no credentials of its own. Local configuration is committed, because the
-local Supabase keys are the published demo ones — identical on every machine and worthless
+local Supabase keys are the CLI's fixed local ones — identical on every machine and worthless
 off it.
 
 ```sh
@@ -79,7 +79,7 @@ Three other things that will each cost an hour:
 
 ```sh
 curl -X POST "http://127.0.0.1:54321/auth/v1/token?grant_type=password" \
-  -H "apikey: $(grep '^SUPABASE_ANON_KEY=' backend/.env.development | cut -d= -f2-)" \
+  -H "apikey: $(grep '^SUPABASE_PUBLISHABLE_KEY=' backend/.env.development | cut -d= -f2-)" \
   -H "Content-Type: application/json" \
   -d '{"email": "test_user@test.com", "password": "TestUserPassword123!"}'
 ```

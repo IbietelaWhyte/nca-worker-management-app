@@ -46,9 +46,9 @@ jobs:
         env:
           # Mock environment variables for tests
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'test-anon-key' }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'test-service-role-key' }}
-          SUPABASE_JWT_SECRET: ${{ secrets.SUPABASE_JWT_SECRET || 'test-jwt-secret' }}
+          # Settings refuses a key without its sb_ prefix, so the fallbacks carry one.
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_test' }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY || 'sb_secret_test' }}
           TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID || 'test-account-sid' }}
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN || 'test-auth-token' }}
           TWILIO_FROM_NUMBER: ${{ secrets.TWILIO_FROM_NUMBER || '+1234567890' }}
