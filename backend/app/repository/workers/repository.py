@@ -10,6 +10,7 @@ from app.core.phone import try_normalize_phone
 from app.core.redaction import mask_email, mask_phone
 from app.repository.filters import quote_postgrest_value
 from app.repository.repository import BaseRepository
+from app.repository.worker_leave import queries as leave_q
 from app.repository.workers import queries as q
 from app.schemas.models import UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerContactMatch, WorkerResponse
@@ -335,7 +336,9 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
             request = request.eq(q.FILTER_APP_ROLE, role.value)
         if status == WorkerStatus.ON_LEAVE:
             on = (today or date.today()).isoformat()
-            request = request.lte(q.FILTER_LEAVE_START, on).gte(q.FILTER_LEAVE_END, on)
+            request = request.lte(q.FILTER_LEAVE_START, on).or_(
+                leave_q.ends_on_or_after(on, column=leave_q.Columns.END_DATE), reference_table=leave_q.TABLE
+            )
         elif status is not None:
             request = request.eq(q.Columns.IS_ACTIVE, status == WorkerStatus.ACTIVE)
         for term in (query or "").split()[: q.MAX_SEARCH_TERMS]:

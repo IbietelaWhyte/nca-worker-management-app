@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.exceptions import ConflictError, NotFoundError
-from app.schemas.worker_leave.models import WorkerLeaveCreate, WorkerLeaveResponse
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
+from app.schemas.worker_leave.models import WorkerLeaveCreate, WorkerLeaveEnd, WorkerLeaveResponse
 from app.service.worker_leave.service import WorkerLeaveService
 from tests.unit.services.conftest import make_assignment, make_schedule, make_worker
 
@@ -78,6 +78,21 @@ class TestCreateLeave:
             )
         mock_leave_repo.create.assert_not_called()
 
+    def test_leave_with_no_end_date_is_stored_open_ended(self, service, mock_leave_repo):
+        mock_leave_repo.create.return_value = make_leave(end_date=None)
+        mock_leave_repo.get_overlapping.return_value = []
+
+        service.create_leave(uuid4(), WorkerLeaveCreate(start_date=TODAY), created_by=None)
+        assert mock_leave_repo.create.call_args.args[0]["end_date"] is None
+        assert mock_leave_repo.get_overlapping.call_args.args[2] is None
+
+    def test_overlapping_open_ended_leave_is_named_as_such(self, service, mock_leave_repo):
+        mock_leave_repo.get_overlapping.return_value = [make_leave(start_date=date(2026, 10, 1), end_date=None)]
+
+        with pytest.raises(ConflictError, match="from 01 Oct 2026 with no end date"):
+            service.create_leave(uuid4(), WorkerLeaveCreate(start_date=date(2026, 11, 1)), created_by=None)
+        mock_leave_repo.create.assert_not_called()
+
     def test_raises_when_the_worker_does_not_exist(self, service, mock_worker_repo, mock_leave_repo):
         mock_worker_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
@@ -114,6 +129,13 @@ class TestClashes:
         service.get_clashes(uuid4(), start, start + timedelta(days=5))
         assert mock_schedule_repo.get_upcoming_assignments_for_worker.call_args.args[1] == start
 
+    def test_open_ended_leave_clashes_with_every_duty_from_its_start(self, service, mock_schedule_repo):
+        far_off = make_schedule(scheduled_date=TODAY + timedelta(days=200))
+        mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [make_assignment(schedules=far_off)]
+
+        report = service.get_clashes(uuid4(), TODAY, None)
+        assert [c.scheduled_date for c in report.clashes] == [far_off.scheduled_date]
+
     def test_an_assignment_with_no_schedule_is_skipped(self, service, mock_schedule_repo):
         mock_schedule_repo.get_upcoming_assignments_for_worker.return_value = [make_assignment(schedules=None)]
         assert service.get_clashes(uuid4(), TODAY, TODAY + timedelta(days=7)).clashes == []
@@ -144,3 +166,42 @@ class TestLeaveCoverage:
         # "Away 10-20 Oct" is how a person says it, so the 20th has to count.
         leave = make_leave(start_date=date(2026, 10, 10), end_date=date(2026, 10, 20))
         assert leave.covers(day) is covered
+
+    def test_open_ended_leave_covers_every_date_from_its_start(self):
+        leave = make_leave(start_date=date(2026, 10, 10), end_date=None)
+        assert leave.covers(date(2026, 10, 9)) is False
+        assert leave.covers(date(2026, 10, 10)) is True
+        assert leave.covers(date(2030, 1, 1)) is True
+
+
+class TestEndLeave:
+    def test_records_the_last_day(self, service, mock_leave_repo):
+        leave = make_leave(start_date=date(2026, 10, 1), end_date=None)
+        mock_leave_repo.get_by_id.return_value = leave
+        mock_leave_repo.get_overlapping.return_value = [leave]  # itself, which does not count
+        mock_leave_repo.update.return_value = make_leave(id=leave.id, end_date=date(2026, 11, 15))
+
+        service.end_leave(leave.id, WorkerLeaveEnd(end_date=date(2026, 11, 15)))
+        mock_leave_repo.update.assert_called_once_with(leave.id, {"end_date": "2026-11-15"})
+
+    def test_a_last_day_before_the_first_is_refused(self, service, mock_leave_repo):
+        mock_leave_repo.get_by_id.return_value = make_leave(start_date=date(2026, 10, 10), end_date=None)
+
+        with pytest.raises(BadRequestError, match="10 Oct 2026"):
+            service.end_leave(uuid4(), WorkerLeaveEnd(end_date=date(2026, 10, 9)))
+        mock_leave_repo.update.assert_not_called()
+
+    def test_extending_into_another_leave_is_refused(self, service, mock_leave_repo):
+        leave = make_leave(start_date=date(2026, 10, 1), end_date=date(2026, 10, 10))
+        later = make_leave(worker_id=leave.worker_id, start_date=date(2026, 10, 20), end_date=date(2026, 10, 25))
+        mock_leave_repo.get_by_id.return_value = leave
+        mock_leave_repo.get_overlapping.return_value = [leave, later]
+
+        with pytest.raises(ConflictError, match="20 Oct 2026"):
+            service.end_leave(leave.id, WorkerLeaveEnd(end_date=date(2026, 10, 22)))
+        mock_leave_repo.update.assert_not_called()
+
+    def test_raises_when_the_leave_does_not_exist(self, service, mock_leave_repo):
+        mock_leave_repo.get_by_id.return_value = None
+        with pytest.raises(NotFoundError):
+            service.end_leave(uuid4(), WorkerLeaveEnd(end_date=TODAY))

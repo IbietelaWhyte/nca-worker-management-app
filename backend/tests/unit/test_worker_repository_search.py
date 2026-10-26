@@ -86,7 +86,9 @@ class TestWorkerRepositorySearch:
 
         assert builder.select.call_args.args == ("*, worker_leave!worker_id!inner(start_date,end_date)",)
         builder.lte.assert_called_once_with("worker_leave.start_date", "2026-10-14")
-        builder.gte.assert_called_once_with("worker_leave.end_date", "2026-10-14")
+        # Open-ended leave has a NULL end_date, and those are the people most certainly away.
+        builder.or_.assert_called_once_with("end_date.gte.2026-10-14,end_date.is.null", reference_table="worker_leave")
+        builder.gte.assert_not_called()
 
     def test_active_and_inactive_filter_on_is_active(self):
         repo, builder = _make_repo_with_mock_client()

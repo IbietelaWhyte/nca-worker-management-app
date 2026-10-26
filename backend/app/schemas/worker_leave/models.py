@@ -8,7 +8,9 @@ class WorkerLeave(BaseModel):
     id: UUID
     worker_id: UUID
     start_date: date
-    end_date: date
+    # None means no end date yet ("until further notice"): the leave covers every date from
+    # start_date on until a head records the last day away.
+    end_date: date | None = None
     reason: str | None = None
     # ON DELETE SET NULL on the FK, so a leave outlives the head who set it. Typed optional for
     # that reason, not as a convenience — a non-optional field here raises ValidationError deep
@@ -28,20 +30,22 @@ class WorkerLeave(BaseModel):
             day: The date to test.
 
         Returns:
-            bool: True if the date falls inside the leave, both ends inclusive.
+            bool: True if the date falls inside the leave, both ends inclusive. A leave with no
+                end date covers every date from its start on.
         """
-        return self.start_date <= day <= self.end_date
+        return self.start_date <= day and (self.end_date is None or day <= self.end_date)
 
 
 class WorkerLeaveCreate(BaseModel):
     """A stretch of time a worker is away.
 
     Both ends are inclusive, because that is how the person setting it reads the dates: "away
-    10-20 Oct" means the 20th is still a day off.
+    10-20 Oct" means the 20th is still a day off. Leave `end_date` out for an absence with no
+    known end; the head records the last day later with `WorkerLeaveEnd`.
     """
 
     start_date: date
-    end_date: date
+    end_date: date | None = None
     reason: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
@@ -54,9 +58,19 @@ class WorkerLeaveCreate(BaseModel):
         Raises:
             ValueError: If end_date precedes start_date.
         """
-        if self.end_date < self.start_date:
+        if self.end_date is not None and self.end_date < self.start_date:
             raise ValueError("The end date cannot be before the start date")
         return self
+
+
+class WorkerLeaveEnd(BaseModel):
+    """The last day away, recorded once somebody on leave is back (or has a return date).
+
+    Only the end can be changed: the start and the note are history, and a different stretch is
+    a new leave. The service checks it against the leave's own start date.
+    """
+
+    end_date: date
 
 
 class WorkerLeaveResponse(WorkerLeave):
@@ -85,4 +99,4 @@ class CurrentLeave(BaseModel):
 
     worker_id: UUID
     start_date: date
-    end_date: date
+    end_date: date | None = None

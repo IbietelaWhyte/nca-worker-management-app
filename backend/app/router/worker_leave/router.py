@@ -13,6 +13,7 @@ from app.schemas.worker_leave.models import (
     CurrentLeave,
     LeaveClashReport,
     WorkerLeaveCreate,
+    WorkerLeaveEnd,
     WorkerLeaveResponse,
 )
 from app.service.worker_leave.service import WorkerLeaveService
@@ -51,7 +52,7 @@ def get_worker_leave(
 def get_leave_clashes(
     worker_id: UUID,
     start_date: date,
-    end_date: date,
+    end_date: date | None = None,
     token: TokenPayload = HODUser,
     service: WorkerLeaveService = Depends(get_worker_leave_service),
     worker_service: WorkerService = Depends(get_worker_service),
@@ -59,7 +60,8 @@ def get_leave_clashes(
     """Duties already on the rota inside a proposed leave period.
 
     Read-only and advisory: the dialog calls it before confirming so the head sees what they
-    will need to reassign. Setting leave never edits the rota.
+    will need to reassign. Setting leave never edits the rota. With no `end_date` the leave is
+    open-ended, so every duty from `start_date` on is reported.
     """
     worker_service.authorize_manage_worker(token, worker_id)
     return service.get_clashes(worker_id, start_date, end_date)
@@ -78,6 +80,19 @@ def create_worker_leave(
     # all, so resolving one is skipped for them rather than allowed to fail.
     actor = None if token.role == UserRole.ADMIN else worker_service.get_worker_for_token(token)
     return service.create_leave(worker_id, data, actor.id if actor else None)
+
+
+@router.patch("/{leave_id}", response_model=WorkerLeaveResponse)
+def end_worker_leave(
+    leave_id: UUID,
+    data: WorkerLeaveEnd,
+    token: TokenPayload = HODUser,
+    service: WorkerLeaveService = Depends(get_worker_leave_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> WorkerLeaveResponse:
+    """Record the last day of a leave, usually one set with no end date."""
+    worker_service.authorize_manage_worker(token, service.get_owner_id(leave_id))
+    return service.end_leave(leave_id, data)
 
 
 @router.delete("/{leave_id}", status_code=status.HTTP_204_NO_CONTENT)

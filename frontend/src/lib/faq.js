@@ -121,8 +121,8 @@ export const FAQ_SECTIONS = [
                 answer: 'On purpose. When you add or swap somebody onto a date they marked off, are on leave for, or are already serving elsewhere on, you get a note saying so and the change still goes through — you have usually already spoken to them, and the app is in no position to overrule that. The same goes for taking somebody off and leaving the rota short: you are told, not blocked.',
             },
             {
-                question: 'Somebody is away for a few weeks. What do I do?',
-                answer: 'Open Workers, find them and choose Leave, then set the first and last day they are away. While away they are not put on any rota and are not texted for availability, and they keep their departments and roles so nothing needs re-adding when they return. If they are already booked for dates inside that period you will see those listed before you confirm — those stay on the rota, so reassign them yourself. Use this rather than deactivating, which removes them from their departments altogether.',
+                question: 'Somebody is away for a while. What do I do?',
+                answer: 'Open Workers, find them and choose Leave, then set the first and last day they are away. If you do not know when they will be back, tick No end date yet, and set their last day from the same place once you do. While away they are not put on any rota and are not texted for availability, and they keep their departments and roles so nothing needs re-adding when they return. If they are already booked for dates inside that period you will see those listed before you confirm — those stay on the rota, and they will still get the reminder for them, so reassign them yourself. Use this rather than deactivating, which removes them from their departments altogether.',
             },
             {
                 question: 'How do I collect availability from my team?',
