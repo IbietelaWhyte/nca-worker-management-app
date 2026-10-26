@@ -16,7 +16,6 @@ EMBED_LEAVE = "worker_leave!worker_id!inner(start_date,end_date)"
 FILTER_DEPARTMENT_ID = "worker_departments.department_id"
 FILTER_APP_ROLE = "worker_app_roles.role"
 FILTER_LEAVE_START = "worker_leave.start_date"
-FILTER_LEAVE_END = "worker_leave.end_date"
 # A search query is split into at most this many words, each of which must match somewhere.
 MAX_SEARCH_TERMS = 3
 

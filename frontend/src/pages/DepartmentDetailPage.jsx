@@ -17,6 +17,7 @@ import {
 } from '@/api/subteams'
 import { assignWorkerRole, unassignWorkerRole } from '@/api/roles'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -56,6 +57,7 @@ import {
     Upload,
     CalendarClock,
     Download,
+    Search,
 } from 'lucide-react'
 import { formatSlotRange } from '@/lib/staffing'
 import { downloadCsv, slug, toCsv } from '@/lib/csv'
@@ -125,6 +127,26 @@ export default function DepartmentDetailPage() {
 
     const canManage = isAdmin || isDepartmentHead
     const showMonthlyLeads = canManage && Boolean(department?.monthly_lead_title)
+
+    // Every word must match one of the fields, so "john usher" finds John on the ushers. Client-side
+    // because the department already arrives with every member; a team is tens of people, not
+    // thousands.
+    const [memberSearch, setMemberSearch] = useState('')
+    const searchWords = memberSearch.toLowerCase().split(/\s+/).filter(Boolean)
+    const visibleMembers = (department?.workers ?? []).filter(worker => {
+        const haystack = [
+            worker.first_name,
+            worker.last_name,
+            worker.email,
+            worker.phone,
+            worker.department_role?.name,
+            worker.subteam?.name,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+        return searchWords.every(word => haystack.includes(word))
+    })
 
     // Workers not already in this department
     const memberIds = new Set(department?.workers?.map(w => w.id) ?? [])
@@ -420,7 +442,9 @@ export default function DepartmentDetailPage() {
                     <div className="space-y-4">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <p className="text-sm text-muted-foreground">
-                                {department.workers?.length ?? 0} workers in this department
+                                {searchWords.length > 0
+                                    ? `${visibleMembers.length} of ${department.workers.length} workers match`
+                                    : `${department.workers?.length ?? 0} workers in this department`}
                             </p>
                             <div className="flex flex-wrap items-center gap-2">
                                 {canManage && department.workers?.length > 0 && (
@@ -431,6 +455,21 @@ export default function DepartmentDetailPage() {
                                     >
                                         <Download size={16} className="mr-2" /> Export CSV
                                     </Button>
+                                )}
+                                {department.workers?.length > 0 && (
+                                    <div className="relative w-full sm:w-64">
+                                        <Search
+                                            size={16}
+                                            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                                        />
+                                        <Input
+                                            value={memberSearch}
+                                            onChange={e => setMemberSearch(e.target.value)}
+                                            placeholder="Search name, phone, role…"
+                                            aria-label="Search members"
+                                            className="h-11 pl-9 sm:h-9"
+                                        />
+                                    </div>
                                 )}
                                 {canManage && (
                                     <Button
@@ -460,6 +499,20 @@ export default function DepartmentDetailPage() {
                                     Add first member
                                 </Button>
                             </div>
+                        ) : visibleMembers.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center h-32 border rounded-lg">
+                                <p className="text-muted-foreground text-sm">
+                                    No members match “{memberSearch.trim()}”
+                                </p>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="mt-3"
+                                    onClick={() => setMemberSearch('')}
+                                >
+                                    Clear search
+                                </Button>
+                            </div>
                         ) : (
                             <div className="hidden border rounded-lg overflow-hidden md:block">
                                 <Table>
@@ -472,7 +525,7 @@ export default function DepartmentDetailPage() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {department.workers.map(worker => {
+                                        {visibleMembers.map(worker => {
                                             const isHod = worker.id === department.hod_id
                                             return (
                                                 <TableRow key={worker.id}>
@@ -606,9 +659,9 @@ export default function DepartmentDetailPage() {
 
                         {/* Below md the members table becomes a card list. Looking someone up and
                             tapping their email or phone is the realistic phone task here. */}
-                        {department.workers && department.workers.length > 0 && (
+                        {visibleMembers.length > 0 && (
                             <ul className="space-y-2 md:hidden">
-                                {department.workers.map(worker => {
+                                {visibleMembers.map(worker => {
                                     const isHod = worker.id === department.hod_id
                                     return (
                                         <li key={worker.id} className="rounded-lg border p-4">

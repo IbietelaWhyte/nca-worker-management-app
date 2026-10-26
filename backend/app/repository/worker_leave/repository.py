@@ -15,8 +15,9 @@ class WorkerLeaveRepository(BaseRepository[WorkerLeaveResponse]):
     """Stretches of time a worker is away.
 
     Every query here is an overlap test rather than an equality test, which in PostgREST terms
-    is `start_date <= range_end AND end_date >= range_start` — two half-open comparisons, not a
-    range type. Both ends of a leave are inclusive.
+    is `start_date <= range_end AND (end_date >= range_start OR end_date IS NULL)` — two
+    half-open comparisons, not a range type. Both ends of a leave are inclusive, and a NULL
+    end_date is a leave with no end yet (`q.ends_on_or_after`).
     """
 
     def __init__(self, client: Client) -> None:
@@ -52,25 +53,27 @@ class WorkerLeaveRepository(BaseRepository[WorkerLeaveResponse]):
         log.debug("fetched_leave_by_worker", count=len(leave))
         return leave
 
-    def get_overlapping(self, worker_id: UUID, start_date: date, end_date: date) -> list[WorkerLeaveResponse]:
+    def get_overlapping(self, worker_id: UUID, start_date: date, end_date: date | None) -> list[WorkerLeaveResponse]:
         """Fetch one worker's leave that overlaps a proposed range.
 
         Args:
             worker_id: The worker being checked.
             start_date: First day of the proposed range, inclusive.
-            end_date: Last day of the proposed range, inclusive.
+            end_date: Last day of the proposed range, inclusive; None for no end date, which
+                overlaps everything that has not ended before `start_date`.
 
         Returns:
             list[WorkerLeaveResponse]: Any leave that would overlap.
         """
-        response = (
+        request = (
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
             .eq(q.Columns.WORKER_ID, str(worker_id))
-            .lte(q.Columns.START_DATE, end_date.isoformat())
-            .gte(q.Columns.END_DATE, start_date.isoformat())
-            .execute()
+            .or_(q.ends_on_or_after(start_date.isoformat()))
         )
+        if end_date is not None:
+            request = request.lte(q.Columns.START_DATE, end_date.isoformat())
+        response = request.execute()
         return self._to_model_list(response.data or [])
 
     def get_for_workers(self, worker_ids: list[UUID], start_date: date, end_date: date) -> list[WorkerLeaveResponse]:
@@ -95,7 +98,7 @@ class WorkerLeaveRepository(BaseRepository[WorkerLeaveResponse]):
             .select(q.SELECT_ALL)
             .in_(q.Columns.WORKER_ID, [str(wid) for wid in worker_ids])
             .lte(q.Columns.START_DATE, end_date.isoformat())
-            .gte(q.Columns.END_DATE, start_date.isoformat())
+            .or_(q.ends_on_or_after(start_date.isoformat()))
             .execute()
         )
         leave = self._to_model_list(response.data or [])
@@ -119,7 +122,7 @@ class WorkerLeaveRepository(BaseRepository[WorkerLeaveResponse]):
             self.client.table(q.TABLE)
             .select(q.SELECT_ALL)
             .lte(q.Columns.START_DATE, day.isoformat())
-            .gte(q.Columns.END_DATE, day.isoformat())
+            .or_(q.ends_on_or_after(day.isoformat()))
             .execute()
         )
         leave = self._to_model_list(response.data or [])

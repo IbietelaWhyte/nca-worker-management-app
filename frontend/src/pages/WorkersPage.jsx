@@ -113,7 +113,11 @@ function StatusBadges({ worker, leave }) {
             <Badge variant={worker.is_active ? 'default' : 'secondary'}>
                 {worker.is_active ? 'Active' : 'Inactive'}
             </Badge>
-            {leave && <Badge variant="warning">On leave to {shortDate(leave.end_date)}</Badge>}
+            {leave && (
+                <Badge variant="warning">
+                    {leave.end_date ? `On leave to ${shortDate(leave.end_date)}` : 'On leave'}
+                </Badge>
+            )}
         </div>
     )
 }

@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { format } from 'date-fns'
 import { AlertTriangle, CalendarOff, Trash2 } from 'lucide-react'
-import { createWorkerLeave, deleteWorkerLeave, getLeaveClashes, getWorkerLeave } from '@/api/leave'
+import {
+    createWorkerLeave,
+    deleteWorkerLeave,
+    endWorkerLeave,
+    getLeaveClashes,
+    getWorkerLeave,
+} from '@/api/leave'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
     Dialog,
     DialogContent,
@@ -36,11 +43,19 @@ const readable = dateStr =>
  * It never edits the rota. Duties already booked inside the window are listed before the head
  * confirms, so they know what to reassign; dropping people off a rota as a side effect of
  * recording an absence would be the worse surprise.
+ *
+ * "No end date yet" records leave with a null end_date, covering every date from the start on.
+ * The head sets the last day once it is known, from the list below — an update, so the absence
+ * stays in the worker's history rather than being deleted and re-entered.
  */
 export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChanged }) {
     const [leave, setLeave] = useState([])
     const [startDate, setStartDate] = useState(today())
     const [endDate, setEndDate] = useState(today())
+    const [openEnded, setOpenEnded] = useState(false)
+    // The leave whose last day is being set, and the date being entered for it.
+    const [ending, setEnding] = useState(null)
+    const [endingDate, setEndingDate] = useState(today())
     const [reason, setReason] = useState('')
     const [clashes, setClashes] = useState([])
     const [busy, setBusy] = useState(false)
@@ -67,18 +82,18 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
     // Look up clashing duties whenever the range changes, so the warning is on screen before
     // the head commits rather than after.
     const loadClashes = useCallback(async () => {
-        if (!workerId || !startDate || !endDate || endDate < startDate) {
+        if (!workerId || !startDate || (!openEnded && (!endDate || endDate < startDate))) {
             setClashes([])
             return
         }
         try {
-            const response = await getLeaveClashes(workerId, startDate, endDate)
+            const response = await getLeaveClashes(workerId, startDate, openEnded ? null : endDate)
             setClashes(response.data.clashes ?? [])
         } catch {
             // Advisory only. A failed lookup must not block recording the absence.
             setClashes([])
         }
-    }, [workerId, startDate, endDate])
+    }, [workerId, startDate, endDate, openEnded])
 
     useEffect(() => {
         if (!open) return
@@ -88,7 +103,7 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
     if (!worker) return null
 
     const name = `${worker.first_name} ${worker.last_name}`
-    const rangeInvalid = Boolean(startDate && endDate && endDate < startDate)
+    const rangeInvalid = Boolean(!openEnded && startDate && endDate && endDate < startDate)
 
     const handleSave = async () => {
         setBusy(true)
@@ -96,7 +111,7 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
         try {
             const response = await createWorkerLeave(workerId, {
                 start_date: startDate,
-                end_date: endDate,
+                end_date: openEnded ? null : endDate,
                 reason: reason.trim() || null,
             })
             setLeave(prev =>
@@ -108,6 +123,21 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
         } catch (err) {
             // The backend names the leave it collided with, which is what the head needs.
             setError(err.response?.data?.detail ?? 'Could not save this leave.')
+        } finally {
+            setBusy(false)
+        }
+    }
+
+    const handleEnd = async () => {
+        setBusy(true)
+        setError(null)
+        try {
+            const response = await endWorkerLeave(ending.id, endingDate)
+            setLeave(prev => prev.map(l => (l.id === ending.id ? response.data : l)))
+            setEnding(null)
+            onChanged?.()
+        } catch (err) {
+            setError(err.response?.data?.detail ?? 'Could not set the last day of this leave.')
         } finally {
             setBusy(false)
         }
@@ -161,10 +191,29 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
                             <Input
                                 id="leave-end"
                                 type="date"
-                                value={endDate}
+                                value={openEnded ? '' : endDate}
+                                disabled={openEnded}
                                 onChange={e => setEndDate(e.target.value)}
                             />
                         </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                            <Checkbox
+                                id="leave-open-ended"
+                                checked={openEnded}
+                                onCheckedChange={checked => setOpenEnded(checked === true)}
+                            />
+                            <Label htmlFor="leave-open-ended" className="font-normal">
+                                No end date yet
+                            </Label>
+                        </div>
+                        {openEnded && (
+                            <p className="text-xs text-muted-foreground">
+                                They stay on leave until you set their last day here.
+                            </p>
+                        )}
                     </div>
 
                     {rangeInvalid && (
@@ -216,7 +265,9 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
                     <div className="flex flex-wrap justify-end gap-2">
                         <Button
                             onClick={handleSave}
-                            disabled={busy || rangeInvalid || !startDate || !endDate}
+                            disabled={
+                                busy || rangeInvalid || !startDate || (!openEnded && !endDate)
+                            }
                         >
                             Set on leave
                         </Button>
@@ -229,33 +280,89 @@ export default function WorkerLeaveDialog({ worker, open, onOpenChange, onChange
                                 {leave.map(entry => (
                                     <li
                                         key={entry.id}
-                                        className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                                        className="space-y-2 rounded-md border px-3 py-2 text-sm"
                                     >
-                                        <div className="min-w-0">
-                                            <p>
-                                                {readable(entry.start_date)} –{' '}
-                                                {readable(entry.end_date)}
-                                            </p>
-                                            {entry.reason && (
-                                                <p className="truncate text-xs text-muted-foreground">
-                                                    {entry.reason}
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <p>
+                                                    {entry.end_date
+                                                        ? `${readable(entry.start_date)} – ${readable(entry.end_date)}`
+                                                        : `From ${readable(entry.start_date)}, no end date`}
                                                 </p>
-                                            )}
+                                                {entry.reason && (
+                                                    <p className="truncate text-xs text-muted-foreground">
+                                                        {entry.reason}
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                {entry.end_date && entry.end_date < today() && (
+                                                    <Badge variant="secondary">Past</Badge>
+                                                )}
+                                                {!entry.end_date && ending?.id !== entry.id && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setEnding(entry)
+                                                            setEndingDate(
+                                                                entry.start_date > today()
+                                                                    ? entry.start_date
+                                                                    : today()
+                                                            )
+                                                        }}
+                                                    >
+                                                        Set last day
+                                                    </Button>
+                                                )}
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => handleDelete(entry.id)}
+                                                    className="text-destructive hover:text-destructive"
+                                                    aria-label="Remove this leave"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </Button>
+                                            </div>
                                         </div>
-                                        <div className="flex shrink-0 items-center gap-2">
-                                            {entry.end_date < today() && (
-                                                <Badge variant="secondary">Past</Badge>
-                                            )}
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => handleDelete(entry.id)}
-                                                className="text-destructive hover:text-destructive"
-                                                aria-label="Remove this leave"
-                                            >
-                                                <Trash2 size={14} />
-                                            </Button>
-                                        </div>
+                                        {ending?.id === entry.id && (
+                                            <div className="flex flex-wrap items-end gap-2">
+                                                <div className="space-y-1">
+                                                    <Label htmlFor={`leave-last-${entry.id}`}>
+                                                        Last day away
+                                                    </Label>
+                                                    <Input
+                                                        id={`leave-last-${entry.id}`}
+                                                        type="date"
+                                                        value={endingDate}
+                                                        min={entry.start_date}
+                                                        onChange={e =>
+                                                            setEndingDate(e.target.value)
+                                                        }
+                                                    />
+                                                </div>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={handleEnd}
+                                                    disabled={
+                                                        busy ||
+                                                        !endingDate ||
+                                                        endingDate < entry.start_date
+                                                    }
+                                                >
+                                                    Save
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={() => setEnding(null)}
+                                                    disabled={busy}
+                                                >
+                                                    Cancel
+                                                </Button>
+                                            </div>
+                                        )}
                                     </li>
                                 ))}
                             </ul>

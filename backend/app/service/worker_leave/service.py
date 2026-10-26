@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
@@ -11,10 +11,18 @@ from app.schemas.worker_leave.models import (
     LeaveClash,
     LeaveClashReport,
     WorkerLeaveCreate,
+    WorkerLeaveEnd,
     WorkerLeaveResponse,
 )
 
 logger = get_logger(__name__)
+
+
+def _describe_range(start_date: date, end_date: date | None) -> str:
+    """Render a leave's dates for a message a head reads."""
+    if end_date is None:
+        return f"from {start_date:%d %b %Y} with no end date"
+    return f"for {start_date:%d %b %Y} to {end_date:%d %b %Y}"
 
 
 class WorkerLeaveService:
@@ -88,7 +96,7 @@ class WorkerLeaveService:
         """
         return {r.worker_id for r in self.leave_repo.get_active_on(day)}
 
-    def get_clashes(self, worker_id: UUID, start_date: date, end_date: date) -> LeaveClashReport:
+    def get_clashes(self, worker_id: UUID, start_date: date, end_date: date | None) -> LeaveClashReport:
         """List duties already on the rota inside a proposed leave period.
 
         Advisory only. Setting leave records an absence; it does not reassign work, and silently
@@ -99,7 +107,8 @@ class WorkerLeaveService:
         Args:
             worker_id: The worker going away.
             start_date: First day away, inclusive.
-            end_date: Last day away, inclusive.
+            end_date: Last day away, inclusive; None for no end date, which clashes with every
+                duty from `start_date` on.
 
         Returns:
             LeaveClashReport: The duties that fall inside the window, soonest first.
@@ -110,7 +119,7 @@ class WorkerLeaveService:
             schedule = assignment.schedules
             if schedule is None or schedule.scheduled_date is None:
                 continue
-            if schedule.scheduled_date > end_date:
+            if end_date is not None and schedule.scheduled_date > end_date:
                 continue
             clashes.append(
                 LeaveClash(
@@ -154,8 +163,8 @@ class WorkerLeaveService:
             existing = overlapping[0]
             log.info("leave_overlaps_existing", existing_id=str(existing.id))
             raise ConflictError(
-                f"This overlaps leave already recorded for {existing.start_date:%d %b %Y} "
-                f"to {existing.end_date:%d %b %Y}. Remove that one first, or change these dates."
+                f"This overlaps leave already recorded {_describe_range(existing.start_date, existing.end_date)}. "
+                "Remove that one or set its last day first, or change these dates."
             )
 
         payload = data.model_dump(mode="json")
@@ -166,8 +175,57 @@ class WorkerLeaveService:
             "leave_created",
             leave_id=str(leave.id),
             start_date=leave.start_date.isoformat(),
-            end_date=leave.end_date.isoformat(),
+            end_date=leave.end_date.isoformat() if leave.end_date else None,
         )
+        return leave
+
+    def end_leave(self, leave_id: UUID, data: WorkerLeaveEnd) -> WorkerLeaveResponse:
+        """Record the last day of a leave — typically one set with no end date.
+
+        An update rather than a delete-and-recreate, so the absence stays in the worker's history
+        with the head who set it. Moving the end later can run into another leave, so it is
+        checked for overlap like a new one, ignoring itself.
+
+        Args:
+            leave_id: The leave to end.
+            data: The last day away, inclusive.
+
+        Returns:
+            WorkerLeaveResponse: The updated leave.
+
+        Raises:
+            NotFoundError: If it does not exist.
+            BadRequestError: If the last day is before the first.
+            ConflictError: If the new range would overlap another leave for the same worker.
+        """
+        log = self.logger.bind(method="end_leave", leave_id=str(leave_id))
+        existing = self.leave_repo.get_by_id(leave_id)
+        if not existing:
+            log.warning("leave_not_found")
+            raise NotFoundError(f"Leave {leave_id} not found")
+        if data.end_date < existing.start_date:
+            raise BadRequestError(
+                f"The last day away cannot be before the first ({existing.start_date:%d %b %Y}). "
+                "To cancel this leave altogether, remove it instead."
+            )
+
+        others = [
+            leave
+            for leave in self.leave_repo.get_overlapping(existing.worker_id, existing.start_date, data.end_date)
+            if leave.id != leave_id
+        ]
+        if others:
+            other = others[0]
+            log.info("leave_end_overlaps_existing", existing_id=str(other.id))
+            raise ConflictError(
+                f"That would overlap leave already recorded {_describe_range(other.start_date, other.end_date)}."
+            )
+
+        leave = self.leave_repo.update(leave_id, {"end_date": data.end_date.isoformat()})
+        if leave is None:
+            # Removed by somebody else between the read and the write.
+            raise NotFoundError(f"Leave {leave_id} not found")
+        log.info("leave_ended", end_date=data.end_date.isoformat())
         return leave
 
     def delete_leave(self, leave_id: UUID) -> None:

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta
 from uuid import uuid4
 
-from app.core.exceptions import ConflictError
+from app.core.exceptions import ConflictError, PermissionDeniedError
 from app.schemas.models import UserRole
 from app.schemas.worker_leave.models import (
     CurrentLeave,
@@ -151,3 +151,44 @@ class TestDeleteLeave:
 
         client.delete(f"/api/v1/leave/{uuid4()}")
         assert mock_worker_service.authorize_manage_worker.call_args.args[1] == owner_id
+
+
+class TestEndLeave:
+    def test_returns_the_updated_leave(self, mock_worker_leave_service, mock_worker_service):
+        leave_id = uuid4()
+        mock_worker_leave_service.get_owner_id.return_value = uuid4()
+        mock_worker_leave_service.end_leave.return_value = make_leave(id=leave_id, end_date=TODAY)
+        client = leave_client(mock_worker_leave_service, mock_worker_service)
+
+        response = client.patch(f"/api/v1/leave/{leave_id}", json={"end_date": TODAY.isoformat()})
+        assert response.status_code == 200
+        assert response.json()["end_date"] == TODAY.isoformat()
+
+    def test_a_head_is_scoped_to_the_owner(self, mock_worker_leave_service, mock_worker_service):
+        owner_id = uuid4()
+        mock_worker_leave_service.get_owner_id.return_value = owner_id
+        mock_worker_service.authorize_manage_worker.side_effect = PermissionDeniedError("nope")
+        client = leave_client(mock_worker_leave_service, mock_worker_service)
+
+        response = client.patch(f"/api/v1/leave/{uuid4()}", json={"end_date": TODAY.isoformat()})
+        assert response.status_code == 403
+        assert mock_worker_service.authorize_manage_worker.call_args.args[1] == owner_id
+        mock_worker_leave_service.end_leave.assert_not_called()
+
+
+class TestOpenEndedLeave:
+    def test_a_leave_with_no_end_date_is_accepted(self, mock_worker_leave_service, mock_worker_service):
+        mock_worker_leave_service.create_leave.return_value = make_leave(end_date=None)
+        client = leave_client(mock_worker_leave_service, mock_worker_service)
+
+        response = client.post(f"/api/v1/leave/workers/{uuid4()}", json={"start_date": TODAY.isoformat()})
+        assert response.status_code == 201
+        assert response.json()["end_date"] is None
+
+    def test_clashes_without_an_end_date(self, mock_worker_leave_service, mock_worker_service):
+        mock_worker_leave_service.get_clashes.return_value = LeaveClashReport(clashes=[])
+        client = leave_client(mock_worker_leave_service, mock_worker_service)
+
+        response = client.get(f"/api/v1/leave/workers/{uuid4()}/clashes?start_date={TODAY.isoformat()}")
+        assert response.status_code == 200
+        assert mock_worker_leave_service.get_clashes.call_args.args[2] is None
