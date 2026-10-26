@@ -1305,9 +1305,30 @@ export default function DepartmentDetailPage() {
                         <DialogTitle>Add Member</DialogTitle>
                     </DialogHeader>
                     {availableWorkers.length === 0 ? (
-                        <p className="text-sm text-muted-foreground py-4 text-center">
-                            All active workers are already members of this department.
-                        </p>
+                        // This list only offers people who already have a worker profile — for a
+                        // head, only those in another department they manage — so someone new
+                        // has to be created first, which nothing else on this page says.
+                        <div className="space-y-3 py-4 text-center">
+                            <p className="text-sm text-muted-foreground">
+                                There is nobody you can add yet: everyone with a worker profile
+                                {isAdmin ? '' : ' in your departments'} is already a member here.
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                                To add someone new, create their profile on the Workers page with{' '}
+                                <span className="font-medium text-foreground">
+                                    Add Worker Profile
+                                </span>{' '}
+                                and choose{' '}
+                                <span className="font-medium text-foreground">
+                                    {department.name}
+                                </span>{' '}
+                                as their department. They will be added here straight away. To add
+                                several people at once, use Import CSV instead.
+                            </p>
+                            <Button variant="outline" onClick={() => navigate('/workers')}>
+                                Go to Workers
+                            </Button>
+                        </div>
                     ) : (
                         <div className="space-y-2 max-h-80 overflow-y-auto">
                             {availableWorkers.map(worker => (
