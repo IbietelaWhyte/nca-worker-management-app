@@ -10,6 +10,7 @@ from app.core.dependencies import (
     get_department_service,
     get_worker_service,
 )
+from app.core.exceptions import BadRequestError
 from app.schemas.authentication.models import GrantAccountRequest, RegisterResponse
 from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import TOTAL_COUNT_HEADER, TokenPayload, UserRole, WorkerStatus
@@ -96,11 +97,13 @@ def create_worker(
     service: WorkerService = Depends(get_worker_service),
     department_service: DepartmentService = Depends(get_department_service),
 ) -> WorkerResponse:
-    """Create a new worker (admin or HOD), optionally assigning them to a department.
+    """Create a new worker (admin or HOD), assigning them to a department.
+
+    The department is optional for an admin and required for a head of department.
 
     Args:
         data: Worker creation data.
-        department_id: Optional UUID of department to assign worker to immediately.
+        department_id: Department to assign the worker to; required unless the caller is an admin.
         current_user: Admin or HOD user token required.
         service: Worker service dependency.
         department_service: Department service dependency.
@@ -111,6 +114,10 @@ def create_worker(
     # Authorize the department assignment before creating, so a forbidden request leaves no orphan worker.
     if department_id is not None:
         service.authorize_create_assignment(current_user, department_id)
+    elif current_user.role != UserRole.ADMIN:
+        # A head only sees workers in the departments they manage, so one created in none would
+        # vanish from their view the moment it was saved — reachable only by an admin.
+        raise BadRequestError("Choose one of your departments for the new worker")
 
     worker = service.create_worker(data)
 

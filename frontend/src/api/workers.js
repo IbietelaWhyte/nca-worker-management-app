@@ -7,7 +7,10 @@ export const getWorkers = params => apiClient.get('/workers', { params })
 
 export const getWorker = id => apiClient.get(`/workers/${id}`)
 
-export const createWorker = data => apiClient.post('/workers', data)
+// departmentId places the new worker in that department in the same request. Required for a head
+// of department, who could not otherwise see the worker they just created.
+export const createWorker = (data, departmentId) =>
+    apiClient.post('/workers', data, { params: { department_id: departmentId || undefined } })
 
 export const updateWorker = (id, data) => apiClient.patch(`/workers/${id}`, data)
 
