@@ -498,7 +498,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         The attendance columns are the sharper of the two. Carried over, they would assert that
         the **new** worker was present at - or absent from - a service they were never on, and
         that assertion is what the absence report shows their head. Done here rather than in a
-        trigger: the backend is the only writer (service-role client, RLS bypassed) and this
+        trigger: the backend is the only writer (secret-key client, RLS bypassed) and this
         schema has no triggers.
 
         Args:
