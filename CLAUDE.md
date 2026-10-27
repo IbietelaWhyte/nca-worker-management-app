@@ -71,7 +71,7 @@ Strict three-layer pattern, one package per domain. Domains: `workers`, `worker_
 
 **Dependency injection** is centralized in `core/dependencies.py`. Every repository and service has a `get_*` factory wired with `Depends(...)`. Routers import these factories plus the auth dependencies (`CurrentUser`, `AdminUser`, `HODUser`) re-exported from the same file — that is the single import point for wiring.
 
-`core/` also holds: `config.py` (pydantic-settings `Settings`), `supabase.py` (singleton service-role client + httpx pool tuning), `authentication.py` (JWKS fetch/cache + JWT verification + role guards), `exceptions.py` (domain errors), `concurrency.py` (thread-pool cap), `phone.py` (E.164 normalization), `redaction.py` (PII masking), `logging.py` (structlog), `middleware.py` (request logging).
+`core/` also holds: `config.py` (pydantic-settings `Settings`), `supabase.py` (singleton secret-key client + httpx pool tuning), `authentication.py` (JWKS fetch/cache + JWT verification + role guards), `exceptions.py` (domain errors), `concurrency.py` (thread-pool cap), `phone.py` (E.164 normalization), `redaction.py` (PII masking), `logging.py` (structlog), `middleware.py` (request logging).
 
 `app/main.py` builds the app, includes routers, registers the exception handlers, exposes `/health` and `/health/db`, and uses a `lifespan` context to configure the thread pool, start/stop the `ReminderService`, and warm the JWKS cache.
 
@@ -91,7 +91,7 @@ Strict three-layer pattern, one package per domain. Domains: `workers`, `worker_
 
 ## Authentication & roles
 
-Auth is delegated to **Supabase**. The frontend signs in with `@supabase/supabase-js` and attaches the access token as a `Bearer` header (see `frontend/src/api/client.js` interceptor). The backend verifies the Supabase JWT against the cached JWKS (`core/authentication.py`, with a one-shot refresh on an unknown `kid`) — it never issues its own tokens. The backend's own Supabase client uses the **service role key**, so it bypasses RLS; authorization is therefore the app's job.
+Auth is delegated to **Supabase**. The frontend signs in with `@supabase/supabase-js` and attaches the access token as a `Bearer` header (see `frontend/src/api/client.js` interceptor). The backend verifies the Supabase JWT against the cached JWKS (`core/authentication.py`, with a one-shot refresh on an unknown `kid`) — it never issues its own tokens. The backend's own Supabase client uses the **secret key**, so it bypasses RLS; authorization is therefore the app's job.
 
 Four roles (`UserRole` in `schemas/models.py`, declared in descending privilege): `admin`, `hod`, `assistant_hod`, `worker`.
 

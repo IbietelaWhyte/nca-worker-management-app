@@ -25,7 +25,7 @@ class AccountService:
 
         Args:
             worker_service: Service used to resolve and update the caller's own worker record.
-            client: Supabase client (service-role) for privileged auth admin operations.
+            client: Supabase client (secret key) for privileged auth admin operations.
         """
         self.worker_service = worker_service
         self.client = client

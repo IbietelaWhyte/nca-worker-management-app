@@ -327,7 +327,7 @@ def get_worker_service(
         department_repo: DepartmentRepository dependency.
         schedule_repo: ScheduleRepository dependency, used to check a worker's remaining
             commitments before deleting their profile.
-        client: Supabase client (service-role) for syncing roles into auth app_metadata.
+        client: Supabase client (secret key) for syncing roles into auth app_metadata.
         department_role_repo: DepartmentRoleRepository dependency, for the CSV import's role column.
         subteam_repo: SubteamRepository dependency, for the CSV import's subteam column.
 
@@ -514,7 +514,7 @@ def get_account_service(
 
     Args:
         worker_service: WorkerService dependency for resolving/updating the caller's own record.
-        client: Supabase client (service-role) for privileged auth admin operations.
+        client: Supabase client (secret key) for privileged auth admin operations.
 
     Returns:
         AccountService: Service for self-service account operations.

@@ -131,7 +131,7 @@ class WorkerService:
             department_repo: Repository for department database operations.
             schedule_repo: Repository for schedule operations, used to check a worker's
                 remaining commitments before deleting their profile.
-            client: Supabase client (service-role) for syncing roles into auth app_metadata.
+            client: Supabase client (secret key) for syncing roles into auth app_metadata.
             department_role_repo: Repository for department roles, to match the CSV import's role column.
             subteam_repo: Repository for subteams, to match the CSV import's subteam column.
         """
