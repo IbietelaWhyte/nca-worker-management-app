@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { format } from 'date-fns'
 import { Search } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +11,23 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog'
+
+// Parsed from local date parts: a bare yyyy-MM-dd is read as UTC and renders a day early west
+// of Greenwich.
+const shortDate = dateStr => format(new Date(dateStr + 'T00:00:00'), 'd MMM')
+
+/**
+ * "Last on 12 Oct · next 9 Nov · 1 this month", or "Not scheduled before". The question a head
+ * is asking while swapping is whether this person has been on recently, so the answer sits under
+ * their name, and the server already lists the fairest first.
+ */
+const describeRecent = ({ last_scheduled, next_scheduled, month_count }) => {
+    const parts = []
+    parts.push(last_scheduled ? `Last on ${shortDate(last_scheduled)}` : 'Not scheduled before')
+    if (next_scheduled) parts.push(`next ${shortDate(next_scheduled)}`)
+    if (month_count) parts.push(`${month_count} this month`)
+    return parts.join(' · ')
+}
 
 /**
  * Pick a worker from a department or subteam roster.
@@ -33,7 +51,9 @@ import {
  * @param {string} props.title
  * @param {string} props.description - What picking somebody will do, including who gets texted.
  * @param {Array<{worker: {id: string, first_name: string, last_name: string, email?: string},
- *   subteam: {id: string, name: string}|null}>} props.candidates - As the server resolved them.
+ *   subteam: {id: string, name: string}|null, last_scheduled: string|null,
+ *   next_scheduled: string|null, month_count: number}>} props.candidates - As the server resolved
+ *   them, fairest first: fewest dates this month, then longest since they last served.
  *   `subteam` is the group this person would actually land in, not a guess: it comes from the
  *   same call that stamps it. A head picks a person and the rota decides the group, so the
  *   group has to be on screen at the moment they pick.
@@ -116,37 +136,38 @@ export default function WorkerPickerDialog({
                     </p>
                 ) : (
                     <ul className="max-h-72 space-y-1 overflow-y-auto">
-                        {matches.map(({ worker, subteam }) => (
-                            <li key={worker.id}>
-                                <button
-                                    type="button"
-                                    disabled={busy}
-                                    onClick={() => onPick(worker.id)}
-                                    className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-muted disabled:opacity-50"
-                                >
-                                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                                        {worker.first_name[0]}
-                                        {worker.last_name[0]}
-                                    </span>
-                                    <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-sm font-medium">
-                                            {worker.first_name} {worker.last_name}
+                        {matches.map(candidate => {
+                            const { worker, subteam } = candidate
+                            return (
+                                <li key={worker.id}>
+                                    <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => onPick(worker.id)}
+                                        className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-muted disabled:opacity-50"
+                                    >
+                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                                            {worker.first_name[0]}
+                                            {worker.last_name[0]}
                                         </span>
-                                        {worker.email && (
-                                            <span className="block truncate text-xs text-muted-foreground">
-                                                {worker.email}
+                                        <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-sm font-medium">
+                                                {worker.first_name} {worker.last_name}
                                             </span>
-                                        )}
-                                    </span>
-                                    {/* Where they land. Outside the truncating column so a long
-                                        email cannot squeeze it out — this is the fact the head
-                                        is choosing on. */}
-                                    <Badge variant="secondary" className="shrink-0">
-                                        {subteam?.name ?? 'No subteam'}
-                                    </Badge>
-                                </button>
-                            </li>
-                        ))}
+                                            <span className="block truncate text-xs text-muted-foreground">
+                                                {describeRecent(candidate)}
+                                            </span>
+                                        </span>
+                                        {/* Where they land. Outside the truncating column so the
+                                        dates line cannot squeeze it out — this is the fact the
+                                        head is choosing on. */}
+                                        <Badge variant="secondary" className="shrink-0">
+                                            {subteam?.name ?? 'No subteam'}
+                                        </Badge>
+                                    </button>
+                                </li>
+                            )
+                        })}
                     </ul>
                 )}
             </DialogContent>

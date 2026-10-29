@@ -218,10 +218,19 @@ class AssignableWorker(BaseModel):
     has to be on screen at the moment they pick.
 
     None means the department-only roster: a member of the department who is in no subteam.
+
+    The dates answer the question a head asks while swapping: has this person been on recently?
+    Counted within this department, drafts included - a draft is the rota being planned, which is
+    exactly what the planner counts too.
     """
 
     worker: Worker
     subteam: SubteamResponse | None = None
+    # Their nearest dates in this department either side of this rota's, None if they have none.
+    last_scheduled: date | None = None
+    next_scheduled: date | None = None
+    # How many dates they already have in this rota's month.
+    month_count: int = 0
 
 
 class ScheduleEditResult(BaseModel):

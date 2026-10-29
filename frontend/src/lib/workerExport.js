@@ -1,7 +1,9 @@
 /**
- * Worker lists as spreadsheet rows, for the Workers page and a department's Members tab. Pure and
- * React-free, like attendance.js's toAbsenceCsv; lib/csv.js does the escaping.
+ * Worker lists as spreadsheet rows, for the Workers page and a department's Members tab, and one
+ * worker's schedule history. Pure and React-free, like attendance.js's toAbsenceCsv; lib/csv.js
+ * does the escaping.
  */
+import { ABSENT, EXCUSED, LATE, NOT_RECORDED, PRESENT, attendanceState } from '@/lib/attendance'
 
 const ROLE_LABELS = { admin: 'Admin', hod: 'HOD', assistant_hod: 'Assistant HOD', worker: 'Worker' }
 
@@ -61,5 +63,53 @@ export const toMemberCsv = (department, members) => ({
         worker.department_role?.name ?? '',
         worker.subteam?.name ?? '',
         worker.id === department.hod_id ? 'Yes' : '',
+    ]),
+})
+
+const ATTENDANCE_LABELS = {
+    [PRESENT]: 'Present',
+    [LATE]: 'Late',
+    [ABSENT]: 'Absent',
+    [EXCUSED]: 'Excused',
+    [NOT_RECORDED]: 'Not recorded',
+}
+
+/**
+ * One worker's duties for the history dialog: the year's dates newest first, plus the two facts a
+ * head checks for fairness - how many this year, and when they last served.
+ *
+ * @param {object[]} assignments From GET /schedules/workers/{id}/assignments (finalized only).
+ * @param {number} year The calendar year to summarise.
+ * @param {string} today yyyy-MM-dd, so "last served" never counts a date still to come.
+ */
+export const summarizeHistory = (assignments, year, today) => {
+    const dated = assignments.filter(a => a.schedules?.scheduled_date)
+    const inYear = dated
+        .filter(a => a.schedules.scheduled_date.startsWith(`${year}-`))
+        .sort((a, b) => b.schedules.scheduled_date.localeCompare(a.schedules.scheduled_date))
+    const past = dated.map(a => a.schedules.scheduled_date).filter(d => d <= today)
+    const upcoming = dated.map(a => a.schedules.scheduled_date).filter(d => d > today)
+    return {
+        rows: inYear,
+        count: inYear.length,
+        lastServed: past.length ? past.sort().at(-1) : null,
+        next: upcoming.length ? upcoming.sort()[0] : null,
+        years: [...new Set(dated.map(a => Number(a.schedules.scheduled_date.slice(0, 4))))],
+    }
+}
+
+/** A worker's duties as spreadsheet rows. Attendance says "Upcoming" for a date not yet reached. */
+export const toHistoryCsv = (rows, today) => ({
+    headers: ['Date', 'Start', 'Department', 'Rota', 'Role', 'Special service', 'Attendance'],
+    rows: rows.map(a => [
+        a.schedules.scheduled_date,
+        a.schedules.start_time?.slice(0, 5) ?? '',
+        a.schedules.departments?.name ?? '',
+        a.schedules.title,
+        a.department_roles?.name ?? '',
+        a.schedules.special_service_name ?? '',
+        a.schedules.scheduled_date > today
+            ? 'Upcoming'
+            : (ATTENDANCE_LABELS[attendanceState(a)] ?? ''),
     ]),
 })

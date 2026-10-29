@@ -10,6 +10,7 @@ import RoleEditor from '@/components/workers/RoleEditor'
 import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
 import DeleteWorkerDialog from '@/components/workers/DeleteWorkerDialog'
 import WorkerLeaveDialog from '@/components/workers/WorkerLeaveDialog'
+import WorkerHistoryDialog from '@/components/workers/WorkerHistoryDialog'
 import { getCurrentLeave } from '@/api/leave'
 import { getWorkers } from '@/api/workers'
 import { downloadCsv, slug, toCsv } from '@/lib/csv'
@@ -46,6 +47,7 @@ import {
     Trash2,
     MoreVertical,
     CalendarOff,
+    History,
     Download,
     Search,
     X,
@@ -141,6 +143,7 @@ function WorkerActionsMenu({
     onRoles,
     onCreateAccount,
     onLeave,
+    onHistory,
     onDeactivate,
     onDelete,
     triggerClassName,
@@ -172,6 +175,12 @@ function WorkerActionsMenu({
                     <DropdownMenuItem onClick={() => onCreateAccount(worker)}>
                         <KeyRound size={14} className="mr-2" />
                         Create account
+                    </DropdownMenuItem>
+                )}
+                {isDepartmentHead && (
+                    <DropdownMenuItem onClick={() => onHistory(worker)}>
+                        <History size={14} className="mr-2" />
+                        Schedule history
                     </DropdownMenuItem>
                 )}
                 {isDepartmentHead && worker.is_active && (
@@ -269,6 +278,7 @@ export default function WorkersPage() {
     const [deletingWorker, setDeletingWorker] = useState(null)
     const [leaveDialogOpen, setLeaveDialogOpen] = useState(false)
     const [leaveWorker, setLeaveWorker] = useState(null)
+    const [historyWorker, setHistoryWorker] = useState(null)
     // worker id -> the leave they are on right now. Fetched as one list rather than folded into
     // each worker, so the worker endpoint stays unaware of leave.
     const [leaveByWorker, setLeaveByWorker] = useState({})
@@ -545,6 +555,7 @@ export default function WorkersPage() {
                                                     onRoles={handleOpenRoleEdit}
                                                     onCreateAccount={handleOpenCreateAccount}
                                                     onLeave={handleOpenLeave}
+                                                    onHistory={setHistoryWorker}
                                                     onDeactivate={handleDeactivate}
                                                     onDelete={handleOpenDelete}
                                                     triggerClassName="-mr-2"
@@ -589,6 +600,7 @@ export default function WorkersPage() {
                                         onRoles={handleOpenRoleEdit}
                                         onCreateAccount={handleOpenCreateAccount}
                                         onLeave={handleOpenLeave}
+                                        onHistory={setHistoryWorker}
                                         onDeactivate={handleDeactivate}
                                         onDelete={handleOpenDelete}
                                         triggerClassName="-mr-2"
@@ -613,6 +625,12 @@ export default function WorkersPage() {
                     onPageChange={list.setPage}
                 />
             </div>
+
+            <WorkerHistoryDialog
+                worker={historyWorker}
+                open={historyWorker !== null}
+                onOpenChange={next => !next && setHistoryWorker(null)}
+            />
 
             <WorkerLeaveDialog
                 worker={leaveWorker}
