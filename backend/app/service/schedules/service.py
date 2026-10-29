@@ -513,8 +513,8 @@ class ScheduleService:
             schedule_id: The rota being edited.
 
         Returns:
-            list[AssignableWorker]: Candidates in group order — subteams by name, then the
-                                    department-only roster.
+            list[AssignableWorker]: Candidates fairest first - fewest dates this month, then
+                                    longest since they last served - each with those dates.
 
         Raises:
             NotFoundError: If the schedule or its department does not exist.
@@ -522,12 +522,40 @@ class ScheduleService:
         schedule = self._require_schedule(schedule_id)
         taken = {a.worker_id for a in schedule.schedule_assignments}
         groups = self._resolve_scope_groups(schedule.department_id, _scope_of(schedule), schedule.subteam_id)
-        return [
+        candidates = [
             AssignableWorker(worker=worker, subteam=group.subteam)
             for group in groups
             for worker in group.workers
             if worker.id not in taken
         ]
+
+        # One query for everyone, the same history fetch generation uses - so the picker can say
+        # who has served recently and put whoever has waited longest first.
+        on = schedule.scheduled_date
+        history = self.schedule_repo.get_assignment_history_for_workers(
+            [c.worker.id for c in candidates], schedule.department_id
+        )
+        dates: dict[UUID, list[date]] = {}
+        for assignment in history:
+            if assignment.schedules is not None and assignment.schedules.scheduled_date is not None:
+                dates.setdefault(assignment.worker_id, []).append(assignment.schedules.scheduled_date)
+        for candidate in candidates:
+            theirs = dates.get(candidate.worker.id, [])
+            candidate.last_scheduled = max((d for d in theirs if d < on), default=None)
+            candidate.next_scheduled = min((d for d in theirs if d > on), default=None)
+            candidate.month_count = sum(1 for d in theirs if (d.year, d.month) == (on.year, on.month))
+
+        # Fairest first: fewest dates this month, then longest since they last served. Somebody
+        # never scheduled leads. Name breaks ties so the order is stable between opens.
+        candidates.sort(
+            key=lambda c: (
+                c.month_count,
+                c.last_scheduled or date.min,
+                c.worker.last_name.lower(),
+                c.worker.first_name.lower(),
+            )
+        )
+        return candidates
 
     def add_assignment(self, schedule_id: UUID, worker_id: UUID) -> ScheduleEditResult:
         """Put another worker on a generated rota.

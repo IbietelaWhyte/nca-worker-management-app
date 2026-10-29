@@ -1258,11 +1258,11 @@ class TestGetAssignableWorkers:
 
         assignable = service.get_assignable_workers(schedule.id)
 
-        # Group order: subteams by name, so Discovery before Seekers.
-        assert [(a.worker.first_name, a.subteam.name) for a in assignable] == [
+        # Order is fairness now (see TestAssignableWorkerFairness), so check the pairing alone.
+        assert {(a.worker.first_name, a.subteam.name) for a in assignable} == {
             ("Grace", "Discovery"),
             ("Ada", "Seekers"),
-        ]
+        }
 
     def test_raises_for_an_unknown_schedule(self, service, mock_schedule_repo):
         mock_schedule_repo.get_with_assignments.return_value = None
@@ -1846,3 +1846,57 @@ class TestDeleteMonth:
         result = service.delete_month(uuid4(), self.MARCH, ScheduleStatus.FINAL)
 
         assert result.warnings == ["Could not text Ada L. Let them know another way."]
+
+
+class TestAssignableWorkerFairness:
+    """The swap picker's question: has this person been on recently?"""
+
+    def _history(self, mock_schedule_repo, *pairs):
+        mock_schedule_repo.get_assignment_history_for_workers.return_value = [
+            make_assignment(worker_id=worker.id, schedules=make_schedule(scheduled_date=on)) for worker, on in pairs
+        ]
+
+    def test_dates_either_side_and_the_month_count(self, service, edit, mock_schedule_repo):
+        # The rota is 2 Aug 2026.
+        spare = edit.spare[0]
+        self._history(
+            mock_schedule_repo,
+            (spare, date(2026, 7, 12)),
+            (spare, date(2026, 7, 26)),
+            (spare, date(2026, 8, 16)),
+            (spare, date(2026, 8, 30)),
+        )
+
+        [candidate] = service.get_assignable_workers(edit.schedule.id)
+
+        assert candidate.last_scheduled == date(2026, 7, 26)
+        assert candidate.next_scheduled == date(2026, 8, 16)
+        assert candidate.month_count == 2
+
+    def test_somebody_never_scheduled_has_no_dates(self, service, edit, mock_schedule_repo):
+        self._history(mock_schedule_repo)
+        [candidate] = service.get_assignable_workers(edit.schedule.id)
+        assert (candidate.last_scheduled, candidate.next_scheduled, candidate.month_count) == (None, None, 0)
+
+    def test_fairest_first(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo
+    ):
+        roomy = EditFixture(
+            (mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo), spare=3
+        )
+        busy_this_month, served_long_ago, never = roomy.spare
+        self._history(
+            mock_schedule_repo,
+            (busy_this_month, date(2026, 8, 23)),
+            (served_long_ago, date(2026, 3, 1)),
+        )
+
+        assignable = service.get_assignable_workers(roomy.schedule.id)
+
+        # Fewest this month first, then longest since they served; never-served leads.
+        assert [a.worker.id for a in assignable] == [never.id, served_long_ago.id, busy_this_month.id]
+
+    def test_one_history_query_for_everyone(self, service, edit, mock_schedule_repo):
+        self._history(mock_schedule_repo)
+        service.get_assignable_workers(edit.schedule.id)
+        mock_schedule_repo.get_assignment_history_for_workers.assert_called_once()
