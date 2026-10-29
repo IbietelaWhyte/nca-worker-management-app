@@ -8,6 +8,14 @@ import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import BrandMark from '@/components/layout/BrandMark'
+import { describeTimeout } from '@/lib/idle'
+import { takeSignOutReason } from '@/lib/signOutReason'
+
+const SIGN_OUT_MESSAGES = {
+    idle: () =>
+        `You were signed out after ${describeTimeout()} without activity. Sign in to carry on.`,
+    expired: () => 'Your session ended. Please sign in again.',
+}
 
 export default function LoginPage() {
     const { signIn } = useAuth()
@@ -19,6 +27,8 @@ export default function LoginPage() {
     const [error, setError] = useState(null)
     const [loading, setLoading] = useState(false)
     const [resetSent, setResetSent] = useState(false)
+    // Read once: taking the reason clears it, so it is shown on this visit and never again.
+    const [signedOutBecause] = useState(() => SIGN_OUT_MESSAGES[takeSignOutReason()]?.() ?? null)
 
     const handleSubmit = async e => {
         e.preventDefault()
@@ -71,6 +81,12 @@ export default function LoginPage() {
                         </p>
                     </div>
                 </div>
+
+                {signedOutBecause && mode === 'signin' && (
+                    <Alert>
+                        <AlertDescription>{signedOutBecause}</AlertDescription>
+                    </Alert>
+                )}
 
                 {mode === 'signin' ? (
                     <form onSubmit={handleSubmit} className="space-y-4">

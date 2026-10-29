@@ -40,6 +40,10 @@ export const FAQ_SECTIONS = [
                 answer: 'It leaves out anyone who has marked themselves unavailable and anyone already serving elsewhere that same day, then works down from whoever served least recently. A quiet month usually means you were unavailable, already booked, or the team is bigger than the number of places.',
             },
             {
+                question: 'Why was I signed out?',
+                answer: "For safety, the app signs you out after 30 minutes with nothing happening, so somebody else at a shared computer cannot see people's contact details. A minute before, it asks whether you are still there; tap Stay signed in to carry on. Using the app in another tab counts too. Just sign in again — nothing you saved is lost.",
+            },
+            {
                 question: 'How do I change my phone number or my password?',
                 answer: 'Both are on the Account page. Keep your phone number up to date — your duties, your reminders and your availability link are all sent to it by text.',
             },
