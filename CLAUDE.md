@@ -181,6 +181,18 @@ A subteam can require roles on every rota: "at least 1 Teacher and 2 Helpers" (`
 - **Not stamped onto schedules**, unlike the band: they steer generation and nothing else, so changing them never relabels a rota. Hand edits do not warn about a missing role yet.
 - The subteam list embeds them (`SELECT_WITH_ROLE_REQUIREMENTS`). A PATCH returns no embed, so `useSubteams.editSubteam` keeps the loaded ones. `PUT /subteams/{id}/role-requirements` replaces the set — upsert on the primary key, then delete the rest.
 
+### Drafts
+
+A month can be committed as a **draft** (`MonthlyScheduleCommitRequest.draft`), edited with nobody hearing about it, and **finalized** when it is right. Finalizing is what tells people (`20261029120000_draft_schedules.sql`).
+
+- **`schedules.finalized_at` NULL means draft**, the `notice_sent_at` idiom. It defaults to `now()`, so every existing row, the single-date generator and a month committed straight to final are finalized with no code. `Schedule.is_draft` is the one place that reads it.
+- **The two notification RPCs are the gate.** Both filter `s.finalized_at is not null`, so no sweep can text about a draft. Finalizing (`POST /schedules/{id}/finalize`, `POST /schedules/departments/{id}/finalize-month`) sends nothing itself — the notice sweep picks the rows up within `notice_interval_minutes`, one text per person, which is also what keeps two senders from overlapping.
+- **Edits on a draft text nobody.** `_announce_assignment` / `_announce_cancellation` return early on a draft; the sweep reaches everybody at finalize because their `notice_sent_at` is still NULL. `trigger_for_schedule` and attendance refuse a draft outright.
+- **Workers never see one.** `get_assignments_for_worker` uses an `!inner` schedule embed filtered on `finalized_at` (a filter on a non-inner embed would only blank it), and the own-assignment RLS policy requires a finalized parent. The attendance report counts finalized rotas only.
+- **A draft still occupies its date and counts as booked.** The partial unique indexes are unchanged, `_existing_schedule_dates` reads both kinds, and drafts feed fairness history and other departments' "already scheduled": they are the rota somebody intends to publish.
+- **`get_by_department(status=…)`**: None returns both, which the generators need. The frontend asks for `final` (Month, List, dashboard) or `draft` (Drafts tab, which embeds `creator:workers!created_by` — `schedules` has three FKs to `workers`).
+- **`DELETE /schedules/departments/{id}/month?status=`** never mixes the two. Drafts go silently. Finalized rotas go **from today on only** (past ones carry attendance), and everybody whose `notice_sent_at` was set gets **one** `send_duties_cancelled` text listing all their dates; a failure is a warning, since the rows are gone and nothing can retry.
+
 ### Editing a rota after generation
 
 `add_assignment`, `replace_assignment_worker` and `remove_assignment` (`service/schedules/service.py`) repair a generated rota in place. There is no migration behind them: `unique (schedule_id, worker_id)` was already the right constraint, and `23505` maps to `ConflictError` through the existing `UNIQUE_VIOLATION` path.

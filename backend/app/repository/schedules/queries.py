@@ -11,6 +11,10 @@ SELECT_ALL = "*"
 # than the constraint, so it survives a constraint being renamed, and the returned key is still
 # "workers". `subteams/queries.py` already does this for the same reason.
 SELECT_WITH_ASSIGNMENTS = "*, schedule_assignments(*, workers!worker_id(*), subteams(*), department_roles(*))"
+# The Drafts tab names who started each draft, since any head of the department can finish it.
+# schedules has three FKs to workers (created_by, finalized_by, attendance_closed_by), so the embed
+# names its column - the PGRST201 trap above, one table up.
+SELECT_DRAFTS = f"{SELECT_WITH_ASSIGNMENTS}, creator:workers!created_by(first_name,last_name)"
 # Rooted at schedule_assignments, where SELECT_WITH_ASSIGNMENTS above is rooted at schedules.
 # Write paths must re-read through this: PostgREST returns base-table columns only from an UPDATE,
 # and the schedule detail page renders a row entirely from these embeds — without them a confirmed
@@ -20,6 +24,9 @@ SELECT_ASSIGNMENT_WITH_RELATIONS = "*, workers!worker_id(*), subteams(*), depart
 # facts the SMS and the confirmation page carry — a worker serving in several departments cannot
 # tell their Sundays apart from the schedule title alone.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE = "*, schedules(*, departments(*)), department_roles(*)"
+# The worker's own duties hide drafts, which needs a filter on the schedule - and a filter on a
+# non-inner embed only nulls the embed, leaving the assignment row behind with no schedule.
+SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER_FOR_WORKER = "*, schedules!inner(*, departments(*)), department_roles(*)"
 # Inner join variant: required when filtering on a schedules column, otherwise PostgREST
 # nulls the embedded object instead of dropping the assignment row.
 SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER = "*, schedules!inner(*)"
@@ -64,6 +71,9 @@ class Columns:
     SPECIAL_SERVICE_NAME = "special_service_name"
     CREATED_BY = "created_by"
     CREATED_AT = "created_at"
+    # NULL while a draft.
+    FINALIZED_AT = "finalized_at"
+    FINALIZED_BY = "finalized_by"
 
 
 class AssignmentColumns:

@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.core.exceptions import TooManyRequestsError
+from app.core.exceptions import BadRequestError, TooManyRequestsError
 from app.repository.schedules.repository import ScheduleRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.departments.models import DepartmentResponse
@@ -63,6 +63,8 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
             notes=kwargs.get("notes", "Be on time!"),
             created_by=kwargs.get("created_by", uuid4()),
             created_at=kwargs.get("schedule_created_at", "2026-02-01T10:00:00Z"),
+            # Every row the sweeps return is finalized - the RPCs exclude drafts.
+            finalized_at=kwargs.get("finalized_at", "2026-02-01T10:00:00Z"),
         ),
     )
 
@@ -377,4 +379,17 @@ class TestTriggerForScheduleCooldown:
             service.trigger_for_schedule(schedule_id)
 
         mock_sms_service.claim_manual_send.assert_called_once_with(f"schedule:{schedule_id}")
+        mock_sms_service.send_reminder.assert_not_called()
+
+
+class TestTriggerForScheduleRefusesDrafts:
+    def test_a_draft_is_refused_before_the_cooldown_is_claimed(self, service, mock_schedule_repo, mock_sms_service):
+        schedule = make_due_assignment(finalized_at=None).schedules
+        schedule.schedule_assignments = [make_due_assignment()]
+        mock_schedule_repo.get_with_assignments.return_value = schedule
+
+        with pytest.raises(BadRequestError, match="draft"):
+            service.trigger_for_schedule(uuid4())
+        # Refusing must not spend the cooldown, or the head waits for nothing once they finalize.
+        mock_sms_service.claim_manual_send.assert_not_called()
         mock_sms_service.send_reminder.assert_not_called()

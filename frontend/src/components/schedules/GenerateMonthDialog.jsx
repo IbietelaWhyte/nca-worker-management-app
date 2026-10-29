@@ -15,6 +15,7 @@ import {
     SelectValue,
 } from '@/components/ui/select'
 import { useSubteams } from '@/hooks/useSubteams'
+import FinalizeDialog from './FinalizeDialog'
 import MonthPreviewTable, { groupKey } from './MonthPreviewTable'
 import ReminderLeadTimesField from './ReminderLeadTimesField'
 
@@ -70,6 +71,7 @@ export default function GenerateMonthDialog({
     const [result, setResult] = useState(null)
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
+    const [confirmOpen, setConfirmOpen] = useState(false)
 
     const handleChange = e => {
         const { name, value } = e.target
@@ -140,38 +142,61 @@ export default function GenerateMonthDialog({
             return { ...prev, [dateStr]: { ...byGroup, [key]: next } }
         })
 
-    const handleCommit = async () => {
-        // The backend resolves each worker's subteam itself, so the groups flatten into
-        // one id list per date.
-        const dates = Object.entries(selection)
+    // The backend resolves each worker's subteam itself, so the groups flatten into one id list
+    // per date.
+    const selectedDates = () =>
+        Object.entries(selection)
             .map(([scheduled_date, byGroup]) => ({
                 scheduled_date,
                 worker_ids: Object.values(byGroup).flat(),
             }))
             .filter(d => d.worker_ids.length > 0)
 
-        if (dates.length === 0) return setError('There is nothing to save for this month')
+    // A draft texts nobody and is edited from the Drafts tab; finalizing is what tells people,
+    // which is why it goes through the confirm dialog first and a draft does not.
+    const handleCommit = async ({ draft }) => {
+        const dates = selectedDates()
+        if (dates.length === 0) {
+            setConfirmOpen(false)
+            return setError('There is nothing to save for this month')
+        }
 
         setError(null)
         setLoading(true)
         try {
-            setResult(await onCommit({ ...basePayload(), dates }))
+            setResult({ ...(await onCommit({ ...basePayload(), dates, draft })), draft })
+            setConfirmOpen(false)
             setStep('result')
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Failed to save this month')
+            setConfirmOpen(false)
         } finally {
             setLoading(false)
         }
     }
 
+    const toFinalize = selectedDates()
+
     if (step === 'result' && result) {
         return (
             <div className="space-y-4">
                 <Alert>
-                    <p className="text-sm">
-                        Created {result.created.length} schedule
-                        {result.created.length === 1 ? '' : 's'} for {format(month, 'MMMM yyyy')}.
-                    </p>
+                    {result.draft ? (
+                        <p className="text-sm">
+                            Saved {result.created.length} schedule
+                            {result.created.length === 1 ? '' : 's'} for{' '}
+                            {format(month, 'MMMM yyyy')} as drafts. Nobody has been texted. You can
+                            keep editing them under <span className="font-medium">Drafts</span>, and
+                            finalize when they are ready.
+                        </p>
+                    ) : (
+                        <p className="text-sm">
+                            Created {result.created.length} schedule
+                            {result.created.length === 1 ? '' : 's'} for{' '}
+                            {format(month, 'MMMM yyyy')}. Everyone scheduled will get a text within
+                            about 10 minutes.
+                        </p>
+                    )}
                 </Alert>
 
                 {result.skipped.length > 0 && (
@@ -202,7 +227,7 @@ export default function GenerateMonthDialog({
                 )}
 
                 <div className="flex justify-end pt-2">
-                    <Button onClick={onDone}>Done</Button>
+                    <Button onClick={() => onDone(result)}>Done</Button>
                 </div>
             </div>
         )
@@ -224,14 +249,31 @@ export default function GenerateMonthDialog({
 
                 <MonthPreviewTable preview={preview} selection={selection} onSwap={handleSwap} />
 
-                <div className="flex justify-end gap-2 pt-2">
+                <div className="flex flex-wrap justify-end gap-2 pt-2">
                     <Button variant="outline" onClick={() => setStep('form')} disabled={loading}>
                         Back
                     </Button>
-                    <Button onClick={handleCommit} disabled={loading}>
-                        {loading ? 'Saving...' : 'Confirm & save'}
+                    <Button
+                        variant="outline"
+                        onClick={() => handleCommit({ draft: true })}
+                        disabled={loading}
+                    >
+                        {loading && !confirmOpen ? 'Saving...' : 'Save Draft'}
+                    </Button>
+                    <Button onClick={() => setConfirmOpen(true)} disabled={loading}>
+                        Finalize
                     </Button>
                 </div>
+
+                <FinalizeDialog
+                    open={confirmOpen}
+                    count={toFinalize.length}
+                    people={new Set(toFinalize.flatMap(d => d.worker_ids)).size}
+                    monthLabel={format(month, 'MMMM yyyy')}
+                    busy={loading}
+                    onCancel={() => setConfirmOpen(false)}
+                    onConfirm={() => handleCommit({ draft: false })}
+                />
             </div>
         )
     }

@@ -770,15 +770,18 @@ class TestRoleRequirements:
         assert plan.status == DatePlanStatus.UNDERSTAFFED
 
     def test_the_role_rotates_among_its_holders(self):
-        # Fairness still runs within the role: three Teachers share four Sundays.
+        # Fairness still runs within the role: three Teachers share four Sundays. One slot, so the
+        # quota is the only way a Teacher gets on - with more, the left-over places can land on a
+        # Teacher too, and which one is first in the list would depend on the random ids.
         teachers = make_workers(3)
         helpers = [make_worker(first_name=f"H{i}", email=f"h{i}@example.com") for i in range(6)]
         roles = {t.id: TEACHER for t in teachers} | {h.id: HELPER for h in helpers}
-        ctx = roled_group([*teachers, *helpers], (3, 3), [(TEACHER, "Teacher", 1)], roles)
+        ctx = roled_group([*teachers, *helpers], (1, 1), [(TEACHER, "Teacher", 1)], roles)
 
         plans = plan_month(SUNDAYS, ctx)
         teacher_ids = {t.id for t in teachers}
-        on_duty = [next(w for w in selected(p) if w in teacher_ids) for p in plans]
+        on_duty = [selected(p)[0] for p in plans]
+        assert all(w in teacher_ids for w in on_duty)
 
         assert set(on_duty[:3]) == teacher_ids
         assert all(a != b for a, b in zip(on_duty, on_duty[1:]))

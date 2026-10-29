@@ -174,6 +174,36 @@ class TestAssignmentCancelledBody:
         assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
 
 
+def duties_cancelled_body(service, duties) -> str:
+    """Send a month's cancellation and return the body that reached send_sms."""
+    with patch.object(SMSService, "send_sms", return_value=True) as send:
+        service.send_duties_cancelled(to="+14165550101", worker_name="Ada", duties=duties)
+    return str(send.call_args.args[1])
+
+
+class TestDutiesCancelledBody:
+    """Deleting a month of finalized rotas: one text per person, no retry behind it."""
+
+    def test_a_month_of_dates_in_one_message(self, service):
+        body = duties_cancelled_body(
+            service, [("Ushering", "Sun 01 Mar at 09:00"), ("Ushering", "Sun 08 Mar at 09:00")]
+        )
+        assert body == (
+            "Hi Ada, you are no longer scheduled for 2 dates - Ushering: Sun 01 Mar at 09:00, Sun 08 Mar at 09:00."
+            " No action needed."
+        )
+
+    def test_one_date_reads_like_the_single_cancellation(self, service):
+        # The same sentence a head's single removal sends, so the two never drift apart.
+        assert duties_cancelled_body(service, [("Ushering", "Sun 02 Aug at 09:00")]) == (
+            "Hi Ada, you are no longer scheduled for Sun 02 Aug at 09:00 in Ushering. No action needed."
+        )
+
+    def test_the_body_stays_inside_gsm_7(self, service):
+        body = duties_cancelled_body(service, [("Ushering", "Sun 01 Mar at 09:00"), ("", "Sun 08 Mar at 09:00")])
+        assert not (set(body) - GSM7), f"non-GSM-7 characters: {sorted(set(body) - GSM7)}"
+
+
 def prompt_body(service, worker_name="Ada", department_name="Ushering", url=PROMPT_URL) -> str:
     """Send an availability prompt and return the body that reached send_sms."""
     with patch.object(SMSService, "send_sms", return_value=True) as send:

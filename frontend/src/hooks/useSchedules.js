@@ -24,10 +24,16 @@ export function useSchedules(departmentId) {
         try {
             setLoading(true)
             setError(null)
-            const response = await getSchedulesByDepartment(departmentId, {
-                from: format(startOfMonth(month), 'yyyy-MM-dd'),
-                to: format(endOfMonth(month), 'yyyy-MM-dd'),
-            })
+            // Finalized only: the Month and List views show what workers have been told. Drafts
+            // have their own tab (useDraftSchedules).
+            const response = await getSchedulesByDepartment(
+                departmentId,
+                {
+                    from: format(startOfMonth(month), 'yyyy-MM-dd'),
+                    to: format(endOfMonth(month), 'yyyy-MM-dd'),
+                },
+                'final'
+            )
             setSchedules(response.data)
         } catch (err) {
             setError(err.response?.data?.detail ?? 'Failed to load schedules')
@@ -57,8 +63,9 @@ export function useSchedules(departmentId) {
         // rest would show up as phantom entries when the user pages to another month.
         const from = format(startOfMonth(month), 'yyyy-MM-dd')
         const to = format(endOfMonth(month), 'yyyy-MM-dd')
+        // A draft belongs to the Drafts tab, not this view.
         const visible = response.data.created.filter(
-            s => s.scheduled_date >= from && s.scheduled_date <= to
+            s => !s.is_draft && s.scheduled_date >= from && s.scheduled_date <= to
         )
         setSchedules(prev => [...visible, ...prev])
         return response.data

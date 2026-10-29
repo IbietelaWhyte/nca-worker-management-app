@@ -11,7 +11,9 @@ from app.schemas.schedules.models import (
     DateSelection,
     MonthlyScheduleCommitRequest,
     MonthlySchedulePreviewRequest,
+    MonthRef,
     ScheduleCreate,
+    ScheduleStatus,
 )
 from app.service.schedules.service import ScheduleService
 from tests.unit.services.conftest import (
@@ -382,6 +384,7 @@ def make_month_commit_request(**kwargs) -> MonthlyScheduleCommitRequest:
         start_time=kwargs.get("start_time", time(9, 0)),
         end_time=kwargs.get("end_time", time(11, 0)),
         reminder_days_before=kwargs.get("reminder_days_before", [1]),
+        draft=kwargs.get("draft", False),
     )
 
 
@@ -1678,3 +1681,168 @@ class TestSpecialServiceStamping:
 
         first = next(d for d in preview.dates if d.scheduled_date == special_date)
         assert [a.worker.id for a in plan_assignments(first)] == [ada.id]
+
+
+# ----------------------------------------------------------------
+# Drafts
+# ----------------------------------------------------------------
+
+
+def _commit_one(service, monthly_repos, mock_worker_repo, mock_department_repo, *, draft):
+    schedule_repo, _ = monthly_repos
+    dept = make_department(band=1)
+    worker, creator = make_worker(), make_worker()
+    mock_department_repo.get_by_id.return_value = dept
+    mock_worker_repo.get_department_only_workers.return_value = [worker]
+    mock_worker_repo.get_by_email.return_value = creator
+    created = make_schedule(department_id=dept.id, scheduled_date=date(2026, 3, 1))
+    schedule_repo.bulk_create_schedules.return_value = [created]
+    schedule_repo.get_with_assignments.return_value = created
+    data = make_month_commit_request(
+        department_id=dept.id,
+        dates=[DateSelection(scheduled_date=date(2026, 3, 1), worker_ids=[worker.id])],
+        draft=draft,
+    )
+    service.commit_monthly_schedule(data, created_by="hod@example.com")
+    return schedule_repo.bulk_create_schedules.call_args.args[0][0], creator
+
+
+class TestCommitAsDraft:
+    def test_a_draft_is_written_with_no_finalized_stamp(
+        self, service, monthly_repos, mock_worker_repo, mock_department_repo
+    ):
+        row, _ = _commit_one(service, monthly_repos, mock_worker_repo, mock_department_repo, draft=True)
+        # An explicit NULL, overriding the column default - this is what keeps every sweep off it.
+        assert "finalized_at" in row and row["finalized_at"] is None
+
+    def test_a_final_commit_keeps_the_default_and_records_who(
+        self, service, monthly_repos, mock_worker_repo, mock_department_repo
+    ):
+        row, creator = _commit_one(service, monthly_repos, mock_worker_repo, mock_department_repo, draft=False)
+        assert "finalized_at" not in row
+        assert row["finalized_by"] == str(creator.id)
+
+
+class TestFinalize:
+    def test_finalizes_a_draft(self, service, mock_schedule_repo, mock_worker_repo):
+        draft = make_schedule(finalized_at=None)
+        actor = make_worker()
+        mock_schedule_repo.get_with_assignments.return_value = draft
+        mock_worker_repo.get_by_email.return_value = actor
+
+        service.finalize_schedule(draft.id, "hod@example.com")
+
+        mock_schedule_repo.finalize.assert_called_once_with([draft.id], actor.id)
+
+    def test_finalizing_a_final_rota_is_a_no_op(self, service, mock_schedule_repo):
+        mock_schedule_repo.get_with_assignments.return_value = make_schedule()
+        service.finalize_schedule(uuid4(), "hod@example.com")
+        mock_schedule_repo.finalize.assert_not_called()
+
+    def test_a_month_is_one_statement_and_counts_people_once(
+        self, service, mock_schedule_repo, mock_worker_repo, mock_sms_service
+    ):
+        ada, grace = make_worker(), make_worker()
+        first = make_schedule(finalized_at=None, scheduled_date=date(2026, 3, 1))
+        second = make_schedule(finalized_at=None, scheduled_date=date(2026, 3, 8))
+        first.schedule_assignments = [make_assignment(worker_id=ada.id), make_assignment(worker_id=grace.id)]
+        second.schedule_assignments = [make_assignment(worker_id=ada.id)]
+        mock_schedule_repo.get_by_department.return_value = [first, second]
+        mock_worker_repo.get_by_email.return_value = None  # an admin with no worker profile
+
+        result = service.finalize_month(uuid4(), MonthRef(year=2026, month=3), "admin@example.com")
+
+        assert (result.count, result.people) == (2, 2)
+        mock_schedule_repo.finalize.assert_called_once_with([first.id, second.id], None)
+        assert mock_schedule_repo.get_by_department.call_args.kwargs["status"] == ScheduleStatus.DRAFT
+        # Finalizing sends nothing itself: the notice sweep does, one text per person.
+        assert not mock_sms_service.method_calls
+
+
+class TestEditingADraftTextsNobody:
+    @pytest.fixture
+    def draft(self, edit):
+        edit.schedule.finalized_at = None
+        return edit
+
+    def test_adding(self, service, draft, mock_sms_service):
+        service.add_assignment(draft.schedule.id, draft.spare[0].id)
+        mock_sms_service.send_assignment_notice.assert_not_called()
+
+    def test_swapping(self, service, draft, mock_schedule_repo, mock_sms_service):
+        mock_schedule_repo.get_assignment_with_schedule.return_value = draft.assignment_of(draft.on_rota[0])
+        service.replace_assignment_worker(draft.schedule.schedule_assignments[0].id, draft.spare[0].id)
+        mock_sms_service.send_assignment_notice.assert_not_called()
+        mock_sms_service.send_assignment_cancelled.assert_not_called()
+
+    def test_removing(self, service, draft, mock_schedule_repo, mock_sms_service):
+        mock_schedule_repo.get_assignment_with_schedule.return_value = draft.assignment_of(draft.on_rota[0])
+        service.remove_assignment(draft.schedule.schedule_assignments[0].id)
+        mock_schedule_repo.delete_assignment.assert_called_once()
+        mock_sms_service.send_assignment_cancelled.assert_not_called()
+
+
+class TestDeleteMonth:
+    MARCH = MonthRef(year=2099, month=3)
+
+    def test_drafts_go_silently(self, service, mock_schedule_repo, mock_sms_service):
+        draft = make_schedule(finalized_at=None, scheduled_date=date(2099, 3, 1))
+        draft.schedule_assignments = [make_assignment(notice_sent_at="2099-02-01T00:00:00Z")]
+        mock_schedule_repo.get_by_department.return_value = [draft]
+
+        result = service.delete_month(uuid4(), self.MARCH, ScheduleStatus.DRAFT)
+
+        mock_schedule_repo.delete_schedules.assert_called_once_with([draft.id])
+        assert result.count == 1
+        mock_sms_service.send_duties_cancelled.assert_not_called()
+
+    def test_finalized_past_dates_are_kept(self, service, mock_schedule_repo):
+        past = make_schedule(scheduled_date=date(2020, 3, 1))
+        mock_schedule_repo.get_by_department.return_value = [past]
+
+        result = service.delete_month(uuid4(), MonthRef(year=2020, month=3), ScheduleStatus.FINAL)
+
+        # Past rotas carry attendance a head has acted on.
+        assert result.count == 0
+        mock_schedule_repo.delete_schedules.assert_not_called()
+
+    def test_one_text_per_person_and_only_to_those_who_were_told(
+        self, service, mock_schedule_repo, mock_sms_service, mock_department_repo
+    ):
+        ada = make_worker(first_name="Ada", last_name="L", phone="+14165550101")
+        grace = make_worker(first_name="Grace", last_name="H", phone="+14165550102")
+        first = make_schedule(scheduled_date=date(2099, 3, 1))
+        second = make_schedule(scheduled_date=date(2099, 3, 8))
+        told = "2099-02-01T00:00:00Z"
+        first.schedule_assignments = [
+            make_assignment(worker_id=ada.id, workers=ada, notice_sent_at=told),
+            # Never told: finalized minutes ago, before the sweep reached her.
+            make_assignment(worker_id=grace.id, workers=grace, notice_sent_at=None),
+        ]
+        second.schedule_assignments = [make_assignment(worker_id=ada.id, workers=ada, notice_sent_at=told)]
+        mock_schedule_repo.get_by_department.return_value = [second, first]
+        mock_department_repo.get_by_id.return_value = make_department(name="Ushers")
+        mock_sms_service.send_duties_cancelled.return_value = True
+
+        result = service.delete_month(uuid4(), self.MARCH, ScheduleStatus.FINAL)
+
+        mock_schedule_repo.delete_schedules.assert_called_once()
+        mock_sms_service.send_duties_cancelled.assert_called_once()
+        kwargs = mock_sms_service.send_duties_cancelled.call_args.kwargs
+        assert kwargs["to"] == ada.phone
+        # Both of her dates, soonest first, in one message.
+        assert [when for _, when in kwargs["duties"]] == ["Sun 01 Mar at 09:00", "Sun 08 Mar at 09:00"]
+        assert (result.count, result.people, result.warnings) == (2, 2, [])
+
+    def test_a_failed_text_becomes_a_warning(self, service, mock_schedule_repo, mock_sms_service):
+        ada = make_worker(first_name="Ada", last_name="L", phone="+14165550101")
+        rota = make_schedule(scheduled_date=date(2099, 3, 1))
+        rota.schedule_assignments = [
+            make_assignment(worker_id=ada.id, workers=ada, notice_sent_at="2099-02-01T00:00:00Z")
+        ]
+        mock_schedule_repo.get_by_department.return_value = [rota]
+        mock_sms_service.send_duties_cancelled.return_value = False
+
+        result = service.delete_month(uuid4(), self.MARCH, ScheduleStatus.FINAL)
+
+        assert result.warnings == ["Could not text Ada L. Let them know another way."]

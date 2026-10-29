@@ -1,10 +1,13 @@
 import apiClient from './client'
 
 // `range` is an optional { from, to } pair of yyyy-MM-dd strings; omitting it returns
-// every schedule the department has.
-export const getSchedulesByDepartment = (departmentId, range) =>
+// every schedule the department has. `status` is 'draft' or 'final'; omitted returns both.
+export const getSchedulesByDepartment = (departmentId, range, status) =>
     apiClient.get(`/schedules/departments/${departmentId}`, {
-        params: range?.from && range?.to ? { from: range.from, to: range.to } : {},
+        params: {
+            ...(range?.from && range?.to ? { from: range.from, to: range.to } : {}),
+            ...(status ? { status } : {}),
+        },
     })
 
 export const getSchedule = scheduleId => apiClient.get(`/schedules/${scheduleId}`)
@@ -15,8 +18,23 @@ export const generateSchedule = data => apiClient.post('/schedules/generate', da
 export const previewMonthlySchedule = data =>
     apiClient.post('/schedules/generate-month/preview', data)
 
-// Saves the month the HOD approved, using the exact per-date worker selection.
+// Saves the month the HOD approved, using the exact per-date worker selection. With `draft: true`
+// nobody is texted until it is finalized.
 export const generateMonthlySchedule = data => apiClient.post('/schedules/generate-month', data)
+
+// Publishing a draft. Nothing is sent by these calls: the notice job texts everybody on the rota
+// within about 10 minutes, one message per person.
+export const finalizeSchedule = scheduleId => apiClient.post(`/schedules/${scheduleId}/finalize`)
+
+export const finalizeMonth = (departmentId, year, month) =>
+    apiClient.post(`/schedules/departments/${departmentId}/finalize-month`, { year, month })
+
+// `status` 'draft' deletes the month's drafts silently; 'final' deletes its upcoming finalized
+// rotas and texts whoever had been told. Returns { count, people, warnings }.
+export const deleteMonth = (departmentId, year, month, status) =>
+    apiClient.delete(`/schedules/departments/${departmentId}/month`, {
+        params: { year, month, status },
+    })
 
 export const deleteSchedule = scheduleId => apiClient.delete(`/schedules/${scheduleId}`)
 

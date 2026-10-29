@@ -17,13 +17,16 @@ from app.schemas.schedules.models import (
     AssignableWorker,
     AssignmentResponse,
     AssignmentWorkerRequest,
+    MonthActionResult,
     MonthlyScheduleCommitRequest,
     MonthlySchedulePreview,
     MonthlySchedulePreviewRequest,
     MonthlyScheduleResult,
+    MonthRef,
     ScheduleCreate,
     ScheduleEditResult,
     ScheduleResponse,
+    ScheduleStatus,
 )
 from app.service.reminders.service import ReminderService
 from app.service.schedules.service import ScheduleService
@@ -37,6 +40,9 @@ def list_schedules_by_department(
     department_id: UUID,
     from_date: date | None = Query(None, alias="from", description="Inclusive lower bound on scheduled_date"),
     to_date: date | None = Query(None, alias="to", description="Inclusive upper bound on scheduled_date"),
+    schedule_status: ScheduleStatus | None = Query(
+        None, alias="status", description="draft or final; both when omitted"
+    ),
     token: TokenPayload = HODUser,
     service: ScheduleService = Depends(get_schedule_service),
     worker_service: WorkerService = Depends(get_worker_service),
@@ -47,7 +53,55 @@ def list_schedules_by_department(
     worker reads their own duties through /schedules/workers/{id}/assignments instead.
     """
     worker_service.authorize_create_assignment(token, department_id)
-    return service.get_schedules_by_department(department_id, from_date, to_date)
+    return service.get_schedules_by_department(department_id, from_date, to_date, schedule_status)
+
+
+# ----------------------------------------------------------------
+# Drafts
+#
+# A draft texts nobody. Finalizing is what publishes it; the notice sweep then texts everybody
+# on it within notice_interval_minutes, one message per person.
+# ----------------------------------------------------------------
+
+
+@router.post("/departments/{department_id}/finalize-month", response_model=MonthActionResult)
+def finalize_month(
+    department_id: UUID,
+    data: MonthRef,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> MonthActionResult:
+    """Finalize every draft the department has in one month."""
+    worker_service.authorize_create_assignment(token, department_id)
+    return service.finalize_month(department_id, data, token.email)
+
+
+@router.delete("/departments/{department_id}/month", response_model=MonthActionResult)
+def delete_month(
+    department_id: UUID,
+    year: int = Query(ge=2020, le=2100),
+    month: int = Query(ge=1, le=12),
+    schedule_status: ScheduleStatus = Query(alias="status"),
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> MonthActionResult:
+    """Delete a month's drafts, or its upcoming finalized rotas (texting whoever had been told)."""
+    worker_service.authorize_create_assignment(token, department_id)
+    return service.delete_month(department_id, MonthRef(year=year, month=month), schedule_status)
+
+
+@router.post("/{schedule_id}/finalize", response_model=ScheduleResponse)
+def finalize_schedule(
+    schedule_id: UUID,
+    token: TokenPayload = HODUser,
+    service: ScheduleService = Depends(get_schedule_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> ScheduleResponse:
+    """Finalize one draft rota."""
+    worker_service.authorize_create_assignment(token, service.get_schedule(schedule_id).department_id)
+    return service.finalize_schedule(schedule_id, token.email)
 
 
 @router.get("/{schedule_id}", response_model=ScheduleResponse)

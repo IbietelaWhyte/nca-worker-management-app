@@ -8,6 +8,7 @@ import {
 } from '@/api/attendance'
 import {
     addAssignment,
+    finalizeSchedule,
     getSchedule,
     removeAssignment,
     replaceAssignmentWorker,
@@ -122,6 +123,12 @@ export function useScheduleDetail(scheduleId) {
 
     const reopenAttendance = async () => replaceFrom(await apiReopenAttendance(scheduleId))
 
+    // Publishes a draft. The notice job texts everybody on it; this call sends nothing itself.
+    const finalize = async () => {
+        const response = await finalizeSchedule(scheduleId)
+        setSchedule(response.data)
+    }
+
     const sendReminders = async () => {
         const response = await triggerReminders()
         return response.data
@@ -148,5 +155,6 @@ export function useScheduleDetail(scheduleId) {
         reopenAttendance,
         sendReminders,
         sendRemindersForSchedule,
+        finalize,
     }
 }

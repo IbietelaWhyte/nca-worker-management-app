@@ -95,7 +95,11 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Can I plan a whole month in one go?',
-                answer: 'Yes. Generating a month shows you every date first, with the workers it would pick and who is spare. Nothing is saved until you commit, and you can drop any date you do not want.',
+                answer: 'Yes. Generating a month shows you every date first, with the workers it would pick and who is spare, and you can swap anybody before saving. Then choose Save Draft to keep working on it without telling anybody, or Finalize to publish it and text everyone on it.',
+            },
+            {
+                question: 'What is a draft?',
+                answer: 'A month you have saved but not published. Nobody on it is texted and workers cannot see it, so you can change it as much as you like. Drafts are under the Drafts tab on the Schedules page, grouped by month, and any head of the department can open and finish them. When it is right, finalize one rota or the whole month: everyone on it then gets one text listing their dates, within about 10 minutes. Delete month there removes the drafts without telling anybody.',
             },
             {
                 question: 'Why was a date skipped or left understaffed?',
@@ -107,7 +111,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Can I change a rota after it has been generated?',
-                answer: 'Yes. Open the schedule and use Swap to put somebody else in a duty, Remove to take somebody off, or Add worker to put another person on. Everybody affected gets a text, including the person coming off. There can only be one schedule per department, date and subteam, so adjust the existing one rather than generating a second.',
+                answer: 'Yes. Open the schedule and use Swap to put somebody else in a duty, Remove to take somebody off, or Add worker to put another person on. Everybody affected gets a text, including the person coming off, unless the rota is still a draft, when nobody hears anything until you finalize it. There can only be one schedule per department, date and subteam, so adjust the existing one rather than generating a second.',
             },
         ],
     },
@@ -118,7 +122,7 @@ export const FAQ_SECTIONS = [
         items: [
             {
                 question: 'When do workers actually get a text?',
-                answer: 'Once soon after the schedule is created, listing every date they are on, and then once for each reminder you set on the schedule — a week out, three days out, the night before, whichever you choose. Reminders go out in the morning, and a worker with several duties due that day gets one text covering all of them. You can also set no reminders at all if your team works off the printed rota.',
+                answer: 'Once soon after the schedule is finalized (a draft texts nobody), listing every date they are on, and then once for each reminder you set on the schedule — a week out, three days out, the night before, whichever you choose. Reminders go out in the morning, and a worker with several duties due that day gets one text covering all of them. You can also set no reminders at all if your team works off the printed rota.',
             },
             {
                 question: 'The app let me schedule somebody who is unavailable.',
