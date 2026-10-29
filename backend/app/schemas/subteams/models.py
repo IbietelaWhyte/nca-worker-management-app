@@ -25,6 +25,34 @@ def _validate_band(minimum: int | None, maximum: int | None) -> None:
         raise ValueError("The most workers must be the same as the fewest, or more")
 
 
+class RoleRequirement(BaseModel):
+    """At least `min_count` workers holding this department role on every generated rota."""
+
+    department_role_id: UUID
+    min_count: int = Field(ge=1)
+
+
+class RoleRequirementsSet(BaseModel):
+    """The whole set of requirements for one subteam. An empty list clears them."""
+
+    requirements: list[RoleRequirement] = []
+
+    @model_validator(mode="after")
+    def _unique_roles(self) -> "RoleRequirementsSet":
+        """One count per role: two rows for the same role cannot both be true.
+
+        Returns:
+            RoleRequirementsSet: The validated model.
+
+        Raises:
+            ValueError: If a role appears more than once.
+        """
+        role_ids = [r.department_role_id for r in self.requirements]
+        if len(role_ids) != len(set(role_ids)):
+            raise ValueError("Each role can only be listed once")
+        return self
+
+
 class Subteam(BaseModel):
     id: UUID
     name: str
@@ -33,6 +61,9 @@ class Subteam(BaseModel):
     min_workers_per_slot: int | None = None
     max_workers_per_slot: int | None = None
     created_at: datetime
+    # Embedded by the department's subteam list only. Defaulted because a write does not return
+    # its embeds, and every other read of a subteam has no use for them.
+    role_requirements: list[RoleRequirement] = []
 
 
 class SubteamCreate(BaseModel):

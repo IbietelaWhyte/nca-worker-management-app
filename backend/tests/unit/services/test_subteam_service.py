@@ -4,14 +4,18 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError
-from app.schemas.subteams.models import SubteamCreate, SubteamUpdate
+from app.schemas.subteams.models import RoleRequirement, RoleRequirementsSet, SubteamCreate, SubteamUpdate
 from app.service.subteams.service import SubteamService
-from tests.unit.services.conftest import make_subteam
+from tests.unit.services.conftest import make_department, make_department_role, make_subteam
 
 
 @pytest.fixture
-def service(mock_subteam_repo, mock_department_repo):
-    return SubteamService(subteam_repo=mock_subteam_repo, department_repo=mock_department_repo)
+def service(mock_subteam_repo, mock_department_repo, mock_department_role_repo):
+    return SubteamService(
+        subteam_repo=mock_subteam_repo,
+        department_repo=mock_department_repo,
+        department_role_repo=mock_department_role_repo,
+    )
 
 
 class TestGetSubteam:
@@ -136,3 +140,49 @@ class TestUnassignWorker:
         mock_subteam_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.unassign_worker(uuid4(), uuid4())
+
+
+class TestSetRoleRequirements:
+    @pytest.fixture
+    def setup(self, mock_subteam_repo, mock_department_repo, mock_department_role_repo):
+        department = make_department(band=(2, 4))
+        subteam = make_subteam(department_id=department.id, name="Seekers")
+        teacher = make_department_role(department_id=department.id, name="Teacher")
+        helper = make_department_role(department_id=department.id, name="Helper")
+        mock_subteam_repo.get_by_id.return_value = subteam
+        mock_department_repo.get_by_id.return_value = department
+        mock_department_role_repo.get_by_department.return_value = [teacher, helper]
+        return SimpleNamespace(subteam=subteam, teacher=teacher, helper=helper)
+
+    def test_stores_the_set(self, service, setup, mock_subteam_repo):
+        wanted = [RoleRequirement(department_role_id=setup.teacher.id, min_count=1)]
+        assert service.set_role_requirements(setup.subteam.id, RoleRequirementsSet(requirements=wanted)) == wanted
+        mock_subteam_repo.replace_role_requirements.assert_called_once_with(setup.subteam.id, wanted)
+
+    def test_an_empty_set_clears(self, service, setup, mock_subteam_repo):
+        service.set_role_requirements(setup.subteam.id, RoleRequirementsSet(requirements=[]))
+        mock_subteam_repo.replace_role_requirements.assert_called_once_with(setup.subteam.id, [])
+
+    def test_refuses_a_role_from_another_department(self, service, setup, mock_subteam_repo):
+        stranger = RoleRequirement(department_role_id=uuid4(), min_count=1)
+        with pytest.raises(BadRequestError, match="do not belong"):
+            service.set_role_requirements(setup.subteam.id, RoleRequirementsSet(requirements=[stranger]))
+        mock_subteam_repo.replace_role_requirements.assert_not_called()
+
+    def test_refuses_a_total_above_the_maximum_and_names_it(self, service, setup, mock_subteam_repo):
+        # The subteam inherits the department's 2-4, and the planner never passes 4.
+        too_many = [
+            RoleRequirement(department_role_id=setup.teacher.id, min_count=2),
+            RoleRequirement(department_role_id=setup.helper.id, min_count=3),
+        ]
+        with pytest.raises(BadRequestError, match="2 Teacher \\+ 3 Helper is 5, but Seekers takes at most 4"):
+            service.set_role_requirements(setup.subteam.id, RoleRequirementsSet(requirements=too_many))
+        mock_subteam_repo.replace_role_requirements.assert_not_called()
+
+    def test_a_role_listed_twice_is_refused_by_the_schema(self, setup):
+        twice = [
+            RoleRequirement(department_role_id=setup.teacher.id, min_count=1),
+            RoleRequirement(department_role_id=setup.teacher.id, min_count=2),
+        ]
+        with pytest.raises(ValueError, match="only be listed once"):
+            RoleRequirementsSet(requirements=twice)

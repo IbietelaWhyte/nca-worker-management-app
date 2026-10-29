@@ -11,6 +11,8 @@ from app.core.dependencies import (
 )
 from app.schemas.models import MessageResponse, TokenPayload
 from app.schemas.subteams.models import (
+    RoleRequirement,
+    RoleRequirementsSet,
     SubteamCreate,
     SubteamResponse,
     SubteamUpdate,
@@ -65,6 +67,19 @@ def update_subteam(
 ) -> SubteamResponse:
     worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
     return service.update_subteam(subteam_id, data)
+
+
+@router.put("/{subteam_id}/role-requirements", response_model=list[RoleRequirement])
+def set_subteam_role_requirements(
+    subteam_id: UUID,
+    data: RoleRequirementsSet,
+    token: TokenPayload = HODUser,
+    service: SubteamService = Depends(get_subteam_service),
+    worker_service: WorkerService = Depends(get_worker_service),
+) -> list[RoleRequirement]:
+    """Replace the minimum count of each role on this subteam's generated rotas."""
+    worker_service.authorize_create_assignment(token, service.get_subteam(subteam_id).department_id)
+    return service.set_role_requirements(subteam_id, data)
 
 
 @router.delete("/{subteam_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -53,7 +53,7 @@ export const formatSlotRange = (min, max) => {
  * A subteam's own band, or the department's when it inherits.
  *
  * Both bounds or neither — the schema enforces it — so one null check settles the pair. Mirrors
- * `_staffing_band` in the scheduling service, which is what actually decides the rota.
+ * `staffing_band` in the subteam service, which is what actually decides the rota.
  *
  * @param {{min_workers_per_slot?: number|null, max_workers_per_slot?: number|null}|null|undefined} subteam
  * @param {{min_workers_per_slot?: number, max_workers_per_slot?: number}|null|undefined} department
@@ -66,3 +66,19 @@ export const resolveSlotRange = (subteam, department) =>
               max: department?.max_workers_per_slot ?? null,
           }
         : { min: subteam.min_workers_per_slot, max: subteam.max_workers_per_slot }
+
+/**
+ * A subteam's role requirements as a phrase: "Needs 1 Teacher, 2 Helper". Null when there are
+ * none, or none whose role still exists. Role names are used as written, so no plural is added.
+ *
+ * @param {{department_role_id: string, min_count: number}[]|undefined} requirements
+ * @param {{id: string, name: string}[]} roles The department's roles.
+ * @returns {string|null}
+ */
+export const describeRoleRequirements = (requirements, roles) => {
+    const names = Object.fromEntries(roles.map(role => [role.id, role.name]))
+    const parts = (requirements ?? [])
+        .filter(r => names[r.department_role_id])
+        .map(r => `${r.min_count} ${names[r.department_role_id]}`)
+    return parts.length ? `Needs ${parts.join(', ')}` : null
+}

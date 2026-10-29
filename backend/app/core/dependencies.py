@@ -457,12 +457,14 @@ def get_attendance_service(
 def get_subteam_service(
     subteam_repo: SubteamRepository = Depends(get_subteam_repository),
     department_repo: DepartmentRepository = Depends(get_department_repository),
+    department_role_repo: DepartmentRoleRepository = Depends(get_department_role_repository),
 ) -> SubteamService:
     """FastAPI dependency that provides a SubteamService instance.
 
     Args:
         subteam_repo: SubteamRepository dependency.
         department_repo: DepartmentRepository dependency.
+        department_role_repo: DepartmentRoleRepository dependency, for role requirements.
 
     Returns:
         SubteamService: Service for subteam business logic operations.
@@ -470,6 +472,7 @@ def get_subteam_service(
     return SubteamService(
         subteam_repo=subteam_repo,
         department_repo=department_repo,
+        department_role_repo=department_role_repo,
     )
 
 

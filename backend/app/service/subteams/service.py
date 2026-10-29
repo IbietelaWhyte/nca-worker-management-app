@@ -2,23 +2,64 @@ from uuid import UUID
 
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
+from app.repository.department_roles.repository import DepartmentRoleRepository
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.subteams.repository import SubteamRepository
-from app.schemas.subteams.models import SubteamCreate, SubteamResponse, SubteamUpdate, SubteamWithWorkersResponse
+from app.schemas.departments.models import DepartmentResponse
+from app.schemas.subteams.models import (
+    RoleRequirement,
+    RoleRequirementsSet,
+    SubteamCreate,
+    SubteamResponse,
+    SubteamUpdate,
+    SubteamWithWorkersResponse,
+)
 
 logger = get_logger(__name__)
 
 
+def staffing_band(subteam: SubteamResponse | None, department: DepartmentResponse) -> tuple[int, int]:
+    """The (minimum, maximum) a group has to staff to.
+
+    A subteam overrides the whole band or inherits the whole band — `chk_subteam_inherit_both`
+    makes a half-set override unrepresentable — so one `is None` test settles both bounds.
+
+    Tested with `is None` rather than the old `subteam.workers_per_slot or ...`: a minimum of 0
+    ("use whoever is free, never flag it short") is now a legitimate setting, and `or` would
+    silently discard it in favour of the department's. The old expression was only ever safe
+    because a CHECK forbade 0, and that guard does not survive the split.
+
+    Args:
+        subteam: The group's subteam, or None for the department-only roster.
+        department: The department, which supplies the band when the subteam inherits.
+
+    Returns:
+        tuple[int, int]: Minimum and maximum workers for this group on one date.
+    """
+    if subteam is not None and subteam.min_workers_per_slot is not None:
+        # max is guaranteed non-None alongside min by chk_subteam_inherit_both; the `or` is a
+        # belt-and-braces default for a row that predates the constraint.
+        return subteam.min_workers_per_slot, subteam.max_workers_per_slot or subteam.min_workers_per_slot
+    return department.min_workers_per_slot, department.max_workers_per_slot
+
+
 class SubteamService:
-    def __init__(self, subteam_repo: SubteamRepository, department_repo: DepartmentRepository) -> None:
+    def __init__(
+        self,
+        subteam_repo: SubteamRepository,
+        department_repo: DepartmentRepository,
+        department_role_repo: DepartmentRoleRepository,
+    ) -> None:
         """Initialize the SubteamService with required repositories.
 
         Args:
             subteam_repo: Repository for subteam database operations.
             department_repo: Repository for department database operations.
+            department_role_repo: Repository for department roles, to check role requirements.
         """
         self.subteam_repo = subteam_repo
         self.department_repo = department_repo
+        self.department_role_repo = department_role_repo
         self.logger = logger.bind(service="SubteamService")
 
     def get_subteam(self, subteam_id: UUID) -> SubteamResponse:
@@ -222,3 +263,47 @@ class SubteamService:
         subteams = self.subteam_repo.get_by_department(department_id)
         log.info("fetched_subteams_by_department", count=len(subteams))
         return subteams
+
+    def set_role_requirements(self, subteam_id: UUID, data: RoleRequirementsSet) -> list[RoleRequirement]:
+        """Replace the minimum count of each department role on this subteam's rotas.
+
+        Two rules no constraint can hold, because each spans tables: every role must belong to the
+        subteam's own department, and the minimums together may not exceed the subteam's maximum —
+        the planner never passes the maximum, so a larger total could never be met and would mark
+        every date short.
+
+        Args:
+            subteam_id: The subteam whose requirements to set.
+            data: The complete new set. An empty list clears them.
+
+        Returns:
+            list[RoleRequirement]: The requirements now stored.
+
+        Raises:
+            NotFoundError: If the subteam or its department does not exist.
+            BadRequestError: If a role is not the department's, or the total exceeds the maximum.
+        """
+        log = self.logger.bind(method="set_role_requirements", subteam_id=str(subteam_id))
+        subteam = self.get_subteam(subteam_id)
+        department = self.department_repo.get_by_id(subteam.department_id)
+        if not department:
+            raise NotFoundError(f"Department {subteam.department_id} not found")
+
+        roles = {role.id: role.name for role in self.department_role_repo.get_by_department(department.id)}
+        strangers = [r.department_role_id for r in data.requirements if r.department_role_id not in roles]
+        if strangers:
+            log.warning("role_requirement_outside_department", roles=[str(r) for r in strangers])
+            raise BadRequestError(f"{len(strangers)} of these roles do not belong to {department.name}")
+
+        _, maximum = staffing_band(subteam, department)
+        total = sum(r.min_count for r in data.requirements)
+        if total > maximum:
+            parts = " + ".join(f"{r.min_count} {roles[r.department_role_id]}" for r in data.requirements)
+            raise BadRequestError(
+                f"{parts} is {total}, but {subteam.name} takes at most {maximum} on a rota. "
+                "Lower a count, or raise the most workers."
+            )
+
+        self.subteam_repo.replace_role_requirements(subteam_id, data.requirements)
+        log.info("role_requirements_set", count=len(data.requirements), total=total)
+        return data.requirements

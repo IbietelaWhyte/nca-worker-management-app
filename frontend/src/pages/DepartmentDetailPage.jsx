@@ -59,7 +59,7 @@ import {
     Download,
     Search,
 } from 'lucide-react'
-import { formatSlotRange } from '@/lib/staffing'
+import { describeRoleRequirements, formatSlotRange } from '@/lib/staffing'
 import { downloadCsv, slug, toCsv } from '@/lib/csv'
 import { toMemberCsv } from '@/lib/workerExport'
 import { format } from 'date-fns'
@@ -91,6 +91,7 @@ export default function DepartmentDetailPage() {
         loading: subteamsLoading,
         addSubteam,
         editSubteam,
+        setRoleRequirements,
         removeSubteam,
     } = useSubteams(id)
 
@@ -203,11 +204,24 @@ export default function DepartmentDetailPage() {
         setSubteamDialogOpen(true)
     }
 
-    const handleSubteamSubmit = async formData => {
-        if (editingSubteam) {
-            await editSubteam(editingSubteam.id, formData)
-        } else {
-            await addSubteam(formData)
+    const handleSubteamSubmit = async (formData, requirements) => {
+        const saved = editingSubteam
+            ? await editSubteam(editingSubteam.id, formData)
+            : await addSubteam(formData)
+        // If the requirements then fail, the form stays open on the subteam that now exists, so
+        // pressing Save again updates it instead of creating a second one.
+        setEditingSubteam({ ...saved, role_requirements: editingSubteam?.role_requirements })
+
+        const before = JSON.stringify(
+            [...(editingSubteam?.role_requirements ?? [])]
+                .map(r => [r.department_role_id, r.min_count])
+                .sort()
+        )
+        const after = JSON.stringify(
+            requirements.map(r => [r.department_role_id, r.min_count]).sort()
+        )
+        if (before !== after) {
+            await setRoleRequirements(saved.id, requirements)
         }
         setSubteamDialogOpen(false)
         setEditingSubteam(null)
@@ -873,6 +887,17 @@ export default function DepartmentDetailPage() {
                                                                         subteam.max_workers_per_slot
                                                                     )
                                                                 )}
+                                                                {describeRoleRequirements(
+                                                                    subteam.role_requirements,
+                                                                    roles
+                                                                ) && (
+                                                                    <p className="text-xs text-muted-foreground">
+                                                                        {describeRoleRequirements(
+                                                                            subteam.role_requirements,
+                                                                            roles
+                                                                        )}
+                                                                    </p>
+                                                                )}
                                                             </TableCell>
                                                             <TableCell>
                                                                 <span className="text-sm text-muted-foreground">
@@ -1128,6 +1153,17 @@ export default function DepartmentDetailPage() {
                                                                       subteam.max_workers_per_slot
                                                                   )} per service`}
                                                         </p>
+                                                        {describeRoleRequirements(
+                                                            subteam.role_requirements,
+                                                            roles
+                                                        ) && (
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {describeRoleRequirements(
+                                                                    subteam.role_requirements,
+                                                                    roles
+                                                                )}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                     {isExpanded ? (
                                                         <ChevronDown
@@ -1551,6 +1587,7 @@ export default function DepartmentDetailPage() {
                             min: department?.min_workers_per_slot,
                             max: department?.max_workers_per_slot,
                         }}
+                        roles={roles}
                         onSubmit={handleSubteamSubmit}
                         onCancel={() => {
                             setSubteamDialogOpen(false)

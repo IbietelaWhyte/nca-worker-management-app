@@ -5,9 +5,10 @@
 
 from collections import Counter
 from datetime import date, timedelta
+from uuid import uuid4
 
 from app.schemas.schedules.models import DatePlanStatus
-from app.service.schedules.planner import GroupContext, PlanContext, plan_month
+from app.service.schedules.planner import GroupContext, PlanContext, RoleQuota, plan_month
 from tests.unit.services.conftest import make_worker
 
 # Four consecutive Sundays in March 2026.
@@ -688,3 +689,107 @@ class TestSpacing:
         plans = plan_month(march, ctx)
 
         assert third.id in selected(plans[0])
+
+
+TEACHER = uuid4()
+HELPER = uuid4()
+
+
+def roled_group(workers, band, quotas, roles, **kwargs) -> PlanContext:
+    """One group that requires roles. `quotas` is [(role_id, name, min)], `roles` worker -> role."""
+    minimum, maximum = band
+    return PlanContext(
+        groups=[
+            GroupContext(
+                key="",
+                workers=workers,
+                min_workers=minimum,
+                max_workers=maximum,
+                role_quotas=[RoleQuota(role_id=r, name=n, min_count=c) for r, n, c in quotas],
+            )
+        ],
+        worker_roles=roles,
+        **kwargs,
+    )
+
+
+class TestRoleRequirements:
+    def test_a_required_role_is_picked_even_when_everyone_else_is_ahead(self):
+        # Every Helper is fresher than the Teacher, so fairness alone would field three Helpers.
+        helpers = make_workers(4)
+        teacher = make_worker(first_name="Tess", email="tess@example.com")
+        roles = {h.id: HELPER for h in helpers} | {teacher.id: TEACHER}
+        ctx = roled_group([*helpers, teacher], (3, 3), [(TEACHER, "Teacher", 1)], roles, total_count={teacher.id: 10})
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        assert teacher.id in selected(plan)
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.PLANNED
+
+    def test_a_missing_role_is_flagged_even_with_a_full_head_count(self):
+        helpers = make_workers(4)
+        teacher = make_worker(first_name="Tess", email="tess@example.com")
+        roles = {h.id: HELPER for h in helpers} | {teacher.id: TEACHER}
+        ctx = roled_group(
+            [*helpers, teacher],
+            (3, 3),
+            [(TEACHER, "Teacher", 1)],
+            roles,
+            unavailable={SUNDAYS[0]: {teacher.id}},
+        )
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        # The slot is not handed to a Helper and called planned: the other slots still fill.
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.UNDERSTAFFED
+        assert plan.groups[0].message == "No Teacher available (1 needed)."
+        # The head count is whole, so the date must not read "3 of 3 slots filled".
+        assert plan.message == "A required role could not be filled."
+
+    def test_a_partly_met_role_says_how_many_were_found(self):
+        workers = make_workers(4)
+        roles = {workers[0].id: HELPER, workers[1].id: TEACHER, workers[2].id: TEACHER, workers[3].id: TEACHER}
+        ctx = roled_group(workers, (1, 4), [(HELPER, "Helper", 2)], roles)
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        assert plan.groups[0].message == "Only 1 Helper available (2 needed)."
+
+    def test_quotas_never_pass_the_maximum(self):
+        teachers = make_workers(3)
+        helpers = [make_worker(first_name=f"H{i}", email=f"h{i}@example.com") for i in range(3)]
+        roles = {t.id: TEACHER for t in teachers} | {h.id: HELPER for h in helpers}
+        # 2 + 2 against a maximum of 3: the ceiling wins and the second role comes up short.
+        ctx = roled_group([*teachers, *helpers], (3, 3), [(TEACHER, "Teacher", 2), (HELPER, "Helper", 2)], roles)
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.UNDERSTAFFED
+
+    def test_the_role_rotates_among_its_holders(self):
+        # Fairness still runs within the role: three Teachers share four Sundays.
+        teachers = make_workers(3)
+        helpers = [make_worker(first_name=f"H{i}", email=f"h{i}@example.com") for i in range(6)]
+        roles = {t.id: TEACHER for t in teachers} | {h.id: HELPER for h in helpers}
+        ctx = roled_group([*teachers, *helpers], (3, 3), [(TEACHER, "Teacher", 1)], roles)
+
+        plans = plan_month(SUNDAYS, ctx)
+        teacher_ids = {t.id for t in teachers}
+        on_duty = [next(w for w in selected(p) if w in teacher_ids) for p in plans]
+
+        assert set(on_duty[:3]) == teacher_ids
+        assert all(a != b for a, b in zip(on_duty, on_duty[1:]))
+
+    def test_left_over_slots_go_to_whoever_is_next_whatever_their_role(self):
+        teachers = make_workers(4)
+        roles = {t.id: TEACHER for t in teachers}
+        ctx = roled_group(teachers, (1, 3), [(TEACHER, "Teacher", 1)], roles)
+
+        plan = plan_month([SUNDAYS[0]], ctx)[0]
+
+        # One required, two more by turn: a minimum, not an exact count.
+        assert len(selected(plan)) == 3
+        assert plan.status == DatePlanStatus.PLANNED
