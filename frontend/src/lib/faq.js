@@ -63,6 +63,10 @@ export const FAQ_SECTIONS = [
                 answer: 'A subteam is a group that serves together, like Team A and Team B, and can have its own number of workers per service. A role is the job somebody does on the day, like Head Usher. A worker can have both, or neither.',
             },
             {
+                question: 'Can I make sure every rota has a Teacher?',
+                answer: "Yes, per subteam. Edit the subteam and set how many of each role every rota needs, for example at least 1 Teacher and 2 Helpers. Those are picked first, taking turns among the people who hold that role, and any places left go to whoever is next whatever their role. If nobody with a required role is free on a date, that place is left empty and the date is marked short with the role named, so you can sort it out — it is never quietly given to somebody else. Each person's role comes from the Members tab. This only shapes rotas you generate from now on; it does not change ones already made.",
+            },
+            {
                 question: 'Where do I set how many workers are scheduled per service?',
                 answer: 'On the department. A subteam can override it with its own number, and a whole-department schedule fills each subteam to its own figure rather than sharing one total between them.',
             },

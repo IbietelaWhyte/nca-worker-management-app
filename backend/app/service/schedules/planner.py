@@ -28,6 +28,11 @@ Two things shape the design:
   and then nothing for three months. The streak is a sort term and not a filter, so it
   reorders the queue without ever refusing to staff a date: where there are more slots than
   fresh people, the shortest runs come back up. Eligibility is untouched.
+- **A group can require roles.** "At least 1 Teacher and 2 Helpers" is filled first, each
+  role from its own holders in fairness order, then any slots left go to whoever is next
+  regardless of role. Every count is a minimum and the maximum still caps the whole take.
+  A role nobody free holds leaves its slot empty and the group UNDERSTAFFED, rather than
+  handing the slot to somebody who cannot do the job and calling the date planned.
 
   It counts *consecutive* turns rather than just flagging the last one, because flagging
   cannot tell somebody on their second service running from somebody on their fifth. Where
@@ -49,6 +54,15 @@ ORDINARY = ""
 
 
 @dataclass
+class RoleQuota:
+    """At least `min_count` of a group's picks must hold this department role."""
+
+    role_id: UUID
+    name: str
+    min_count: int
+
+
+@dataclass
 class GroupContext:
     """One roster to staff on each date, with its own quota.
 
@@ -60,12 +74,15 @@ class GroupContext:
             judges an outcome — short of `max_workers` but at or above this one is
             fully planned, not understaffed.
         max_workers: Slots to fill when enough people are free. Never exceeded.
+        role_quotas: Roles this group must include, filled before anybody else. Empty for a
+            group that does not care, which plans exactly as before.
     """
 
     key: str
     workers: list[Worker]
     min_workers: int
     max_workers: int
+    role_quotas: list[RoleQuota] = field(default_factory=list)
 
 
 @dataclass
@@ -102,6 +119,7 @@ class PlanContext:
             occurrences the worker served, counting back from the latest one and stopping
             at the first they missed. 0 means they sat the last one out, which is the
             front of the queue.
+        worker_roles: Worker -> their department role. Read only for groups with quotas.
     """
 
     groups: list[GroupContext]
@@ -115,6 +133,7 @@ class PlanContext:
     special_count: dict[tuple[UUID, str], int] = field(default_factory=dict)
     last_served: dict[tuple[UUID, str], date] = field(default_factory=dict)
     streak: dict[tuple[UUID, str], int] = field(default_factory=dict)
+    worker_roles: dict[UUID, UUID] = field(default_factory=dict)
 
 
 @dataclass
@@ -144,6 +163,9 @@ class GroupPlanResult:
     selected: list[UUID] = field(default_factory=list)
     alternates: list[UUID] = field(default_factory=list)
     message: str | None = None
+    # Short of a required role, whatever the head count. Lets the date's message say so
+    # instead of "3 of 3 slots filled" beside an UNDERSTAFFED badge.
+    role_short: bool = False
 
 
 @dataclass
@@ -205,7 +227,10 @@ def plan_month(dates: list[date], ctx: PlanContext) -> list[DatePlanResult]:
         unavailable = ctx.unavailable.get(scheduled_date, set())
         booked = already_scheduled.setdefault(scheduled_date, set())
 
-        group_results = [_plan_group(group, scheduled_date, kind, unavailable, booked, tallies) for group in ctx.groups]
+        group_results = [
+            _plan_group(group, scheduled_date, kind, unavailable, booked, tallies, ctx.worker_roles)
+            for group in ctx.groups
+        ]
 
         results.append(_aggregate(scheduled_date, group_results, is_special))
 
@@ -219,6 +244,7 @@ def _plan_group(
     unavailable: set[UUID],
     booked: set[UUID],
     tallies: _Tallies,
+    worker_roles: dict[UUID, UUID] | None = None,
 ) -> GroupPlanResult:
     """Staff one group on one date, mutating the running fairness and booking state."""
     free = [w for w in group.workers if w.id not in unavailable and w.id not in booked]
@@ -234,10 +260,9 @@ def _plan_group(
 
     free.sort(key=lambda w: _fairness_key(w, kind, tallies))
 
-    # Fill to the ceiling when the people are there. The floor never limits the take —
-    # it only judges the result afterwards.
-    selected = free[: group.max_workers]
-    alternates = free[group.max_workers :]
+    selected, role_shortfalls = _pick(free, group, worker_roles or {})
+    chosen_ids = {w.id for w in selected}
+    alternates = [w for w in free if w.id not in chosen_ids]
 
     # The streak is the one tally that moves for everybody, not just the picked: sitting a
     # service out is precisely what ends a run, and a worker left out because they were
@@ -266,35 +291,89 @@ def _plan_group(
         key=group.key,
         min_workers=group.min_workers,
         max_workers=group.max_workers,
-        status=_group_status(len(selected), group),
+        status=_group_status(len(selected), group, role_shortfalls),
         selected=[w.id for w in selected],
         alternates=[w.id for w in alternates],
-        message=_staffing_message(len(selected), group),
+        message=_staffing_message(len(selected), group, role_shortfalls),
+        role_short=bool(role_shortfalls),
     )
 
 
-def _group_status(filled: int, group: GroupContext) -> DatePlanStatus:
-    """UNDERSTAFFED is judged against the minimum alone.
+def _pick(
+    free: list[Worker], group: GroupContext, worker_roles: dict[UUID, UUID]
+) -> tuple[list[Worker], list[tuple[RoleQuota, int]]]:
+    """Choose who serves from `free`, already in fairness order.
+
+    Each required role is filled first from its own holders, in the order they appear — so
+    within a role the longest-overdue person still goes first — and then any slots left go
+    to the front of the queue whatever their role. The maximum caps the whole take, role
+    picks included. Without quotas this is exactly `free[:max_workers]`.
+
+    Returns:
+        The picks in fairness order, and each quota that could not be met with how many were
+        found for it.
+    """
+    chosen: set[UUID] = set()
+    shortfalls: list[tuple[RoleQuota, int]] = []
+    for quota in group.role_quotas:
+        room = group.max_workers - len(chosen)
+        holders = [w for w in free if w.id not in chosen and worker_roles.get(w.id) == quota.role_id]
+        taken = holders[: min(quota.min_count, max(room, 0))]
+        chosen.update(w.id for w in taken)
+        if len(taken) < quota.min_count:
+            shortfalls.append((quota, len(taken)))
+
+    # Fill to the ceiling when the people are there. The floor never limits the take — it only
+    # judges the result afterwards.
+    for worker in free:
+        if len(chosen) >= group.max_workers:
+            break
+        chosen.add(worker.id)
+
+    return [w for w in free if w.id in chosen], shortfalls
+
+
+def _group_status(
+    filled: int, group: GroupContext, role_shortfalls: list[tuple[RoleQuota, int]] | None = None
+) -> DatePlanStatus:
+    """UNDERSTAFFED is judged against the minimum, and against every required role.
 
     Short of the maximum is not a problem worth flagging: the maximum says how many to use
     when they are there, the minimum says the number below which the group cannot run. A
-    band of 2-4 that fields 3 is planned.
+    band of 2-4 that fields 3 is planned. A class with its full head count and no Teacher is
+    not, which is the whole point of requiring one.
     """
-    return DatePlanStatus.UNDERSTAFFED if filled < group.min_workers else DatePlanStatus.PLANNED
+    if filled < group.min_workers or role_shortfalls:
+        return DatePlanStatus.UNDERSTAFFED
+    return DatePlanStatus.PLANNED
 
 
-def _staffing_message(filled: int, group: GroupContext) -> str | None:
+def _staffing_message(
+    filled: int, group: GroupContext, role_shortfalls: list[tuple[RoleQuota, int]] | None = None
+) -> str | None:
     """Say what was filled, but only when it is worth saying.
 
-    Below the floor is a problem and names the floor. Between the two is worth mentioning —
-    a head may want to add somebody — but against the ceiling, so it does not read as a
-    complaint. At the ceiling there is nothing to say.
+    A missing role leads, since it is the thing a head has to act on and the head count may
+    look fine. Below the floor is a problem and names the floor. Between the two is worth
+    mentioning — a head may want to add somebody — but against the ceiling, so it does not read
+    as a complaint. At the ceiling there is nothing to say.
     """
+    parts = [_role_shortfall_message(quota, found) for quota, found in role_shortfalls or []]
     if filled < group.min_workers:
-        return f"Only {filled} of {group.min_workers} workers available."
-    if filled < group.max_workers:
-        return f"{filled} of {group.max_workers} slots filled."
-    return None
+        parts.append(f"Only {filled} of {group.min_workers} workers available.")
+    elif filled < group.max_workers:
+        parts.append(f"{filled} of {group.max_workers} slots filled.")
+    return " ".join(parts) or None
+
+
+def _role_shortfall_message(quota: RoleQuota, found: int) -> str:
+    """'No Teacher available (1 needed).' or 'Only 1 Helper available (2 needed).'
+
+    The role name is used as written, singular or not, so the count sits in brackets rather than
+    in front of a noun it would have to agree with.
+    """
+    found_text = "No" if found == 0 else f"Only {found}"
+    return f"{found_text} {quota.name} available ({quota.min_count} needed)."
 
 
 def _aggregate(scheduled_date: date, groups: list[GroupPlanResult], is_special: bool = False) -> DatePlanResult:
@@ -318,11 +397,15 @@ def _aggregate(scheduled_date: date, groups: list[GroupPlanResult], is_special: 
         # Minimums, not maximums: the date is only UNDERSTAFFED because a group fell below
         # its floor, so totalling ceilings here would contradict the per-group message.
         needed = sum(g.min_workers for g in groups)
+        message = f"{filled} of {needed} slots filled."
+        if filled >= needed and any(g.role_short for g in groups):
+            # The head count is fine, so the count alone would contradict the badge.
+            message = "A required role could not be filled."
         return DatePlanResult(
             scheduled_date=scheduled_date,
             status=DatePlanStatus.UNDERSTAFFED,
             groups=groups,
-            message=f"{filled} of {needed} slots filled.",
+            message=message,
             is_special=is_special,
         )
 

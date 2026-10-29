@@ -6,7 +6,7 @@ from supabase import Client
 from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.subteams import queries as q
-from app.schemas.subteams.models import SubteamResponse, SubteamWithWorkersResponse
+from app.schemas.subteams.models import RoleRequirement, SubteamResponse, SubteamWithWorkersResponse
 
 logger = get_logger(__name__)
 
@@ -47,10 +47,12 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
 
     def get_by_department(self, department_id: UUID) -> list[SubteamResponse]:
         """
-        Retrieve all subteams that belong to a specific department.
+        Retrieve all subteams that belong to a specific department, with their role requirements.
 
         This method queries the subteams table for records that have a matching
-        department_id, returning a list of subteams associated with that department.
+        department_id, returning a list of subteams associated with that department. Each
+        carries its `role_requirements`, so the department page can show them without a
+        request per subteam.
 
         Args:
             department_id (UUID): The unique identifier of the department.
@@ -61,11 +63,68 @@ class SubteamRepository(BaseRepository[SubteamResponse]):
         """
         log = self.logger.bind(method="get_by_department", department_id=str(department_id))
         response = (
-            self.client.table(q.TABLE).select(q.SELECT_ALL).eq(q.Columns.DEPARTMENT_ID, str(department_id)).execute()
+            self.client.table(q.TABLE)
+            .select(q.SELECT_WITH_ROLE_REQUIREMENTS)
+            .eq(q.Columns.DEPARTMENT_ID, str(department_id))
+            .execute()
         )
         subteams = self._to_model_list(response.data) if response.data else []
         log.debug("fetched_subteams_by_department", count=len(subteams))
         return subteams
+
+    def get_role_requirements(self, subteam_ids: list[UUID]) -> dict[UUID, dict[UUID, int]]:
+        """Fetch the role requirements of several subteams in one round-trip.
+
+        Args:
+            subteam_ids (list[UUID]): The subteams to read.
+
+        Returns:
+            dict[UUID, dict[UUID, int]]: Subteam -> department role -> minimum count. A subteam
+                with no requirements is absent.
+        """
+        if not subteam_ids:
+            return {}
+        response = (
+            self.client.table(q.REQUIREMENTS_TABLE)
+            .select(q.SELECT_ALL)
+            .in_(q.RequirementColumns.SUBTEAM_ID, [str(s) for s in subteam_ids])
+            .execute()
+        )
+        requirements: dict[UUID, dict[UUID, int]] = {}
+        for row in cast(list[dict[str, Any]], response.data or []):
+            subteam_id = UUID(row[q.RequirementColumns.SUBTEAM_ID])
+            role_id = UUID(row[q.RequirementColumns.DEPARTMENT_ROLE_ID])
+            requirements.setdefault(subteam_id, {})[role_id] = int(row[q.RequirementColumns.MIN_COUNT])
+        return requirements
+
+    def replace_role_requirements(self, subteam_id: UUID, requirements: list[RoleRequirement]) -> None:
+        """Make a subteam's role requirements exactly `requirements`.
+
+        Writes the new set before removing the old, as monthly leads do: a failure between the two
+        statements leaves a stale extra requirement rather than a subteam that silently lost one.
+
+        Args:
+            subteam_id (UUID): The subteam whose requirements to replace.
+            requirements (list[RoleRequirement]): The complete new set; empty clears them all.
+        """
+        log = self.logger.bind(method="replace_role_requirements", subteam_id=str(subteam_id))
+        if requirements:
+            rows: list[dict[str, Any]] = [
+                {
+                    q.RequirementColumns.SUBTEAM_ID: str(subteam_id),
+                    q.RequirementColumns.DEPARTMENT_ROLE_ID: str(r.department_role_id),
+                    q.RequirementColumns.MIN_COUNT: r.min_count,
+                }
+                for r in requirements
+            ]
+            self.client.table(q.REQUIREMENTS_TABLE).upsert(rows, on_conflict=q.REQUIREMENTS_CONFLICT).execute()
+
+        delete = self.client.table(q.REQUIREMENTS_TABLE).delete().eq(q.RequirementColumns.SUBTEAM_ID, str(subteam_id))
+        if requirements:
+            kept = [str(r.department_role_id) for r in requirements]
+            delete = delete.not_.in_(q.RequirementColumns.DEPARTMENT_ROLE_ID, kept)
+        delete.execute()
+        log.info("role_requirements_replaced", count=len(requirements))
 
     def get_with_workers(self, subteam_id: UUID) -> list[SubteamWithWorkersResponse]:
         """

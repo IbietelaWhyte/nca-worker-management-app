@@ -89,12 +89,17 @@ def mock_monthly_lead_service():
 
 @pytest.fixture
 def mock_subteam_repo():
-    return MagicMock(spec=SubteamRepository)
+    repo = MagicMock(spec=SubteamRepository)
+    # No requirements unless a test sets some; a bare MagicMock is truthy and would read as some.
+    repo.get_role_requirements.return_value = {}
+    return repo
 
 
 @pytest.fixture
 def mock_department_role_repo():
-    return MagicMock(spec=DepartmentRoleRepository)
+    repo = MagicMock(spec=DepartmentRoleRepository)
+    repo.get_role_ids_for_department.return_value = {}
+    return repo
 
 
 @pytest.fixture

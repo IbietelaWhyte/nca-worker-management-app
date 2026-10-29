@@ -16,7 +16,6 @@ from app.repository.subteams.repository import SubteamRepository
 from app.repository.worker_leave.repository import WorkerLeaveRepository
 from app.repository.workers.repository import WorkerRepository
 from app.schemas.department_roles.models import DepartmentRoleResponse
-from app.schemas.departments.models import DepartmentResponse
 from app.schemas.models import AvailabilityType, DayOfWeek
 from app.schemas.monthly_leads.models import first_of_month
 from app.schemas.schedules.models import (
@@ -41,9 +40,10 @@ from app.schemas.schedules.models import (
 from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker, WorkerResponse
 from app.service.monthly_leads.service import MonthlyLeadService
-from app.service.schedules.planner import ORDINARY, GroupContext, PlanContext, plan_month
+from app.service.schedules.planner import ORDINARY, GroupContext, PlanContext, RoleQuota, plan_month
 from app.service.sms.service import SMSService
 from app.service.special_services.service import SpecialServiceService
+from app.service.subteams.service import staffing_band
 
 logger = get_logger(__name__)
 
@@ -68,31 +68,6 @@ class ScopeGroup:
     def key(self) -> str:
         """Stable identity used to match planner results back to this group."""
         return str(self.subteam.id) if self.subteam else ""
-
-
-def _staffing_band(subteam: SubteamResponse | None, department: DepartmentResponse) -> tuple[int, int]:
-    """The (minimum, maximum) a group has to staff to.
-
-    A subteam overrides the whole band or inherits the whole band — `chk_subteam_inherit_both`
-    makes a half-set override unrepresentable — so one `is None` test settles both bounds.
-
-    Tested with `is None` rather than the old `subteam.workers_per_slot or ...`: a minimum of 0
-    ("use whoever is free, never flag it short") is now a legitimate setting, and `or` would
-    silently discard it in favour of the department's. The old expression was only ever safe
-    because a CHECK forbade 0, and that guard does not survive the split.
-
-    Args:
-        subteam: The group's subteam, or None for the department-only roster.
-        department: The department, which supplies the band when the subteam inherits.
-
-    Returns:
-        tuple[int, int]: Minimum and maximum workers for this group on one date.
-    """
-    if subteam is not None and subteam.min_workers_per_slot is not None:
-        # max is guaranteed non-None alongside min by chk_subteam_inherit_both; the `or` is a
-        # belt-and-braces default for a row that predates the constraint.
-        return subteam.min_workers_per_slot, subteam.max_workers_per_slot or subteam.min_workers_per_slot
-    return department.min_workers_per_slot, department.max_workers_per_slot
 
 
 def _active(workers: list[WorkerResponse]) -> list[Worker]:
@@ -1115,12 +1090,12 @@ class ScheduleService:
                 raise NotFoundError(f"Subteam {subteam_id} not found")
             members = self.subteam_repo.get_with_workers(subteam_id)
             workers = [w.worker for w in members if w.worker and w.worker.is_active] if members else []
-            minimum, maximum = _staffing_band(subteam, department)
+            minimum, maximum = staffing_band(subteam, department)
             return [ScopeGroup(subteam=subteam, min_workers=minimum, max_workers=maximum, workers=workers)]
 
         if scope == ScopeType.DEPARTMENT_ONLY:
             response = self.worker_repo.get_department_only_workers(department_id)
-            minimum, maximum = _staffing_band(None, department)
+            minimum, maximum = staffing_band(None, department)
             return [ScopeGroup(subteam=None, min_workers=minimum, max_workers=maximum, workers=_active(response))]
 
         # ScopeType.DEPARTMENT_ALL — one group per subteam, plus the un-subteamed workers.
@@ -1132,14 +1107,14 @@ class ScheduleService:
             subteam_workers = _active(grouped.get(subteam.id, []))
             if not subteam_workers:
                 continue
-            minimum, maximum = _staffing_band(subteam, department)
+            minimum, maximum = staffing_band(subteam, department)
             groups.append(
                 ScopeGroup(subteam=subteam, min_workers=minimum, max_workers=maximum, workers=subteam_workers)
             )
 
         department_only = _active(grouped.get(None, []))
         if department_only:
-            minimum, maximum = _staffing_band(None, department)
+            minimum, maximum = staffing_band(None, department)
             groups.append(ScopeGroup(subteam=None, min_workers=minimum, max_workers=maximum, workers=department_only))
 
         return groups
@@ -1164,13 +1139,22 @@ class ScheduleService:
         `special_dates` is passed in rather than resolved here so the caller resolves the
         window once and reuses it for the badges on screen as well as the plan.
         """
+        quotas = self._role_quotas(groups, department_id)
         plan_groups = [
-            GroupContext(key=g.key, workers=g.workers, min_workers=g.min_workers, max_workers=g.max_workers)
+            GroupContext(
+                key=g.key,
+                workers=g.workers,
+                min_workers=g.min_workers,
+                max_workers=g.max_workers,
+                role_quotas=quotas.get(g.key, []),
+            )
             for g in groups
         ]
+        # Only read when some group requires a role: one query, and none at all otherwise.
+        worker_roles = self.department_role_repo.get_role_ids_for_department(department_id) if quotas else {}
         worker_ids = [w.id for g in groups for w in g.workers]
         if not dates:
-            return PlanContext(groups=plan_groups)
+            return PlanContext(groups=plan_groups, worker_roles=worker_roles)
 
         range_start, range_end = min(dates), max(dates)
 
@@ -1239,7 +1223,35 @@ class ScheduleService:
             special_count=special_count,
             last_served=last_served,
             streak=_streaks_from(rosters, worker_ids),
+            worker_roles=worker_roles,
         )
+
+    def _role_quotas(self, groups: list[ScopeGroup], department_id: UUID) -> dict[str, list[RoleQuota]]:
+        """Each subteam group's required roles, keyed like the planner's groups.
+
+        Two queries at most whatever the number of groups, and none when no group is a subteam.
+        The department-only group never has quotas: requirements are set per subteam.
+
+        Args:
+            groups: The groups being planned.
+            department_id: Their department, for the role names the messages use.
+
+        Returns:
+            dict[str, list[RoleQuota]]: Group key -> its quotas. Groups without any are absent.
+        """
+        subteam_ids = [g.subteam.id for g in groups if g.subteam is not None]
+        requirements = self.subteam_repo.get_role_requirements(subteam_ids)
+        if not requirements:
+            return {}
+        names = {role.id: role.name for role in self.department_role_repo.get_by_department(department_id)}
+        return {
+            str(subteam_id): [
+                RoleQuota(role_id=role_id, name=names.get(role_id, "required role"), min_count=count)
+                # Sorted by name so a preview's messages come out in the same order every time.
+                for role_id, count in sorted(by_role.items(), key=lambda item: names.get(item[0], ""))
+            ]
+            for subteam_id, by_role in requirements.items()
+        }
 
     def _build_unavailability_map(
         self, worker_ids: list[UUID], dates: list[date], range_start: date, range_end: date

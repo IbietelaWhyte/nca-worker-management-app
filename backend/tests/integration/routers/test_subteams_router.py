@@ -236,3 +236,41 @@ class TestDepartmentScope:
         # Each member embeds their phone and email.
         client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
         assert client.get(f"/api/v1/subteams/{uuid4()}/workers").status_code == 403
+
+
+class TestSetRoleRequirements:
+    BODY = {"requirements": [{"department_role_id": str(uuid4()), "min_count": 1}]}
+
+    def test_returns_the_stored_set(self, mock_subteam_service, mock_worker_service):
+        mock_subteam_service.get_subteam.return_value = make_subteam()
+        mock_subteam_service.set_role_requirements.return_value = []
+        client = make_client(
+            role=UserRole.HOD, subteam_service=mock_subteam_service, worker_service=mock_worker_service
+        )
+
+        response = client.put(f"/api/v1/subteams/{uuid4()}/role-requirements", json={"requirements": []})
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_a_head_of_another_department_is_refused(self, mock_subteam_service, mock_worker_service):
+        mock_subteam_service.get_subteam.return_value = make_subteam()
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("nope")
+        client = make_client(
+            role=UserRole.HOD, subteam_service=mock_subteam_service, worker_service=mock_worker_service
+        )
+
+        response = client.put(f"/api/v1/subteams/{uuid4()}/role-requirements", json=self.BODY)
+        assert response.status_code == 403
+        mock_subteam_service.set_role_requirements.assert_not_called()
+
+    def test_a_plain_worker_is_refused(self, mock_subteam_service):
+        client = make_client(role=UserRole.WORKER, subteam_service=mock_subteam_service)
+        response = client.put(f"/api/v1/subteams/{uuid4()}/role-requirements", json=self.BODY)
+        assert response.status_code == 403
+
+    def test_a_zero_count_is_a_422(self, mock_subteam_service):
+        # Zero is "no requirement", which is expressed by leaving the role out.
+        client = make_client(role=UserRole.HOD, subteam_service=mock_subteam_service)
+        body = {"requirements": [{"department_role_id": str(uuid4()), "min_count": 0}]}
+        response = client.put(f"/api/v1/subteams/{uuid4()}/role-requirements", json=body)
+        assert response.status_code == 422

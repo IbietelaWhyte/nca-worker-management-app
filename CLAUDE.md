@@ -171,6 +171,16 @@ Nothing asks a worker for their availability unless a head does. `AvailabilityPr
 
 The resolved band is frozen onto the schedule row (`schedules.min_workers` / `max_workers`, summed across groups), like `reminder_days_before`. Every screen that renders a schedule has only the schedule in scope, and a March rota must keep reading correctly after the department's numbers change in June. Both are nullable — rows predating the band have no honest answer, and `summarizeStaffing` falls back to the assignment count rather than claiming "0 needed".
 
+### Role requirements
+
+A subteam can require roles on every rota: "at least 1 Teacher and 2 Helpers" (`subteam_role_requirements`, `20261028120000`). Without it the planner sorts by fairness alone and a class can come out as all Helpers.
+
+- **Every count is a minimum**, filled first in `planner._pick`: each role from its own holders in fairness order (so the role still rotates), then any slots left go to the front of the queue whatever their role. The **maximum caps everything**, role picks included, and `SubteamService.set_role_requirements` refuses a total above it (resolved with `staffing_band`, now in `service/subteams/service.py` so both services share one copy).
+- **A missing role leaves its slot empty and the group UNDERSTAFFED** ("No Teacher available (1 needed)."), never handed to someone without the role. The date's message says "A required role could not be filled." when the head count alone looks whole — otherwise it would read "3 of 3 slots filled" beside an understaffed badge.
+- **Subteams only.** The department-only group has none. A worker's role is their one `worker_departments.department_role_id`, read in one query (`get_role_ids_for_department`) and only when some group has quotas; requirements come in one query too, so `_build_plan_context` stays a fixed number of reads.
+- **Not stamped onto schedules**, unlike the band: they steer generation and nothing else, so changing them never relabels a rota. Hand edits do not warn about a missing role yet.
+- The subteam list embeds them (`SELECT_WITH_ROLE_REQUIREMENTS`). A PATCH returns no embed, so `useSubteams.editSubteam` keeps the loaded ones. `PUT /subteams/{id}/role-requirements` replaces the set — upsert on the primary key, then delete the rest.
+
 ### Editing a rota after generation
 
 `add_assignment`, `replace_assignment_worker` and `remove_assignment` (`service/schedules/service.py`) repair a generated rota in place. There is no migration behind them: `unique (schedule_id, worker_id)` was already the right constraint, and `23505` maps to `ConflictError` through the existing `UNIQUE_VIOLATION` path.
@@ -336,7 +346,7 @@ supabase db reset               # reset + reapply + seed
 supabase migration repair --status reverted $MIGRATION_ID   # after a failed push
 ```
 
-Core tables: `workers`, `worker_app_roles`, `worker_leave`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `availability`, `schedules` (carries the attendance-closed marker), `schedule_assignments` (carries attendance), `assignment_reminder_sends`, `special_services`, `monthly_leads`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
+Core tables: `workers`, `worker_app_roles`, `worker_leave`, `departments`, `department_roles`, `worker_departments` (junction, carries `department_role_id` + `subteam_id`), `subteams`, `subteam_role_requirements`, `availability`, `schedules` (carries the attendance-closed marker), `schedule_assignments` (carries attendance), `assignment_reminder_sends`, `special_services`, `monthly_leads`, `department_assistant_hods`, `confirmation_tokens`. RLS helpers defined in SQL: `current_worker_id()`, `has_app_role()`, `is_hod(dept_id)`.
 
 **`worker_departments` is unique on (worker_id, department_id)**, so the role and subteam it carries are facts about *that membership*, not about the person — the same worker holds a different role in another department. Two consequences: `SubteamService.assign_workers` **UPDATEs** that row rather than inserting — one statement for the whole batch the add-member dialog submits (`POST /subteams/{id}/workers`, all-or-nothing on department membership) — so putting somebody in a subteam silently moves them out of whichever one they were in (the dialog says so and labels the button "Move"); and `DepartmentWithWorkersResponse` carries both `department_role` and `subteam` per member, flattened off the junction embed in `DepartmentRepository.get_with_workers` — `test_department_repository_members.py` guards that flatten.
 

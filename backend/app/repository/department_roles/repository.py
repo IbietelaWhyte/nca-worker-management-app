@@ -70,6 +70,30 @@ class DepartmentRoleRepository(BaseRepository[DepartmentRoleResponse]):
         log.debug("fetched_roles_by_department", count=len(roles))
         return roles
 
+    def get_role_ids_for_department(self, department_id: UUID) -> dict[UUID, UUID]:
+        """Every member's standing role in a department, in one round-trip.
+
+        The batched form of `get_role_for_worker_in_department`, for the planner, which needs
+        every worker's role to fill role requirements and cannot afford a query per worker.
+
+        Args:
+            department_id (UUID): The department to read.
+
+        Returns:
+            dict[UUID, UUID]: Worker -> department role id. Members with no role are absent.
+        """
+        response = (
+            self.client.table(q.JUNCTION_TABLE)
+            .select(f"{q.JunctionColumns.WORKER_ID},{q.JunctionColumns.DEPARTMENT_ROLE_ID}")
+            .eq(q.JunctionColumns.DEPARTMENT_ID, str(department_id))
+            .not_.is_(q.JunctionColumns.DEPARTMENT_ROLE_ID, "null")
+            .execute()
+        )
+        return {
+            UUID(row[q.JunctionColumns.WORKER_ID]): UUID(row[q.JunctionColumns.DEPARTMENT_ROLE_ID])
+            for row in cast(list[dict[str, Any]], response.data or [])
+        }
+
     def assign_worker_role(self, role_id: UUID, worker_id: UUID) -> dict[str, Any]:
         """
         Assign a department role to a worker.

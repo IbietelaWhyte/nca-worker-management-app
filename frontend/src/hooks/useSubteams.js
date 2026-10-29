@@ -4,6 +4,7 @@ import {
     createSubteam,
     updateSubteam,
     deleteSubteam,
+    setSubteamRoleRequirements,
 } from '@/api/subteams'
 
 export function useSubteams(departmentId) {
@@ -40,7 +41,23 @@ export function useSubteams(departmentId) {
 
     const editSubteam = async (subteamId, data) => {
         const response = await updateSubteam(subteamId, data)
-        setSubteams(prev => prev.map(s => (s.id === subteamId ? response.data : s)))
+        // A write does not return its embeds, so the PATCH response has no role_requirements:
+        // keep the ones already loaded rather than blanking them.
+        setSubteams(prev =>
+            prev.map(s =>
+                s.id === subteamId
+                    ? { ...response.data, role_requirements: s.role_requirements }
+                    : s
+            )
+        )
+        return response.data
+    }
+
+    const setRoleRequirements = async (subteamId, requirements) => {
+        const response = await setSubteamRoleRequirements(subteamId, requirements)
+        setSubteams(prev =>
+            prev.map(s => (s.id === subteamId ? { ...s, role_requirements: response.data } : s))
+        )
         return response.data
     }
 
@@ -56,6 +73,7 @@ export function useSubteams(departmentId) {
         refetch: fetchSubteams,
         addSubteam,
         editSubteam,
+        setRoleRequirements,
         removeSubteam,
     }
 }
