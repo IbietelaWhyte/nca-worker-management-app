@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { supabase } from '../lib/supabaseClient'
+import { signOutHere } from '../lib/signOutReason'
 
 const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL,
@@ -70,6 +71,12 @@ apiClient.interceptors.response.use(
                 message: error.message,
                 data: error.response?.data,
             })
+        }
+        // A signed-in request the backend refused: the session was revoked or has expired. Send the
+        // person back to sign in rather than leaving a page of errors. Only requests that carried a
+        // token count, so the public availability page, which has no session, is never affected.
+        if (error.response?.status === 401 && error.config?.headers?.Authorization) {
+            signOutHere('expired')
         }
         return Promise.reject(error)
     }

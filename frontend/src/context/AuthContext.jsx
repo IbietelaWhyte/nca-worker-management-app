@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabaseClient'
+import { signOutHere } from '@/lib/signOutReason'
+import { recordActivity } from '@/lib/idle'
 
 const AuthContext = createContext(null)
 
@@ -38,8 +40,13 @@ export function AuthProvider({ children }) {
             password,
         })
         if (error) throw error
+        // Signing in is the one moment the idle clock starts afresh. Every later page load is
+        // judged against it instead, so a session left signed in on a computer and reopened the
+        // next morning ends rather than getting another 30 minutes.
+        recordActivity()
     }
 
+    // The Sign out button: every session this person has, as before.
     const signOut = async () => {
         const { error } = await supabase.auth.signOut()
         if (error) throw error
@@ -54,6 +61,8 @@ export function AuthProvider({ children }) {
         isDepartmentHead,
         signIn,
         signOut,
+        // Idle and expired sessions: this browser only, with the reason the login page shows.
+        signOutLocally: signOutHere,
     }
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

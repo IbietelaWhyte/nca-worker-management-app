@@ -2,9 +2,13 @@ import { useState } from 'react'
 import Sidebar, { SidebarNav } from './Sidebar'
 import TopBar from './TopBar'
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import IdleWarningDialog from './IdleWarningDialog'
+import { useIdleSignOut } from '@/hooks/useIdleSignOut'
 
 export default function AppLayout({ children }) {
     const [navOpen, setNavOpen] = useState(false)
+    // Only signed-in pages use this layout, so the public availability page never runs the timer.
+    const idle = useIdleSignOut()
 
     return (
         <div className="flex min-h-screen bg-background">
@@ -29,6 +33,13 @@ export default function AppLayout({ children }) {
                 <TopBar onOpenNav={() => setNavOpen(true)} />
                 <main className="flex-1 p-4 md:p-6 overflow-auto">{children}</main>
             </div>
+
+            <IdleWarningDialog
+                open={idle.warning}
+                secondsLeft={idle.secondsLeft}
+                onStay={idle.staySignedIn}
+                onSignOut={idle.signOutNow}
+            />
         </div>
     )
 }
