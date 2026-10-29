@@ -209,6 +209,25 @@ class SMSService:
         self.logger.info("sending_assignment_cancelled", to=mask_phone(to))
         return self.send_sms(to, body)
 
+    def send_duties_cancelled(self, to: str, worker_name: str, duties: list[tuple[str, str]]) -> bool:
+        """Tell a worker several of their dates are gone, in one message.
+
+        Deleting a month of finalized rotas would otherwise send one text per date to the same
+        person. Like `send_assignment_cancelled` there is no retry behind it - the rows are gone -
+        so a failure is reported back to the head.
+
+        Args:
+            to: Recipient phone number in E.164 format.
+            worker_name: Name of the worker being stood down.
+            duties: (department name, human-readable date) pairs, soonest first.
+
+        Returns:
+            bool: True if the message was sent, False if sending failed.
+        """
+        body = f"Hi {worker_name}, you are no longer scheduled for {self._describe_duties(duties)}. No action needed."
+        self.logger.info("sending_duties_cancelled", to=mask_phone(to), dates=len(duties))
+        return self.send_sms(to, body)
+
     @staticmethod
     def _describe_duties(duties: list[tuple[str, str]]) -> str:
         """Render a worker's dates as an object phrase, e.g. "Sun 02 Aug at 09:00 in Ushering".

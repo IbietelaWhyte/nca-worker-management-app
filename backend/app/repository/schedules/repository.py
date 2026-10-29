@@ -7,7 +7,7 @@ from supabase import Client
 from app.core.logging import get_logger
 from app.repository.repository import BaseRepository
 from app.repository.schedules import queries as q
-from app.schemas.schedules.models import AssignmentResponse, DueReminder, ScheduleResponse
+from app.schemas.schedules.models import AssignmentResponse, DueReminder, ScheduleResponse, ScheduleStatus
 
 logger = get_logger(__name__)
 
@@ -28,9 +28,13 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         department_id: UUID,
         from_date: date | None = None,
         to_date: date | None = None,
+        status: ScheduleStatus | None = None,
     ) -> list[ScheduleResponse]:
         """
         Retrieve schedules for a specific department, newest scheduled_date first.
+
+        `status` narrows to drafts or to finalized rotas. None returns both, which is what the
+        generators' "is this date taken" check needs: a draft occupies its date.
 
         Assignments are embedded so callers can show who is on each schedule without a
         second round-trip — the month grid needs names and confirmed counts per day.
@@ -39,6 +43,7 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             department_id (UUID): The unique identifier of the department.
             from_date (date | None): Optional inclusive lower bound on scheduled_date.
             to_date (date | None): Optional inclusive upper bound on scheduled_date.
+            status (ScheduleStatus | None): Drafts only, finalized only, or both when None.
 
         Returns:
             list[ScheduleResponse]: Schedules for the department with their assignments,
@@ -50,13 +55,16 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             from_date=from_date.isoformat() if from_date else None,
             to_date=to_date.isoformat() if to_date else None,
         )
-        query = (
-            self.client.table(q.TABLE).select(q.SELECT_WITH_ASSIGNMENTS).eq(q.Columns.DEPARTMENT_ID, str(department_id))
-        )
+        select = q.SELECT_DRAFTS if status == ScheduleStatus.DRAFT else q.SELECT_WITH_ASSIGNMENTS
+        query = self.client.table(q.TABLE).select(select).eq(q.Columns.DEPARTMENT_ID, str(department_id))
         if from_date is not None:
             query = query.gte(q.Columns.SCHEDULED_DATE, from_date.isoformat())
         if to_date is not None:
             query = query.lte(q.Columns.SCHEDULED_DATE, to_date.isoformat())
+        if status == ScheduleStatus.DRAFT:
+            query = query.is_(q.Columns.FINALIZED_AT, "null")
+        elif status == ScheduleStatus.FINAL:
+            query = query.not_.is_(q.Columns.FINALIZED_AT, "null")
 
         response = query.order(q.Columns.SCHEDULED_DATE, desc=True).execute()
         schedules = self._to_model_list(response.data or [])
@@ -140,10 +148,11 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
 
     def get_assignments_for_worker(self, worker_id: UUID) -> list[AssignmentResponse]:
         """
-        Retrieve all schedule assignments for a specific worker.
+        Retrieve every finalized schedule assignment for a specific worker.
 
         This method fetches all assignments for a worker with embedded schedule details,
-        ordered by schedule date in descending order (most recent first).
+        ordered by schedule date in descending order (most recent first). Drafts are left out:
+        this is the worker's own duty list, and a draft is a rota nobody has been told about.
 
         Args:
             worker_id (UUID): The unique identifier of the worker.
@@ -156,8 +165,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         log = self.logger.bind(method="get_assignments_for_worker", worker_id=str(worker_id))
         response = (
             self.client.table(q.ASSIGNMENTS_TABLE)
-            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE)
+            .select(q.SELECT_ASSIGNMENTS_WITH_SCHEDULE_INNER_FOR_WORKER)
             .eq(q.AssignmentColumns.WORKER_ID, str(worker_id))
+            .not_.is_(f"{q.TABLE}.{q.Columns.FINALIZED_AT}", "null")
             .order(f"{q.TABLE}({q.Columns.SCHEDULED_DATE})", desc=True)
             .execute()
         )
@@ -337,6 +347,32 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
         created = self._to_model_list(response.data or [])
         log.info("bulk_schedules_created", created_count=len(created))
         return created
+
+    def finalize(self, schedule_ids: list[UUID], finalized_by: UUID | None) -> None:
+        """Finalize several drafts in one statement.
+
+        Only rows still drafts are touched, so finalizing twice does not move the original stamp.
+        The notice sweep picks the assignments up from here; nothing is sent by this call.
+
+        Args:
+            schedule_ids (list[UUID]): The schedules to finalize.
+            finalized_by (UUID | None): The worker who finalized them, if they have a profile.
+        """
+        if not schedule_ids:
+            return
+        (
+            self.client.table(q.TABLE)
+            .update(
+                {
+                    q.Columns.FINALIZED_AT: datetime.now(timezone.utc).isoformat(),
+                    q.Columns.FINALIZED_BY: str(finalized_by) if finalized_by else None,
+                }
+            )
+            .in_(q.Columns.ID, [str(sid) for sid in schedule_ids])
+            .is_(q.Columns.FINALIZED_AT, "null")
+            .execute()
+        )
+        self.logger.info("schedules_finalized", method="finalize", count=len(schedule_ids))
 
     def delete_schedules(self, schedule_ids: list[UUID]) -> None:
         """
@@ -775,6 +811,9 @@ class ScheduleRepository(BaseRepository[ScheduleResponse]):
             self.client.table(q.TABLE)
             .select(q.SELECT_FOR_ATTENDANCE_REPORT)
             .eq(q.Columns.DEPARTMENT_ID, str(department_id))
+            # A draft is not a service anybody was asked to: counting it would understate how
+            # often attendance was taken.
+            .not_.is_(q.Columns.FINALIZED_AT, "null")
             .gte(q.Columns.SCHEDULED_DATE, from_date.isoformat())
             .lte(q.Columns.SCHEDULED_DATE, to_date.isoformat())
             .order(q.Columns.SCHEDULED_DATE)

@@ -418,4 +418,7 @@ class AttendanceService:
         schedule = self.schedule_repo.get_with_assignments(schedule_id)
         if not schedule:
             raise NotFoundError(f"Schedule {schedule_id} not found")
+        if schedule.is_draft:
+            # Nobody on a draft was asked to come, so there is nobody to mark present or absent.
+            raise BadRequestError("This rota is still a draft. Finalize it before taking attendance.")
         return schedule

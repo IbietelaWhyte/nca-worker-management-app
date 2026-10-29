@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, computed_field, model_validator
 
 from app.schemas.attendance.models import AttendanceCount
 from app.schemas.department_roles.models import DepartmentRoleResponse
@@ -49,6 +49,20 @@ class ScopeType(StrEnum):
     DEPARTMENT_ALL = "department_all"
 
 
+class ScheduleStatus(StrEnum):
+    """A draft has `finalized_at` NULL: nobody on it is texted or shown it until it is finalized."""
+
+    DRAFT = "draft"
+    FINAL = "final"
+
+
+class ScheduleCreator(BaseModel):
+    """Who started a draft, for the Drafts tab. Names only - this is not a contact read."""
+
+    first_name: str
+    last_name: str
+
+
 class Schedule(BaseModel):
     id: UUID
     department_id: UUID
@@ -86,6 +100,20 @@ class Schedule(BaseModel):
     # sort, which took down schedule generation entirely.
     created_by: UUID | None = None
     created_at: datetime
+    # NULL while a draft. Defaulted for the rows the RPCs return from before the column existed in
+    # a deployment that has not yet migrated; every real row carries a value or a deliberate NULL.
+    # finalized_by is ON DELETE SET NULL, and an admin need not be a worker at all.
+    finalized_at: datetime | None = None
+    finalized_by: UUID | None = None
+    # Embedded by the drafts read only; None everywhere else and when the creator was deleted.
+    creator: ScheduleCreator | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_draft(self) -> bool:
+        """Whether this rota is still a draft. The single place that reads the marker."""
+        return self.finalized_at is None
+
     # Nested department object, present only on the queries that embed it — the public confirmation
     # page needs the name and cannot look one up, having no session. Optional like every other
     # embed, so the selects that don't ask for it still validate.
@@ -338,6 +366,8 @@ class DateSelection(BaseModel):
 
 class MonthlyScheduleCommitRequest(MonthlyScheduleBase):
     dates: list[DateSelection] = Field(min_length=1)
+    # Save without telling anybody. A draft is edited freely and texts nobody until it is finalized.
+    draft: bool = False
 
     @model_validator(mode="after")
     def validate_dates_unique(self) -> "MonthlyScheduleCommitRequest":
@@ -345,6 +375,25 @@ class MonthlyScheduleCommitRequest(MonthlyScheduleBase):
         if len(seen) != len(self.dates):
             raise ValueError("dates must not contain duplicate scheduled_date values")
         return self
+
+
+class MonthRef(BaseModel):
+    """One calendar month, for the actions that work on a department's whole month."""
+
+    year: int = Field(ge=2020, le=2100)
+    month: int = Field(ge=1, le=12)
+
+
+class MonthActionResult(BaseModel):
+    """What finalizing or deleting a month did.
+
+    `people` is the distinct workers affected - finalizing texts each of them once, deleting
+    texts the ones who had been told. `warnings` names anybody a cancellation could not reach.
+    """
+
+    count: int
+    people: int
+    warnings: list[str] = []
 
 
 class SkippedDate(BaseModel):

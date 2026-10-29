@@ -24,16 +24,19 @@ from app.schemas.schedules.models import (
     DatePlan,
     DatePlanStatus,
     DateSelection,
+    MonthActionResult,
     MonthlyScheduleCommitRequest,
     MonthlySchedulePreview,
     MonthlySchedulePreviewRequest,
     MonthlyScheduleResult,
+    MonthRef,
     PlannedAssignment,
     PlannedGroup,
     Schedule,
     ScheduleCreate,
     ScheduleEditResult,
     ScheduleResponse,
+    ScheduleStatus,
     ScopeType,
     SkippedDate,
 )
@@ -237,12 +240,13 @@ class ScheduleService:
         department_id: UUID,
         from_date: date | None = None,
         to_date: date | None = None,
+        status: ScheduleStatus | None = None,
     ) -> list[ScheduleResponse]:
         # bind the method and department_id for better traceability in logs
         log = self.logger.bind(method="get_schedules_by_department", department_id=str(department_id))
         if from_date and to_date and from_date > to_date:
             raise BadRequestError("'from' must not be after 'to'")
-        schedules = self.schedule_repo.get_by_department(department_id, from_date, to_date)
+        schedules = self.schedule_repo.get_by_department(department_id, from_date, to_date, status=status)
         log.info(
             "fetched_schedules_by_department",
             count=len(schedules),
@@ -749,6 +753,10 @@ class ScheduleService:
         return warnings
 
     def _announce_assignment(self, assignment_id: UUID, worker: Worker, schedule: ScheduleResponse) -> list[str]:
+        # A draft texts nobody. The notice sweep reaches everyone on it once it is finalized,
+        # because the row's notice_sent_at is still NULL (a swap clears it).
+        if schedule.is_draft:
+            return []
         """Text a newly added worker straight away, and mark the notice as sent.
 
         The sweep would find this row on its own — `notice_sent_at` is NULL on a fresh or
@@ -778,7 +786,11 @@ class ScheduleService:
         **This one has no safety net.** The row is gone, so there is nothing for a sweep to
         find and retry; a failure here means the worker is never told by the app at all. Hence
         the warning handed back to the head rather than a log line nobody reads.
+
+        Nothing on a draft: nobody was ever told they were on it.
         """
+        if schedule.is_draft:
+            return []
         name = f"{worker.first_name} {worker.last_name}".strip()
         if not worker.phone:
             return [f"{name} has no phone number, so they have not been told."]
@@ -808,6 +820,113 @@ class ScheduleService:
         self.schedule_repo.delete_assignments_for_schedule(schedule_id)
         self.schedule_repo.delete(schedule_id)
         log.info("schedule_deleted")
+
+    # ----------------------------------------------------------------
+    # Drafts
+    # ----------------------------------------------------------------
+
+    def finalize_schedule(self, schedule_id: UUID, finalized_by: str | None) -> ScheduleResponse:
+        """Publish one draft rota. Its workers are texted by the notice sweep, not by this call.
+
+        Finalizing a rota that is already final is a no-op, so a double click cannot move the stamp.
+
+        Args:
+            schedule_id: The rota to finalize.
+            finalized_by: Email of the head finalizing it, to record who did.
+
+        Returns:
+            ScheduleResponse: The rota, now finalized.
+
+        Raises:
+            NotFoundError: If it does not exist.
+        """
+        schedule = self._require_schedule(schedule_id)
+        if schedule.is_draft:
+            self.schedule_repo.finalize([schedule.id], self._actor_id(finalized_by))
+            self.logger.info("schedule_finalized", schedule_id=str(schedule_id))
+        return self._require_schedule(schedule_id)
+
+    def finalize_month(self, department_id: UUID, month: MonthRef, finalized_by: str | None) -> MonthActionResult:
+        """Publish every draft a department has in one month, in one statement.
+
+        Args:
+            department_id: The department.
+            month: The month whose drafts to finalize.
+            finalized_by: Email of the head finalizing them.
+
+        Returns:
+            MonthActionResult: How many rotas, and how many distinct people the sweep will text.
+        """
+        drafts = self._schedules_in_month(department_id, month, ScheduleStatus.DRAFT)
+        self.schedule_repo.finalize([s.id for s in drafts], self._actor_id(finalized_by))
+        people = {a.worker_id for s in drafts for a in s.schedule_assignments}
+        self.logger.info("month_finalized", department_id=str(department_id), schedules=len(drafts), people=len(people))
+        return MonthActionResult(count=len(drafts), people=len(people))
+
+    def delete_month(self, department_id: UUID, month: MonthRef, status: ScheduleStatus) -> MonthActionResult:
+        """Delete a department's drafts, or its upcoming finalized rotas, for one month.
+
+        Drafts go silently: nobody was told about them. Finalized rotas are deleted only from today
+        on - the past ones carry attendance a head has acted on - and everybody who had been told
+        about a deleted date gets one text listing all of theirs. Somebody whose notice had not yet
+        gone out was never told, so is not told it is off. The rows go first, then the texts, so a
+        failed delete can never leave people told about rotas that are still there.
+
+        Args:
+            department_id: The department.
+            month: The month to clear.
+            status: Drafts or finalized rotas; the two are never deleted together.
+
+        Returns:
+            MonthActionResult: Rotas deleted, distinct people on them, and a warning per person a
+                cancellation could not reach. There is no retry once the rows are gone.
+        """
+        log = self.logger.bind(method="delete_month", department_id=str(department_id), status=status)
+        schedules = self._schedules_in_month(department_id, month, status)
+        if status == ScheduleStatus.FINAL:
+            schedules = [s for s in schedules if s.scheduled_date >= date.today()]
+        if not schedules:
+            return MonthActionResult(count=0, people=0)
+
+        told: dict[UUID, tuple[Worker | WorkerResponse, list[ScheduleResponse]]] = {}
+        if status == ScheduleStatus.FINAL:
+            for schedule in sorted(schedules, key=lambda s: (s.scheduled_date, s.start_time)):
+                for assignment in schedule.schedule_assignments:
+                    if assignment.notice_sent_at is not None and assignment.workers is not None:
+                        told.setdefault(assignment.worker_id, (assignment.workers, []))[1].append(schedule)
+        people = {a.worker_id for s in schedules for a in s.schedule_assignments}
+
+        self.schedule_repo.delete_schedules([s.id for s in schedules])
+        log.info("month_deleted", schedules=len(schedules), people=len(people), to_text=len(told))
+
+        department = self._department_name(department_id)
+        warnings: list[str] = []
+        for worker, dates in told.values():
+            name = f"{worker.first_name} {worker.last_name}".strip()
+            if not worker.phone:
+                warnings.append(f"{name} has no phone number, so they have not been told.")
+                continue
+            duties = [(department, _describe_when(s)) for s in dates]
+            if not self.sms_service.send_duties_cancelled(to=worker.phone, worker_name=name, duties=duties):
+                log.error("month_cancellation_failed", worker_id=str(worker.id))
+                warnings.append(f"Could not text {name}. Let them know another way.")
+
+        return MonthActionResult(count=len(schedules), people=len(people), warnings=warnings)
+
+    def _schedules_in_month(
+        self, department_id: UUID, month: MonthRef, status: ScheduleStatus
+    ) -> list[ScheduleResponse]:
+        """A department's drafts or finalized rotas falling in one calendar month."""
+        first = date(month.year, month.month, 1)
+        return self.schedule_repo.get_by_department(
+            department_id, first, _last_day_of_month(month.year, month.month), status=status
+        )
+
+    def _actor_id(self, email: str | None) -> UUID | None:
+        """The worker behind a token's email, to stamp who did something. None for an admin with no
+        profile, which the nullable `finalized_by` allows."""
+        worker = self.worker_repo.get_by_email(email) if email else None
+        return worker.id if worker else None
 
     # ----------------------------------------------------------------
     # Monthly generation
@@ -1002,6 +1121,9 @@ class ScheduleService:
                 q.Columns.MAX_WORKERS: sum(g.max_workers for g in groups),
                 q.Columns.SPECIAL_SERVICE_NAME: special_dates.get(selection.scheduled_date),
                 q.Columns.CREATED_BY: str(created_by_user.id),
+                # A draft is a NULL marker: no sweep texts about it until it is finalized. A month
+                # committed straight to final keeps the column default and records who did it.
+                **({q.Columns.FINALIZED_AT: None} if data.draft else {q.Columns.FINALIZED_BY: str(created_by_user.id)}),
             }
             for selection in to_create
         ]

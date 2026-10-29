@@ -42,10 +42,15 @@ export function useDashboard({ enabled = true } = {}) {
 
             const results = await Promise.all(
                 depts.map(async department => {
-                    const { data } = await getSchedulesByDepartment(department.id, {
-                        from: format(today, 'yyyy-MM-dd'),
-                        to: format(addDays(today, HORIZON_DAYS), 'yyyy-MM-dd'),
-                    })
+                    // Finalized only: a draft has not been announced, so it is not "upcoming" yet.
+                    const { data } = await getSchedulesByDepartment(
+                        department.id,
+                        {
+                            from: format(today, 'yyyy-MM-dd'),
+                            to: format(addDays(today, HORIZON_DAYS), 'yyyy-MM-dd'),
+                        },
+                        'final'
+                    )
                     return { department, schedules: data }
                 })
             )

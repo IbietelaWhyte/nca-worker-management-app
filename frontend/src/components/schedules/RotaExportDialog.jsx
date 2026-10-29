@@ -54,9 +54,14 @@ export default function RotaExportDialog({
     schedules,
     monthlyLeads,
     onClose,
+    draft = false,
 }) {
     const { subteams } = useSubteams(departmentId)
-    const [title, setTitle] = useState(`${departmentName} — ${format(month, 'MMMM yyyy')}`)
+    // A draft's image is for the heads reviewing it. Marked in the default title so a copy that
+    // gets forwarded is not mistaken for the rota people were told about; editable like any title.
+    const [title, setTitle] = useState(
+        `${departmentName} — ${format(month, 'MMMM yyyy')}${draft ? ' (Draft)' : ''}`
+    )
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState(null)
     const sheetRef = useRef(null)

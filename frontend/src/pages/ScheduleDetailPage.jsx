@@ -12,9 +12,10 @@ import UnderstaffedBadge from '@/components/schedules/UnderstaffedBadge'
 import MonthlyLeadsBanner from '@/components/schedules/MonthlyLeadsBanner'
 import { useMonthlyLeads } from '@/hooks/useMonthlyLeads'
 import { Label } from '@/components/ui/label'
-import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, UserPlus } from 'lucide-react'
+import { ArrowLeft, Bell, ClipboardCheck, RotateCcw, Send, UserPlus } from 'lucide-react'
 import { isHere, tally } from '@/lib/attendance'
 import FinishAttendanceDialog from '@/components/schedules/FinishAttendanceDialog'
+import FinalizeDialog from '@/components/schedules/FinalizeDialog'
 import { format } from 'date-fns'
 import { useState, useEffect, useMemo } from 'react'
 import { getSubteamsByDepartment } from '@/api/subteams'
@@ -46,6 +47,7 @@ export default function ScheduleDetailPage() {
         finishAttendance,
         reopenAttendance,
         sendRemindersForSchedule,
+        finalize,
     } = useScheduleDetail(id)
     // scheduled_date is "2026-11-17", so its month key is the first seven characters plus "-01".
     const monthlyLeads = useMonthlyLeads(
@@ -54,6 +56,9 @@ export default function ScheduleDetailPage() {
     )
     const [reminderLoading, setReminderLoading] = useState(false)
     const [reminderMessage, setReminderMessage] = useState(null)
+    const [finalizeOpen, setFinalizeOpen] = useState(false)
+    const [finalizeBusy, setFinalizeBusy] = useState(false)
+    const [finalizeError, setFinalizeError] = useState(null)
     const [showEmptySubteams, setShowEmptySubteams] = useState(true)
     const [allSubteams, setAllSubteams] = useState([])
     const [subteamsLoading, setSubteamsLoading] = useState(false)
@@ -256,6 +261,7 @@ export default function ScheduleDetailPage() {
     // nonsense, and since most rotas on screen are future ones a permanently disabled button
     // would be clutter on the common case — so it is absent rather than disabled.
     const serviceHasHappened = schedule.scheduled_date <= format(new Date(), 'yyyy-MM-dd')
+    const isDraft = schedule.is_draft
     const untapped = assignments.filter(a => !isHere(a))
 
     const handleMarkHere = async assignment => {
@@ -288,12 +294,23 @@ export default function ScheduleDetailPage() {
             {/* Header */}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-center gap-4">
-                    <Button variant="outline" size="sm" onClick={() => navigate('/schedules')}>
+                    {/* Back to the tab it came from, in its department: a draft is reached from
+                        Drafts, which is not the default view. */}
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                            navigate(
+                                `/schedules?department=${schedule.department_id}${isDraft ? '&view=drafts' : ''}`
+                            )
+                        }
+                    >
                         <ArrowLeft size={16} className="mr-2" /> Back
                     </Button>
                     <div>
                         <div className="flex flex-wrap items-center gap-2">
                             <h2 className="text-2xl font-bold">{schedule.title}</h2>
+                            {isDraft && <Badge variant="secondary">Draft</Badge>}
                             {/* The snapshot, not a lookup: it keeps reading correctly after
                                 the rule is renamed or deleted. */}
                             {schedule.special_service_name && (
@@ -316,19 +333,34 @@ export default function ScheduleDetailPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                    {canManage && serviceHasHappened && !takingAttendance && !attendanceClosed && (
-                        <Button onClick={() => setTakingAttendance(true)}>
-                            <ClipboardCheck size={16} className="mr-2" />
-                            Take Attendance
+                    {canManage && isDraft && (
+                        <Button
+                            onClick={() => {
+                                setFinalizeError(null)
+                                setFinalizeOpen(true)
+                            }}
+                        >
+                            <Send size={16} className="mr-2" />
+                            Finalize
                         </Button>
                     )}
+                    {canManage &&
+                        !isDraft &&
+                        serviceHasHappened &&
+                        !takingAttendance &&
+                        !attendanceClosed && (
+                            <Button onClick={() => setTakingAttendance(true)}>
+                                <ClipboardCheck size={16} className="mr-2" />
+                                Take Attendance
+                            </Button>
+                        )}
                     {canManage && attendanceClosed && (
                         <Button variant="outline" onClick={handleReopen} disabled={editBusy}>
                             <RotateCcw size={16} className="mr-2" />
                             Reopen Attendance
                         </Button>
                     )}
-                    {canManage && (
+                    {canManage && !isDraft && (
                         <Button
                             variant="outline"
                             onClick={() => handleSendReminders(schedule)}
@@ -340,6 +372,16 @@ export default function ScheduleDetailPage() {
                     )}
                 </div>
             </div>
+
+            {isDraft && (
+                <Alert variant="warning">
+                    <p className="text-sm">
+                        <span className="font-medium">Draft.</span> Nobody on this rota has been
+                        told, and workers cannot see it. Changes here send no texts. Finalize it
+                        when it is ready, and everyone on it gets one text.
+                    </p>
+                </Alert>
+            )}
 
             {/* Who is in charge this month. Read live by month, not stamped on the schedule. */}
             <MonthlyLeadsBanner title={monthlyLeads.title} leads={monthlyLeads.leads} />
@@ -522,15 +564,42 @@ export default function ScheduleDetailPage() {
                 onConfirm={handleFinish}
             />
 
+            <FinalizeDialog
+                open={finalizeOpen}
+                count={1}
+                people={new Set(schedule.schedule_assignments.map(a => a.worker_id)).size}
+                busy={finalizeBusy}
+                error={finalizeError}
+                onCancel={() => setFinalizeOpen(false)}
+                onConfirm={async () => {
+                    setFinalizeBusy(true)
+                    setFinalizeError(null)
+                    try {
+                        await finalize()
+                        setFinalizeOpen(false)
+                    } catch (err) {
+                        setFinalizeError(
+                            err.response?.data?.detail ?? 'Could not finalize this rota'
+                        )
+                    } finally {
+                        setFinalizeBusy(false)
+                    }
+                }}
+            />
+
             {/* One picker for the whole page, not one per row. */}
             <WorkerPickerDialog
                 open={picker !== null}
                 onOpenChange={next => !next && setPicker(null)}
                 title={picker?.mode === 'swap' ? 'Swap this duty' : 'Add a worker'}
                 description={
-                    picker?.mode === 'swap'
-                        ? `${workerName(picker.assignment)} comes off this date and whoever you pick goes on. Both of them get a text.`
-                        : 'Whoever you pick goes on this date and gets a text straight away.'
+                    isDraft
+                        ? picker?.mode === 'swap'
+                            ? `${workerName(picker.assignment)} comes off this date and whoever you pick goes on. Nobody is texted while this is a draft.`
+                            : 'Whoever you pick goes on this date. Nobody is texted while this is a draft.'
+                        : picker?.mode === 'swap'
+                          ? `${workerName(picker.assignment)} comes off this date and whoever you pick goes on. Both of them get a text.`
+                          : 'Whoever you pick goes on this date and gets a text straight away.'
                 }
                 candidates={candidates}
                 loading={candidatesLoading}
@@ -551,8 +620,9 @@ export default function ScheduleDetailPage() {
                             Take {removeTarget ? workerName(removeTarget) : 'this worker'} off?
                         </DialogTitle>
                         <DialogDescription>
-                            They come off this date and get a text saying so. The rota keeps every
-                            other change you have made to it.
+                            {isDraft
+                                ? 'They come off this date. Nobody is texted while this is a draft.'
+                                : 'They come off this date and get a text saying so. The rota keeps every other change you have made to it.'}
                         </DialogDescription>
                     </DialogHeader>
 
@@ -571,7 +641,7 @@ export default function ScheduleDetailPage() {
                             Cancel
                         </Button>
                         <Button variant="destructive" disabled={editBusy} onClick={handleRemove}>
-                            {editBusy ? 'Removing...' : 'Remove and text them'}
+                            {editBusy ? 'Removing...' : isDraft ? 'Remove' : 'Remove and text them'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

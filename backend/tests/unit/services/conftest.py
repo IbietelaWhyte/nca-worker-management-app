@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -237,6 +237,8 @@ def make_schedule(**kwargs) -> ScheduleResponse:
         max_workers=kwargs.get("max_workers", None),
         created_by=kwargs.get("created_by", uuid4()),
         created_at=kwargs.get("created_at", date.today()),
+        # Finalized unless a test asks for a draft: every rota before drafts existed was live.
+        finalized_at=kwargs.get("finalized_at", datetime.now()),
         schedule_assignments=kwargs.get("schedule_assignments", []),
     )
 

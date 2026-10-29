@@ -9,9 +9,11 @@ from app.schemas.schedules.models import (
     AssignableWorker,
     DatePlan,
     DatePlanStatus,
+    MonthActionResult,
     MonthlySchedulePreview,
     MonthlyScheduleResult,
     ScheduleEditResult,
+    ScheduleStatus,
     SkippedDate,
 )
 from tests.integration.routers.conftest import make_client
@@ -301,7 +303,7 @@ class TestListSchedulesByDepartmentRange:
 
         assert response.status_code == 200
         mock_schedule_service.get_schedules_by_department.assert_called_once_with(
-            dept_id, date(2026, 3, 1), date(2026, 3, 31)
+            dept_id, date(2026, 3, 1), date(2026, 3, 31), None
         )
 
     def test_returns_422_for_a_malformed_date(self, mock_schedule_service):
@@ -727,3 +729,69 @@ class TestDepartmentScope:
 
         assert response.status_code == 403
         mock_schedule_service.generate_schedule.assert_not_called()
+
+
+class TestDrafts:
+    def test_the_list_filters_by_status(self, mock_schedule_service):
+        dept_id = uuid4()
+        mock_schedule_service.get_schedules_by_department.return_value = []
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        assert client.get(f"/api/v1/schedules/departments/{dept_id}?status=draft").status_code == 200
+        assert mock_schedule_service.get_schedules_by_department.call_args.args[3] == ScheduleStatus.DRAFT
+
+    def test_finalizing_one_returns_the_rota(self, mock_schedule_service):
+        schedule = make_schedule()
+        mock_schedule_service.get_schedule.return_value = schedule
+        mock_schedule_service.finalize_schedule.return_value = schedule
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post(f"/api/v1/schedules/{schedule.id}/finalize")
+        assert response.status_code == 200
+        assert response.json()["is_draft"] is False
+
+    def test_finalizing_a_month(self, mock_schedule_service):
+        mock_schedule_service.finalize_month.return_value = MonthActionResult(count=4, people=6)
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.post(
+            f"/api/v1/schedules/departments/{uuid4()}/finalize-month", json={"year": 2026, "month": 3}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"count": 4, "people": 6, "warnings": []}
+
+    def test_deleting_a_month_needs_a_status(self, mock_schedule_service):
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+        response = client.delete(f"/api/v1/schedules/departments/{uuid4()}/month?year=2026&month=3")
+        assert response.status_code == 422
+        mock_schedule_service.delete_month.assert_not_called()
+
+    def test_deleting_a_month(self, mock_schedule_service):
+        mock_schedule_service.delete_month.return_value = MonthActionResult(count=4, people=6, warnings=["x"])
+        client = make_client(role=UserRole.HOD, schedule_service=mock_schedule_service)
+
+        response = client.delete(f"/api/v1/schedules/departments/{uuid4()}/month?year=2026&month=3&status=final")
+        assert response.status_code == 200
+        assert mock_schedule_service.delete_month.call_args.args[2] == ScheduleStatus.FINAL
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("post", "/api/v1/schedules/{id}/finalize"),
+            ("post", "/api/v1/schedules/departments/{id}/finalize-month"),
+            ("delete", "/api/v1/schedules/departments/{id}/month?year=2026&month=3&status=draft"),
+        ],
+    )
+    def test_a_head_of_another_department_is_refused(self, method, path, mock_schedule_service, mock_worker_service):
+        mock_schedule_service.get_schedule.return_value = make_schedule()
+        mock_worker_service.authorize_create_assignment.side_effect = PermissionDeniedError("nope")
+        client = make_client(
+            role=UserRole.HOD, schedule_service=mock_schedule_service, worker_service=mock_worker_service
+        )
+        kwargs = {"json": {"year": 2026, "month": 3}} if "finalize-month" in path else {}
+
+        response = getattr(client, method)(path.format(id=uuid4()), **kwargs)
+        assert response.status_code == 403
+        mock_schedule_service.finalize_schedule.assert_not_called()
+        mock_schedule_service.finalize_month.assert_not_called()
+        mock_schedule_service.delete_month.assert_not_called()

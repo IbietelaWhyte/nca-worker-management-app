@@ -298,3 +298,14 @@ class TestMissingRecords:
         service.check_in(here.id, "admin@example.com")
 
         assert mock_schedule_repo.set_check_in.call_args.args[4] is None
+
+
+class TestDraftsTakeNoAttendance:
+    def test_a_draft_is_refused(self, service, mock_schedule_repo):
+        # Nobody on a draft was asked to come, so there is nobody to mark present or absent.
+        here = make_assignment()
+        rota(mock_schedule_repo, here).finalized_at = None
+
+        with pytest.raises(BadRequestError, match="draft"):
+            service.check_in(here.id, "head@example.com")
+        mock_schedule_repo.set_check_in.assert_not_called()

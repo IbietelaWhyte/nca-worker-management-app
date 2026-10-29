@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useDepartments } from '@/hooks/useDepartments'
 import { useSchedules } from '@/hooks/useSchedules'
+import { useDraftSchedules } from '@/hooks/useDraftSchedules'
+import { deleteMonth } from '@/api/schedules'
+import { countPeople } from '@/lib/drafts'
+import DraftsView from '@/components/schedules/DraftsView'
+import DeleteMonthDialog from '@/components/schedules/DeleteMonthDialog'
 import { useAuth } from '@/context/AuthContext'
 import GenerateScheduleForm from '@/components/schedules/GenerateScheduleForm'
 import GenerateMonthDialog from '@/components/schedules/GenerateMonthDialog'
@@ -40,7 +45,24 @@ export default function SchedulesPage() {
     const navigate = useNavigate()
     const { isAdmin, isDepartmentHead, role } = useAuth()
     const { departments } = useDepartments()
-    const [selectedDepartmentId, setSelectedDepartmentId] = useState('')
+    // Department and tab live in the URL, so coming back from a draft's page lands on the Drafts
+    // tab of the same department rather than an empty page.
+    const [searchParams, setSearchParams] = useSearchParams()
+    const selectedDepartmentId = searchParams.get('department') ?? ''
+    const view = searchParams.get('view') ?? 'month'
+    const setParam = (key, value) =>
+        setSearchParams(
+            prev => {
+                const next = new URLSearchParams(prev)
+                if (value) next.set(key, value)
+                else next.delete(key)
+                return next
+            },
+            { replace: true }
+        )
+    const setSelectedDepartmentId = id => setParam('department', id)
+    const setView = next => setParam('view', next === 'month' ? '' : next)
+    const [deleteMonthOpen, setDeleteMonthOpen] = useState(false)
     const [generateOpen, setGenerateOpen] = useState(false)
     const [generateMonthOpen, setGenerateMonthOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
@@ -53,6 +75,8 @@ export default function SchedulesPage() {
         if (isAssistantHod && departments.length === 1 && !selectedDepartmentId) {
             setSelectedDepartmentId(departments[0].id)
         }
+        // setSelectedDepartmentId only writes the URL; listing it would re-run this every render.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [departments, isAssistantHod, selectedDepartmentId])
 
     const {
@@ -68,18 +92,38 @@ export default function SchedulesPage() {
         removeSchedule,
     } = useSchedules(selectedDepartmentId)
 
+    const drafts = useDraftSchedules(selectedDepartmentId)
+
     const selectedDepartment = departments.find(d => d.id === selectedDepartmentId)
     const monthlyLeads = useMonthlyLeads(selectedDepartmentId, monthKey(month))
+    const canManage = isAdmin || isDepartmentHead
+    // Deleting a finalized month only ever removes rotas from today on: past ones carry attendance.
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const upcomingThisMonth = schedules.filter(s => s.scheduled_date >= today)
+
+    const handleDeleteFinalMonth = async () => {
+        const { data } = await deleteMonth(
+            selectedDepartmentId,
+            month.getFullYear(),
+            month.getMonth() + 1,
+            'final'
+        )
+        refetch()
+        return data
+    }
 
     const handleGenerate = async formData => {
         await createSchedule(formData)
         setGenerateOpen(false)
     }
 
-    const handleMonthDone = () => {
+    const handleMonthDone = result => {
         setGenerateMonthOpen(false)
         // The commit may have landed in a different month than the one on screen.
         refetch()
+        drafts.refetch()
+        // A saved draft is edited from the Drafts tab, so take the head straight there.
+        if (result?.draft) setView('drafts')
     }
 
     const handleDelete = async schedule => {
@@ -166,35 +210,51 @@ export default function SchedulesPage() {
                         </Alert>
                     )}
 
-                    {/* Month navigation — scopes both views, and bounds what is fetched */}
-                    <div className="flex items-center gap-2">
-                        <Button
-                            variant="outline"
-                            size="icon-sm"
-                            onClick={() => setMonth(prev => subMonths(prev, 1))}
-                        >
-                            <ChevronLeft size={16} />
-                        </Button>
-                        <span className="text-sm font-medium w-36 text-center">
-                            {format(month, 'MMMM yyyy')}
-                        </span>
-                        <Button
-                            variant="outline"
-                            size="icon-sm"
-                            onClick={() => setMonth(prev => addMonths(prev, 1))}
-                        >
-                            <ChevronRight size={16} />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setMonth(startOfMonth(new Date()))}
-                        >
-                            Today
-                        </Button>
-                    </div>
+                    {/* Month navigation — scopes the Month and List views, and bounds what is
+                        fetched. Drafts span every month, so it stands down there. */}
+                    {view !== 'drafts' && (
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="icon-sm"
+                                onClick={() => setMonth(prev => subMonths(prev, 1))}
+                            >
+                                <ChevronLeft size={16} />
+                            </Button>
+                            <span className="text-sm font-medium w-36 text-center">
+                                {format(month, 'MMMM yyyy')}
+                            </span>
+                            <Button
+                                variant="outline"
+                                size="icon-sm"
+                                onClick={() => setMonth(prev => addMonths(prev, 1))}
+                            >
+                                <ChevronRight size={16} />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setMonth(startOfMonth(new Date()))}
+                            >
+                                Today
+                            </Button>
+                            {canManage && upcomingThisMonth.length > 0 && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="ml-auto text-destructive hover:text-destructive"
+                                    onClick={() => setDeleteMonthOpen(true)}
+                                >
+                                    <Trash2 size={14} className="mr-1.5" />
+                                    Delete month
+                                </Button>
+                            )}
+                        </div>
+                    )}
 
-                    <MonthlyLeadsBanner title={monthlyLeads.title} leads={monthlyLeads.leads} />
+                    {view !== 'drafts' && (
+                        <MonthlyLeadsBanner title={monthlyLeads.title} leads={monthlyLeads.leads} />
+                    )}
 
                     {loading && (
                         <div className="flex items-center justify-center h-40">
@@ -203,7 +263,7 @@ export default function SchedulesPage() {
                     )}
 
                     {!loading && !error && (
-                        <Tabs defaultValue="month">
+                        <Tabs value={view} onValueChange={setView}>
                             <TabsList>
                                 <TabsTrigger value="month">Month</TabsTrigger>
                                 <TabsTrigger value="list">
@@ -212,7 +272,45 @@ export default function SchedulesPage() {
                                         {schedules.length}
                                     </Badge>
                                 </TabsTrigger>
+                                <TabsTrigger value="drafts">
+                                    Drafts
+                                    {drafts.drafts.length > 0 && (
+                                        <Badge variant="warning" className="ml-2">
+                                            {drafts.drafts.length}
+                                        </Badge>
+                                    )}
+                                </TabsTrigger>
                             </TabsList>
+
+                            <TabsContent value="drafts" className="mt-4">
+                                {drafts.error && (
+                                    <Alert variant="destructive">
+                                        <p className="text-sm">{drafts.error}</p>
+                                    </Alert>
+                                )}
+                                {drafts.loading ? (
+                                    <p className="text-sm text-muted-foreground">
+                                        Loading drafts...
+                                    </p>
+                                ) : (
+                                    <DraftsView
+                                        drafts={drafts.drafts}
+                                        canManage={canManage}
+                                        departmentId={selectedDepartmentId}
+                                        departmentName={selectedDepartment?.name ?? 'Schedule'}
+                                        onOpen={schedule => navigate(`/schedules/${schedule.id}`)}
+                                        onFinalizeMonth={async (year, monthNumber) => {
+                                            const result = await drafts.finalizeDraftMonth(
+                                                year,
+                                                monthNumber
+                                            )
+                                            refetch()
+                                            return result
+                                        }}
+                                        onDeleteMonth={drafts.deleteDraftMonth}
+                                    />
+                                )}
+                            </TabsContent>
 
                             <TabsContent value="month" className="mt-4">
                                 <MonthCalendar
@@ -497,6 +595,16 @@ export default function SchedulesPage() {
                     )}
                 </DialogContent>
             </Dialog>
+
+            <DeleteMonthDialog
+                open={deleteMonthOpen}
+                onOpenChange={setDeleteMonthOpen}
+                monthLabel={format(month, 'MMMM yyyy')}
+                status="final"
+                count={upcomingThisMonth.length}
+                people={countPeople(upcomingThisMonth)}
+                onConfirm={handleDeleteFinalMonth}
+            />
 
             {/* Export the month on screen as a shareable image */}
             <Dialog open={exportOpen} onOpenChange={setExportOpen}>

@@ -6,6 +6,7 @@ import structlog
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore
 
 from app.core.config import settings
+from app.core.exceptions import BadRequestError
 from app.core.logging import get_logger
 from app.repository.departments.repository import DepartmentRepository
 from app.repository.schedules.repository import ScheduleRepository
@@ -324,6 +325,10 @@ class ReminderService:
         if not schedule:
             log.warning("schedule_not_found")
             return 0
+        if schedule.is_draft:
+            # A draft is a rota nobody has been told about; reminding them of it would be the
+            # first they heard. Checked before the cooldown is claimed, so a refusal costs nothing.
+            raise BadRequestError("This rota is still a draft. Finalize it before texting anyone.")
         # Re-texts everybody every time and records nothing, so the cooldown is the only thing
         # standing between a repeated tap and a phone buzzing for each one.
         self.sms_service.claim_manual_send(f"schedule:{schedule_id}")
