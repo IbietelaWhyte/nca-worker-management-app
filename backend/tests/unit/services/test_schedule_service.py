@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -16,6 +16,7 @@ from app.schemas.schedules.models import (
     ScheduleStatus,
 )
 from app.service.schedules.service import ScheduleService
+from app.service.sms.service import SendResult
 from tests.unit.services.conftest import (
     make_assignment,
     make_availability,
@@ -1308,6 +1309,23 @@ class TestAddAssignment:
         result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
 
         assert any("no phone number" in w for w in result.warnings)
+
+    def test_warns_without_texting_when_the_added_worker_is_blocked(self, service, edit, mock_sms_service):
+        edit.spare[0].sms_blocked_at = datetime(2026, 10, 30, tzinfo=timezone.utc)
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        mock_sms_service.send_assignment_notice.assert_not_called()
+        assert any("cannot receive texts" in w for w in result.warnings)
+
+    def test_warns_when_the_notice_discovers_the_block(self, service, edit, mock_sms_service, mock_schedule_repo):
+        # Unlike a transient failure, the sweep will not retry this one, so the head must hear.
+        mock_sms_service.send_assignment_notice.return_value = SendResult.BLOCKED
+
+        result = service.add_assignment(edit.schedule.id, edit.spare[0].id)
+
+        mock_schedule_repo.mark_notice_sent.assert_not_called()
+        assert any("cannot receive texts" in w for w in result.warnings)
 
     def test_refuses_a_worker_already_on_the_rota(self, service, edit, mock_schedule_repo):
         with pytest.raises(ConflictError, match="already on this rota"):

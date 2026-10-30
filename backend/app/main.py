@@ -58,7 +58,7 @@ def create_reminder_service() -> ReminderService:
     schedule_repo = ScheduleRepository(client)
     worker_repo = WorkerRepository(client)
     department_repo = DepartmentRepository(client)
-    sms_service = SMSService()
+    sms_service = SMSService(worker_repo=worker_repo)
     token_service = ConfirmationTokenService(token_repo=ConfirmationTokenRepository(client))
     prompt_service = AvailabilityPromptService(
         prompt_repo=AvailabilityPromptRepository(client),

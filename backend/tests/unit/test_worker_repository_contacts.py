@@ -94,3 +94,18 @@ class TestBatchWrites:
         client = MagicMock()
         WorkerRepository(client).delete_many([])
         client.table.return_value.delete.assert_not_called()
+
+
+class TestMarkSmsBlocked:
+    def test_marks_every_worker_with_the_number(self):
+        # By phone, not id: an opt-out belongs to the number, and workers.phone is not unique.
+        client = MagicMock()
+        client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [{}, {}]
+        repo = WorkerRepository(client)
+
+        assert repo.mark_sms_blocked("+14165550101", 21610) == 2
+
+        fields = client.table.return_value.update.call_args.args[0]
+        assert fields["sms_error_code"] == 21610
+        assert fields["sms_blocked_at"] is not None
+        assert client.table.return_value.update.return_value.eq.call_args.args == ("phone", "+14165550101")

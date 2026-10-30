@@ -205,13 +205,16 @@ def get_special_service_service(
     return SpecialServiceService(special_service_repo=special_service_repo, worker_repo=worker_repo)
 
 
-def get_sms_service() -> SMSService:
+def get_sms_service(worker_repo: WorkerRepository = Depends(get_worker_repository)) -> SMSService:
     """FastAPI dependency that provides an SMSService instance.
+
+    Args:
+        worker_repo: WorkerRepository dependency, to mark numbers Twilio permanently refused.
 
     Returns:
         SMSService: Service for sending SMS notifications via Twilio.
     """
-    return SMSService()
+    return SMSService(worker_repo=worker_repo)
 
 
 def get_monthly_lead_service(

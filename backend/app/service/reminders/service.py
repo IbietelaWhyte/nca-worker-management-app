@@ -173,6 +173,10 @@ class ReminderService:
         if not worker or not worker.phone:
             log.warning("notice_skipped_no_phone")
             return False
+        if worker.sms_blocked_at:
+            # The RPC already filters these; kept for a worker blocked mid-run by another send.
+            log.warning("notice_skipped_sms_blocked")
+            return False
 
         schedules = [a.schedules for a in assignments if a.schedules]
         if not schedules:
@@ -261,6 +265,10 @@ class ReminderService:
 
         if not worker or not worker.phone:
             log.warning("reminder_skipped_no_phone")
+            return False
+        if worker.sms_blocked_at:
+            # trigger_for_schedule reaches here without the RPC's filter.
+            log.warning("reminder_skipped_sms_blocked")
             return False
         if not schedules:
             log.warning("reminder_skipped_missing_schedule")

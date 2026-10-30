@@ -1,10 +1,12 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from twilio.base.exceptions import TwilioRestException
 
 import app.service.sms.service as sms_module
 from app.core.exceptions import TooManyRequestsError
-from app.service.sms.service import SMSService
+from app.repository.workers.repository import WorkerRepository
+from app.service.sms.service import SendResult, SMSService
 
 PROMPT_URL = "https://app.example.com/availability/abc"
 
@@ -21,7 +23,7 @@ GSM7 = set(
 def service():
     # The Twilio client reaches out on construction; nothing here sends, so stub it out.
     with patch("app.service.sms.service.TwilioClient"):
-        yield SMSService()
+        yield SMSService(worker_repo=MagicMock(spec=WorkerRepository))
 
 
 def notice_body(service, duties) -> str:
@@ -293,3 +295,49 @@ class TestManualSendCooldown:
         monkeypatch.setattr(sms_module.settings, "manual_send_cooldown_minutes", 0)
         service.claim_manual_send("schedule:a")
         service.claim_manual_send("schedule:a")  # no raise
+
+
+class TestSendOutcome:
+    """A refusal about the recipient's number must stop every retry; anything else must not."""
+
+    TO = "+14165550101"
+
+    @staticmethod
+    def refuse(service, code):
+        service.client.messages.create.side_effect = TwilioRestException(400, "/Messages", "refused", code=code)
+
+    def test_a_sent_message_is_truthy(self, service):
+        result = service.send_sms(self.TO, "hi")
+
+        assert result is SendResult.SENT
+        assert result
+        service.worker_repo.mark_sms_blocked.assert_not_called()
+
+    @pytest.mark.parametrize("code", [21610, 21211, 21614])
+    def test_a_permanent_refusal_blocks_the_number(self, service, code):
+        self.refuse(service, code)
+
+        result = service.send_sms(self.TO, "hi")
+
+        assert result is SendResult.BLOCKED
+        assert not result
+        service.worker_repo.mark_sms_blocked.assert_called_once_with(self.TO, code)
+
+    @pytest.mark.parametrize("code", [20429, 21408, 30001, None])
+    def test_any_other_twilio_error_is_left_to_retry(self, service, code):
+        self.refuse(service, code)
+
+        assert service.send_sms(self.TO, "hi") is SendResult.FAILED
+        service.worker_repo.mark_sms_blocked.assert_not_called()
+
+    def test_a_network_error_is_left_to_retry(self, service):
+        service.client.messages.create.side_effect = ConnectionError("reset")
+
+        assert service.send_sms(self.TO, "hi") is SendResult.FAILED
+        service.worker_repo.mark_sms_blocked.assert_not_called()
+
+    def test_failing_to_record_the_block_still_reports_it(self, service):
+        self.refuse(service, 21610)
+        service.worker_repo.mark_sms_blocked.side_effect = RuntimeError("db down")
+
+        assert service.send_sms(self.TO, "hi") is SendResult.BLOCKED

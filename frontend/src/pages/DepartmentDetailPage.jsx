@@ -10,6 +10,7 @@ import RoleForm from '@/components/roles/RoleForm'
 import CsvImportDialog from '@/components/departments/CsvImportDialog'
 import AvailabilityPromptDialog from '@/components/departments/AvailabilityPromptDialog'
 import MonthlyLeadsPanel from '@/components/departments/MonthlyLeadsPanel'
+import SmsBlockedBadge from '@/components/workers/SmsBlockedBadge'
 import {
     getSubteamWithWorkers,
     assignWorkersToSubteam,
@@ -558,6 +559,10 @@ export default function DepartmentDetailPage() {
                                                                     HOD
                                                                 </Badge>
                                                             )}
+                                                            <SmsBlockedBadge
+                                                                worker={worker}
+                                                                className="text-xs"
+                                                            />
                                                         </div>
                                                     </TableCell>
                                                     <TableCell>{worker.email}</TableCell>
@@ -691,6 +696,10 @@ export default function DepartmentDetailPage() {
                                                         <Crown size={10} className="mr-1" /> HOD
                                                     </Badge>
                                                 )}
+                                                <SmsBlockedBadge
+                                                    worker={worker}
+                                                    className="shrink-0 text-xs"
+                                                />
                                             </div>
                                             <a
                                                 href={`mailto:${worker.email}`}

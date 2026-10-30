@@ -44,7 +44,7 @@ from app.schemas.subteams.models import SubteamResponse
 from app.schemas.workers.models import Worker, WorkerResponse
 from app.service.monthly_leads.service import MonthlyLeadService
 from app.service.schedules.planner import ORDINARY, GroupContext, PlanContext, RoleQuota, plan_month
-from app.service.sms.service import SMSService
+from app.service.sms.service import SendResult, SMSService
 from app.service.special_services.service import SpecialServiceService
 from app.service.subteams.service import staffing_band
 
@@ -136,6 +136,15 @@ def _describe_when(schedule: Schedule) -> str:
     about the same date should not have to reconcile two formats.
     """
     return f"{schedule.scheduled_date.strftime('%a %d %b')} at {schedule.start_time.strftime('%H:%M')}"
+
+
+def _blocked_warning(name: str) -> str:
+    """The warning for a worker whose number Twilio has refused for good (see `SMSService.send_sms`).
+
+    Raised both before a send, when the block is already recorded, and after one that discovered
+    it, so the head hears the same sentence either way.
+    """
+    return f"{name} cannot receive texts from us, so they have not been told. Let them know another way."
 
 
 def _last_day_of_month(year: int, month: int) -> date:
@@ -796,12 +805,17 @@ class ScheduleService:
         name = f"{worker.first_name} {worker.last_name}".strip()
         if not worker.phone:
             return [f"{name} has no phone number, so they have not been told."]
+        if worker.sms_blocked_at:
+            return [_blocked_warning(name)]
 
         sent = self.sms_service.send_assignment_notice(
             to=worker.phone,
             worker_name=name,
             duties=[(self._department_name(schedule.department_id), _describe_when(schedule))],
         )
+        if sent is SendResult.BLOCKED:
+            # The number is now marked, so the sweep will not retry it either.
+            return [_blocked_warning(name)]
         if not sent:
             self.logger.warning("assignment_notice_failed_will_retry", assignment_id=str(assignment_id))
             return []
@@ -822,6 +836,8 @@ class ScheduleService:
         name = f"{worker.first_name} {worker.last_name}".strip()
         if not worker.phone:
             return [f"{name} has no phone number, so they have not been told."]
+        if worker.sms_blocked_at:
+            return [_blocked_warning(name)]
 
         sent = self.sms_service.send_assignment_cancelled(
             to=worker.phone,
@@ -829,6 +845,8 @@ class ScheduleService:
             department_name=self._department_name(schedule.department_id),
             when=_describe_when(schedule),
         )
+        if sent is SendResult.BLOCKED:
+            return [_blocked_warning(name)]
         if not sent:
             self.logger.error("assignment_cancellation_failed", worker_id=str(worker.id))
             return [f"Could not text {name}. Let them know another way."]
@@ -934,8 +952,14 @@ class ScheduleService:
             if not worker.phone:
                 warnings.append(f"{name} has no phone number, so they have not been told.")
                 continue
+            if worker.sms_blocked_at:
+                warnings.append(_blocked_warning(name))
+                continue
             duties = [(department, _describe_when(s)) for s in dates]
-            if not self.sms_service.send_duties_cancelled(to=worker.phone, worker_name=name, duties=duties):
+            sent = self.sms_service.send_duties_cancelled(to=worker.phone, worker_name=name, duties=duties)
+            if sent is SendResult.BLOCKED:
+                warnings.append(_blocked_warning(name))
+            elif not sent:
                 log.error("month_cancellation_failed", worker_id=str(worker.id))
                 warnings.append(f"Could not text {name}. Let them know another way.")
 

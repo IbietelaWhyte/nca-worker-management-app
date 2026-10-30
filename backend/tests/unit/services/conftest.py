@@ -157,6 +157,8 @@ def make_worker(**kwargs) -> WorkerResponse:
         phone=kwargs.get("phone", "+14165550101"),
         is_active=kwargs.get("is_active", True),
         created_at=kwargs.get("created_at", date.today()),
+        sms_blocked_at=kwargs.get("sms_blocked_at"),
+        sms_error_code=kwargs.get("sms_error_code"),
     )
 
 

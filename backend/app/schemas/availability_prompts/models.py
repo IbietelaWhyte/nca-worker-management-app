@@ -70,4 +70,7 @@ class PromptSendResult(BaseModel):
     # Counted, not silently dropped: a head who prompts ten people and hears about eight should
     # be told why, or the suppression looks like a bug in the send.
     skipped_on_leave: int = 0
+    # Twilio refused their number for good (replied STOP, invalid, not a mobile). Counted apart
+    # from `failed` because retrying will not help: somebody has to reach them another way.
+    skipped_sms_blocked: int = 0
     failed: int = 0

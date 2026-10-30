@@ -133,6 +133,8 @@ export default function AvailabilityPromptDialog({ open, onOpenChange, departmen
                                     ` ${plural(result.skipped_no_phone, 'worker')} skipped — no phone number on file.`}
                                 {result.skipped_on_leave > 0 &&
                                     ` ${plural(result.skipped_on_leave, 'worker')} skipped — on leave.`}
+                                {result.skipped_sms_blocked > 0 &&
+                                    ` ${plural(result.skipped_sms_blocked, 'worker')} skipped — their number can't receive texts (see Members).`}
                                 {result.failed > 0 &&
                                     ` ${plural(result.failed, 'message')} failed to send.`}
                             </AlertDescription>
