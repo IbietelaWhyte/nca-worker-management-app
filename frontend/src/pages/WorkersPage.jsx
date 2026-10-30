@@ -11,6 +11,7 @@ import CreateAccountDialog from '@/components/workers/CreateAccountDialog'
 import DeleteWorkerDialog from '@/components/workers/DeleteWorkerDialog'
 import WorkerLeaveDialog from '@/components/workers/WorkerLeaveDialog'
 import WorkerHistoryDialog from '@/components/workers/WorkerHistoryDialog'
+import SmsBlockedBadge from '@/components/workers/SmsBlockedBadge'
 import { getCurrentLeave } from '@/api/leave'
 import { getWorkers } from '@/api/workers'
 import { downloadCsv, slug, toCsv } from '@/lib/csv'
@@ -120,6 +121,7 @@ function StatusBadges({ worker, leave }) {
                     {leave.end_date ? `On leave to ${shortDate(leave.end_date)}` : 'On leave'}
                 </Badge>
             )}
+            <SmsBlockedBadge worker={worker} />
         </div>
     )
 }

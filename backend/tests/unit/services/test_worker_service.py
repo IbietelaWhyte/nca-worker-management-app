@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -137,6 +138,25 @@ class TestUpdateWorker:
         mock_worker_repo.get_by_id.return_value = None
         with pytest.raises(NotFoundError, match="not found"):
             service.update_worker(uuid4(), WorkerUpdate(first_name="Jane"))
+
+    def test_saving_a_phone_clears_a_text_block(self, service, mock_worker_repo):
+        # How a head says "try them again": they fixed the number, or the person texted START.
+        worker = make_worker(sms_blocked_at=datetime(2026, 10, 30, tzinfo=timezone.utc), sms_error_code=21610)
+        mock_worker_repo.get_by_id.return_value = worker
+
+        service.update_worker(worker.id, WorkerUpdate(phone="+14165550101"))
+
+        fields = mock_worker_repo.update.call_args.args[1]
+        assert fields["sms_blocked_at"] is None
+        assert fields["sms_error_code"] is None
+
+    def test_an_edit_without_a_phone_leaves_a_text_block_alone(self, service, mock_worker_repo):
+        worker = make_worker(sms_blocked_at=datetime(2026, 10, 30, tzinfo=timezone.utc), sms_error_code=21610)
+        mock_worker_repo.get_by_id.return_value = worker
+
+        service.update_worker(worker.id, WorkerUpdate(first_name="Jane"))
+
+        assert "sms_blocked_at" not in mock_worker_repo.update.call_args.args[1]
 
     def test_role_change_syncs_highest_role_to_auth(self, service, mock_worker_repo, mock_supabase_client):
         auth_user_id = uuid4()

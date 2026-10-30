@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 from uuid import uuid4
 
@@ -15,7 +15,7 @@ from app.schemas.availability_prompts.models import (
 )
 from app.service.availability_prompts.service import AvailabilityPromptService
 from app.service.confirmation_tokens.service import ConfirmationTokenService
-from app.service.sms.service import SMSService
+from app.service.sms.service import SendResult, SMSService
 from tests.unit.services.conftest import make_department, make_worker
 
 
@@ -102,6 +102,27 @@ class TestSendNow:
         result = service.send_now(uuid4())
         assert (result.sent, result.skipped_no_phone) == (1, 1)
         assert mock_sms_service.send_availability_prompt.call_count == 1
+
+    def test_counts_workers_whose_number_is_blocked_without_texting_them(
+        self, service, mock_department_repo, mock_worker_repo, mock_sms_service
+    ):
+        mock_department_repo.get_by_id.return_value = make_department()
+        blocked = make_worker(sms_blocked_at=datetime(2026, 10, 30, tzinfo=timezone.utc), sms_error_code=21610)
+        mock_worker_repo.get_workers_by_department.return_value = [make_worker(), blocked]
+
+        result = service.send_now(uuid4())
+        assert (result.sent, result.skipped_sms_blocked, result.failed) == (1, 1, 0)
+        assert mock_sms_service.send_availability_prompt.call_count == 1
+
+    def test_a_number_refused_mid_send_is_counted_as_blocked_not_failed(
+        self, service, mock_department_repo, mock_worker_repo, mock_sms_service
+    ):
+        mock_department_repo.get_by_id.return_value = make_department()
+        mock_worker_repo.get_workers_by_department.return_value = [make_worker()]
+        mock_sms_service.send_availability_prompt.return_value = SendResult.BLOCKED
+
+        result = service.send_now(uuid4())
+        assert (result.sent, result.skipped_sms_blocked, result.failed) == (0, 1, 0)
 
     def test_skips_inactive_workers(self, service, mock_department_repo, mock_worker_repo, mock_sms_service):
         mock_department_repo.get_by_id.return_value = make_department()

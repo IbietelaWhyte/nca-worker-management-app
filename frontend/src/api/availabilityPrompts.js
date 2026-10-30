@@ -17,6 +17,6 @@ export const createAvailabilityPrompt = (departmentId, data) =>
 export const deleteAvailabilityPrompt = (departmentId, promptId) =>
     apiClient.delete(`/departments/${departmentId}/availability-prompts/${promptId}`)
 
-/** Text the department's workers now. Resolves to { sent, skipped_no_phone, failed }. */
+/** Text the department's workers now. Resolves to { sent, skipped_no_phone, skipped_on_leave, skipped_sms_blocked, failed }. */
 export const sendAvailabilityPromptNow = departmentId =>
     apiClient.post(`/departments/${departmentId}/availability-prompts/send`)

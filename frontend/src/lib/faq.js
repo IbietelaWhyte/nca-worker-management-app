@@ -141,6 +141,10 @@ export const FAQ_SECTIONS = [
                 answer: 'Open the department and send an availability request. The text asks people for the dates they cannot serve, and says that no reply means they are free — so silence is a usable answer rather than a gap you have to chase. You can send it now or have it go out each month on a day you choose. Workers get a link that works without signing in, so it reaches the ones with no account too. Each message costs money to send, so it is never sent automatically on your behalf.',
             },
             {
+                question: 'A worker shows "Replied STOP" or "Texts failing". What does that mean?',
+                answer: 'The app has stopped texting them, because their phone company refused our messages for good: either they replied STOP to one of our texts, or the number cannot receive texts at all. They are still on their rotas, but they are not being told about them, so let them know another way. If they replied STOP, ask them to text START to the number our messages come from, then open Workers, choose Edit and save their phone to resume. If the number is wrong, correct it there.',
+            },
+            {
                 question: 'How do I share the rota with people who do not use the app?',
                 answer: 'Open the schedule and export the month as an image, then send it on however your team already talks. It is laid out to stay readable in a group chat.',
             },

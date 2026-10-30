@@ -18,6 +18,10 @@ class Worker(BaseModel):
     email: str
     is_active: bool
     created_at: datetime
+    # Set when Twilio permanently refused a text to this number (replied STOP, invalid, not a
+    # mobile); the sweeps skip the worker until a head saves their phone again.
+    sms_blocked_at: datetime | None = None
+    sms_error_code: int | None = None
 
 
 class WorkerCreate(BaseModel):

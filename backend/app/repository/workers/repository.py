@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -283,6 +283,35 @@ class WorkerRepository(BaseRepository[WorkerResponse]):
         log = self.logger.bind(method="delete_many", count=len(ids))
         self.client.table(q.TABLE).delete().in_(q.Columns.ID, [str(i) for i in ids]).execute()
         log.info("workers_deleted")
+
+    def mark_sms_blocked(self, phone: str, error_code: int) -> int:
+        """Record that Twilio permanently refused texts to a number.
+
+        Keyed by phone rather than worker id because an opt-out belongs to the number, and
+        `workers.phone` is not unique — a family sharing one phone all stop receiving texts.
+
+        Args:
+            phone: The E.164 number Twilio refused.
+            error_code: Twilio's error code, e.g. 21610 for a recipient who replied STOP.
+
+        Returns:
+            int: How many workers were marked.
+        """
+        log = self.logger.bind(method="mark_sms_blocked", phone=mask_phone(phone), error_code=error_code)
+        response = (
+            self.client.table(q.TABLE)
+            .update(
+                {
+                    q.Columns.SMS_BLOCKED_AT: datetime.now(timezone.utc).isoformat(),
+                    q.Columns.SMS_ERROR_CODE: error_code,
+                }
+            )
+            .eq(q.Columns.PHONE, phone)
+            .execute()
+        )
+        marked = len(response.data or [])
+        log.info("workers_marked_sms_blocked", marked=marked)
+        return marked
 
     def search(
         self,

@@ -14,7 +14,7 @@ from app.schemas.availability_prompts.models import (
     PromptSendResult,
 )
 from app.service.confirmation_tokens.service import ConfirmationTokenService
-from app.service.sms.service import SMSService
+from app.service.sms.service import SendResult, SMSService
 
 logger = get_logger(__name__)
 
@@ -198,15 +198,21 @@ class AvailabilityPromptService:
                 # absence would be noticed.
                 result.skipped_no_phone += 1
                 continue
+            if worker.sms_blocked_at:
+                # Twilio has refused this number for good; another try would only fail again.
+                result.skipped_sms_blocked += 1
+                continue
             token_id = self.token_service.get_or_create_token_id(worker.id)
-            ok = self.sms_service.send_availability_prompt(
+            outcome = self.sms_service.send_availability_prompt(
                 to=worker.phone,
                 worker_name=f"{worker.first_name} {worker.last_name}".strip(),
                 department_name=department_name,
                 availability_url=f"{settings.frontend_url}/availability/{token_id}",
             )
-            if ok:
+            if outcome:
                 result.sent += 1
+            elif outcome is SendResult.BLOCKED:
+                result.skipped_sms_blocked += 1
             else:
                 result.failed += 1
 

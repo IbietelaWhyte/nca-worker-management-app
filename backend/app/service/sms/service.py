@@ -1,13 +1,16 @@
 import math
 import threading
 import time
+from enum import Enum
 
+from twilio.base.exceptions import TwilioRestException
 from twilio.rest import Client as TwilioClient
 
 from app.core.config import settings
 from app.core.exceptions import TooManyRequestsError
 from app.core.logging import get_logger
 from app.core.redaction import mask_phone
+from app.repository.workers.repository import WorkerRepository
 
 logger = get_logger(__name__)
 
@@ -17,14 +20,36 @@ logger = get_logger(__name__)
 _manual_sends: dict[str, float] = {}
 _manual_sends_lock = threading.Lock()
 
+# Twilio errors that no retry can fix, because they are about the recipient's number: 21610 the
+# person replied STOP, 21211 the number is invalid, 21614 it is not a mobile. Retrying one used to
+# re-send every notice_interval_minutes until the duty date passed. 21408 (region not enabled) is
+# deliberately absent - it is this account's configuration, not the person, and fixing it in the
+# Twilio console should not leave a list of workers to unblock by hand.
+PERMANENT_ERROR_CODES = frozenset({21610, 21211, 21614})
+
+
+class SendResult(Enum):
+    """How a send ended. Truthy only when it went out, so `if not sent:` still reads naturally."""
+
+    SENT = "sent"
+    FAILED = "failed"  # Worth retrying: a network blip, a Twilio outage, a rate limit.
+    BLOCKED = "blocked"  # Never worth retrying; the number has been marked on its workers.
+
+    def __bool__(self) -> bool:
+        return self is SendResult.SENT
+
 
 class SMSService:
-    def __init__(self) -> None:
+    def __init__(self, worker_repo: WorkerRepository) -> None:
         """Initialize the SMSService with Twilio client configuration.
 
         Loads Twilio credentials from application settings and creates
         a Twilio client for sending SMS messages.
+
+        Args:
+            worker_repo: Repository for workers, to mark a number Twilio permanently refused.
         """
+        self.worker_repo = worker_repo
         self.client = TwilioClient(
             settings.twilio_account_sid,
             settings.twilio_auth_token,
@@ -56,15 +81,19 @@ class SMSService:
                 )
             _manual_sends[key] = now
 
-    def send_sms(self, to: str, body: str) -> bool:
+    def send_sms(self, to: str, body: str) -> SendResult:
         """Send an SMS message to a phone number.
+
+        A permanent refusal (see `PERMANENT_ERROR_CODES`) is recorded on every worker with this
+        number, here rather than in each caller, so that every path - notice, reminder, prompt,
+        cancellation - stops retrying it at once. The notification RPCs skip a marked worker.
 
         Args:
             to: Recipient phone number in E.164 format (e.g., +14165551234).
             body: Message text to send.
 
         Returns:
-            bool: True if message sent successfully, False if sending failed.
+            SendResult: SENT, FAILED (worth retrying) or BLOCKED (never worth retrying).
         """
         # bind the method and masked recipient for better traceability in logs
         log = self.logger.bind(method="send_sms", to=mask_phone(to))
@@ -76,17 +105,28 @@ class SMSService:
                 body=body,
             )
             log.info("sms_sent", sid=message.sid)
-            return True
+            return SendResult.SENT
+        except TwilioRestException as e:
+            if e.code not in PERMANENT_ERROR_CODES:
+                log.error("sms_failed", error=str(e), error_code=e.code)
+                return SendResult.FAILED
+            log.warning("sms_recipient_blocked", error_code=e.code)
+            try:
+                self.worker_repo.mark_sms_blocked(to, e.code)
+            except Exception as mark_error:
+                # The send is still refused; the next attempt will try to record it again.
+                log.error("sms_block_not_recorded", error=str(mark_error))
+            return SendResult.BLOCKED
         except Exception as e:
             log.error("sms_failed", error=str(e))
-            return False
+            return SendResult.FAILED
 
     def send_reminder(
         self,
         to: str,
         worker_name: str,
         duties: list[tuple[str, str]],
-    ) -> bool:
+    ) -> SendResult:
         """Remind a worker of every duty whose lead time falls today, in one message.
 
         The message is a statement, not a question. Nothing consumes inbound SMS — there is no
@@ -103,7 +143,7 @@ class SMSService:
             duties: (department name, human-readable date) pairs, soonest first.
 
         Returns:
-            bool: True if reminder sent successfully, False if sending failed.
+            SendResult: Whether the reminder went out; see `send_sms`.
         """
         body = f"Hi {worker_name}, a reminder that you are scheduled for {self._describe_duties(duties)}."
         self.logger.info("sending_reminder", to=mask_phone(to), dates=len(duties))
@@ -115,7 +155,7 @@ class SMSService:
         worker_name: str,
         department_name: str,
         availability_url: str,
-    ) -> bool:
+    ) -> SendResult:
         """Ask a worker for the dates they CANNOT serve.
 
         The question is asked negatively because the rota already answers it that way: a worker
@@ -138,7 +178,7 @@ class SMSService:
             availability_url: Public link to the page where they mark themselves off.
 
         Returns:
-            bool: True if the prompt was sent, False if sending failed.
+            SendResult: Whether the prompt went out; see `send_sms`.
         """
         # Every character stays inside GSM-7, and the wording is kept short, so a name, a
         # department and a link still fit one 160-character segment. CANNOT is capitalised
@@ -156,7 +196,7 @@ class SMSService:
         to: str,
         worker_name: str,
         duties: list[tuple[str, str]],
-    ) -> bool:
+    ) -> SendResult:
         """Tell a worker they have been scheduled, covering every date in one message.
 
         Sent shortly after a schedule is created, well before the pre-service reminder, so the
@@ -175,13 +215,13 @@ class SMSService:
                 two parallel lists so a date cannot drift onto the wrong department.
 
         Returns:
-            bool: True if the notice was sent, False if sending failed.
+            SendResult: Whether the notice went out; see `send_sms`.
         """
         body = f"Hi {worker_name}, you have been scheduled for {self._describe_duties(duties)}."
         self.logger.info("sending_assignment_notice", to=mask_phone(to), dates=len(duties))
         return self.send_sms(to, body)
 
-    def send_assignment_cancelled(self, to: str, worker_name: str, department_name: str, when: str) -> bool:
+    def send_assignment_cancelled(self, to: str, worker_name: str, department_name: str, when: str) -> SendResult:
         """Tell a worker they have been taken off a date.
 
         **The only message in the system with no retry.** The notice and the reminder are both
@@ -200,7 +240,7 @@ class SMSService:
             when: Human-readable date and time, e.g. "Sun 02 Aug at 09:00".
 
         Returns:
-            bool: True if the message was sent, False if sending failed.
+            SendResult: Whether the message went out; see `send_sms`.
         """
         # A department we could not name would render as a dangling " in ", so drop it rather
         # than half-applying it — the same rule _describe_duties follows.
@@ -209,7 +249,7 @@ class SMSService:
         self.logger.info("sending_assignment_cancelled", to=mask_phone(to))
         return self.send_sms(to, body)
 
-    def send_duties_cancelled(self, to: str, worker_name: str, duties: list[tuple[str, str]]) -> bool:
+    def send_duties_cancelled(self, to: str, worker_name: str, duties: list[tuple[str, str]]) -> SendResult:
         """Tell a worker several of their dates are gone, in one message.
 
         Deleting a month of finalized rotas would otherwise send one text per date to the same
@@ -222,7 +262,7 @@ class SMSService:
             duties: (department name, human-readable date) pairs, soonest first.
 
         Returns:
-            bool: True if the message was sent, False if sending failed.
+            SendResult: Whether the message went out; see `send_sms`.
         """
         body = f"Hi {worker_name}, you are no longer scheduled for {self._describe_duties(duties)}. No action needed."
         self.logger.info("sending_duties_cancelled", to=mask_phone(to), dates=len(duties))

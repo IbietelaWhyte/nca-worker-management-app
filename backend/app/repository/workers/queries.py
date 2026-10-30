@@ -28,6 +28,8 @@ class Columns:
     PHONE = "phone"
     AUTH_USER_ID = "auth_user_id"
     IS_ACTIVE = "is_active"
+    SMS_BLOCKED_AT = "sms_blocked_at"
+    SMS_ERROR_CODE = "sms_error_code"
 
 
 class JunctionColumns:

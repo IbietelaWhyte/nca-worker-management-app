@@ -47,6 +47,7 @@ def make_due_assignment(**kwargs) -> AssignmentResponse:
             last_name=kwargs.get("last_name", "Doe"),
             email=kwargs.get("email", "john.doe@example.com"),
             phone=kwargs.get("phone", "+14165550101"),
+            sms_blocked_at=kwargs.get("sms_blocked_at"),
             is_active=True,
             created_at=kwargs.get("worker_created_at", "2026-01-01T08:00:00Z"),
         ),
@@ -209,6 +210,14 @@ class TestSendPendingNotices:
         mock_sms_service.send_assignment_notice.assert_not_called()
         mock_schedule_repo.mark_notice_sent.assert_not_called()
 
+    def test_skips_a_worker_whose_number_is_blocked(self, service, mock_schedule_repo, mock_sms_service):
+        # The RPC filters these; this guards a worker blocked by another send since it ran.
+        blocked = make_due_assignment(sms_blocked_at="2026-10-30T08:00:00Z")
+        mock_schedule_repo.get_assignments_due_for_notice.return_value = [blocked]
+
+        assert service.trigger_notices() == 0
+        mock_sms_service.send_assignment_notice.assert_not_called()
+
     def test_no_work_is_not_an_error(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_notice.return_value = []
 
@@ -292,6 +301,14 @@ class TestSendDueReminders:
 
         assert service.trigger_manually() == 0
         mock_sms_service.send_reminder.assert_not_called()
+
+    def test_skips_a_worker_whose_number_is_blocked(self, service, mock_schedule_repo, mock_sms_service):
+        blocked = make_due_reminder(sms_blocked_at="2026-10-30T08:00:00Z")
+        mock_schedule_repo.get_assignments_due_for_reminder.return_value = [blocked]
+
+        assert service.trigger_manually() == 0
+        mock_sms_service.send_reminder.assert_not_called()
+        mock_schedule_repo.mark_reminders_sent.assert_not_called()
 
     def test_no_due_reminders(self, service, mock_schedule_repo, mock_sms_service):
         mock_schedule_repo.get_assignments_due_for_reminder.return_value = []

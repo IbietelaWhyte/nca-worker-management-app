@@ -686,6 +686,13 @@ class WorkerService:
         new_roles = update_dict.pop("roles", None)
         new_assistant_hod_departments = update_dict.pop("assistant_hod_departments", None)
 
+        # Saving a phone, changed or not, is how a head says "try texting them again": they fixed
+        # the number, or the person texted START. Explicit Nones, since exclude_none dropped them.
+        # If the number is still refused, the next send simply marks it again.
+        if "phone" in update_dict:
+            update_dict["sms_blocked_at"] = None
+            update_dict["sms_error_code"] = None
+
         # Update worker profile fields if any were provided
         if update_dict:
             updated = self.worker_repo.update(worker_id, update_dict)
