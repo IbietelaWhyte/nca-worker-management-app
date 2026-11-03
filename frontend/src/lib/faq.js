@@ -45,7 +45,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'How do I change my phone number or my password?',
-                answer: 'Both are on the Account page. Keep your phone number up to date — your duties, your reminders and your availability link are all sent to it by text.',
+                answer: 'Both are on the Account page. Keep your phone number up to date — your duties, your reminders and your availability link are all sent to it by text. A password needs at least 10 characters, with a lowercase letter, an uppercase letter, a number and a symbol. Forgotten it? Use Forgot password on the sign-in page and a reset link is emailed to you.',
             },
             {
                 question: 'Does the app know whether I turned up?',
@@ -84,7 +84,7 @@ export const FAQ_SECTIONS = [
             },
             {
                 question: 'Somebody needs to sign in to the app.',
-                answer: 'Ask an administrator to create their account; only administrators can. A worker does not need one to be scheduled — their duties, reminders and availability links reach them by text either way.',
+                answer: 'Ask an administrator to create their account; only administrators can. They get an email invite and choose their own password, so nobody else ever knows it. The link lasts 24 hours — if it runs out, the administrator can resend it from the Workers page. A worker does not need an account to be scheduled — their duties, reminders and availability links reach them by text either way.',
             },
         ],
     },

@@ -22,7 +22,6 @@ const emptyForm = {
     last_name: '',
     email: '',
     phone: '',
-    password: '',
     role: 'worker',
     department_ids: [],
 }
@@ -58,12 +57,6 @@ export default function RegisterUser() {
         setError(null)
         setSuccess(false)
 
-        // Validate password
-        if (form.password.length < 6) {
-            setError('Password must be at least 6 characters')
-            return
-        }
-
         setLoading(true)
         try {
             await registerUser(form)
@@ -93,7 +86,8 @@ export default function RegisterUser() {
             <div>
                 <h2 className="text-2xl font-bold">Register New User</h2>
                 <p className="text-muted-foreground text-sm mt-1">
-                    Create a new user account with authentication credentials
+                    Adds them as a worker and emails them an invite to choose their own password.
+                    The invite link lasts 24 hours.
                 </p>
             </div>
 
@@ -101,7 +95,7 @@ export default function RegisterUser() {
             {success && (
                 <Alert className="bg-success/10 border-success/30">
                     <p className="text-sm text-success">
-                        User registered successfully! Redirecting...
+                        Invite sent to {form.email}. Redirecting...
                     </p>
                 </Alert>
             )}
@@ -172,24 +166,6 @@ export default function RegisterUser() {
                 </div>
 
                 <div className="space-y-2">
-                    <Label htmlFor="password">
-                        Password <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                        id="password"
-                        name="password"
-                        type="password"
-                        value={form.password}
-                        onChange={handleChange}
-                        placeholder="••••••••"
-                        required
-                    />
-                    <p className="text-xs text-muted-foreground">
-                        Password must be at least 6 characters
-                    </p>
-                </div>
-
-                <div className="space-y-2">
                     <Label htmlFor="role">
                         Role <span className="text-destructive">*</span>
                     </Label>
@@ -254,7 +230,7 @@ export default function RegisterUser() {
                     </Button>
                     <Button type="submit" disabled={loading}>
                         <UserPlus size={16} className="mr-2" />
-                        {loading ? 'Registering...' : 'Register User'}
+                        {loading ? 'Sending invite...' : 'Register and send invite'}
                     </Button>
                 </div>
             </form>

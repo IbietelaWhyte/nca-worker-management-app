@@ -283,7 +283,6 @@ def make_register_request(**kwargs) -> RegisterRequest:
         last_name=kwargs.get("last_name", "Doe"),
         email=kwargs.get("email", "john.doe@example.com"),
         phone=kwargs.get("phone", "+14165550101"),
-        password=kwargs.get("password", "securepassword123"),
     )
 
 

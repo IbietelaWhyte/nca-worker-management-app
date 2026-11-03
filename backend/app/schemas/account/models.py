@@ -17,8 +17,10 @@ class ChangePasswordRequest(BaseModel):
     """Payload for a self-service password change.
 
     ``current_password`` is verified before the new password is applied so a hijacked session
-    cannot silently change the password.
+    cannot silently change the password. The length mirrors the Supabase password policy (10, with
+    lower, upper, digit and symbol); Supabase enforces the character classes and its message is
+    passed back to the user.
     """
 
     current_password: str
-    new_password: str = Field(min_length=8)
+    new_password: str = Field(min_length=10)

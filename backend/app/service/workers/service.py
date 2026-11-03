@@ -31,6 +31,11 @@ from app.schemas.workers.models import (
 
 logger = get_logger(__name__)
 
+# How long a deactivated worker's login is banned for: effectively forever. GoTrue takes a Go
+# duration, and has no "permanent" value short of deleting the user, which would lose the
+# auth_user_id link a future reactivation needs. Reactivating must send ban_duration "none".
+_BAN_FOREVER = "876000h"
+
 # Columns a CSV must provide for a bulk worker import. Email is required (it is the dedup key
 # and the DB declares workers.email NOT NULL UNIQUE); phone is required for SMS reminders.
 REQUIRED_IMPORT_COLUMNS = ("first_name", "last_name", "email", "phone")
@@ -732,7 +737,10 @@ class WorkerService:
         return worker
 
     def deactivate_worker(self, worker_id: UUID) -> WorkerResponse:
-        """Deactivate a worker (set is_active to False).
+        """Deactivate a worker (set is_active to False) and revoke their login.
+
+        A ban stops them signing in or refreshing a token; an access token already issued lives
+        out its hour, but get_worker_for_token refuses an inactive worker in the meantime.
 
         Args:
             worker_id: Unique identifier of the worker to deactivate.
@@ -745,7 +753,16 @@ class WorkerService:
         """
         # bind the method and worker_id for better traceability in logs
         log = self.logger.bind(method="deactivate_worker", worker_id=str(worker_id))
-        self.get_worker(worker_id)
+        worker = self.get_worker(worker_id)
+        # Ban the login first. If it fails the worker stays active and the admin retries, rather
+        # than the list showing somebody as deactivated who can still sign in.
+        if worker.auth_user_id:
+            try:
+                self.client.auth.admin.update_user_by_id(str(worker.auth_user_id), {"ban_duration": _BAN_FOREVER})
+            except AuthApiError as exc:
+                log.error("auth_ban_failed", error=str(exc))
+                raise AppError("Failed to revoke their login. Please try again.") from exc
+            log.info("auth_user_banned")
         updated = self.worker_repo.update(worker_id, {"is_active": False})
         if not updated:
             log.error("worker_deactivation_failed")
@@ -927,6 +944,7 @@ class WorkerService:
         Raises:
             BadRequestError: If the token's subject is not a login id.
             NotFoundError: If no worker profile is linked to that login.
+            PermissionDeniedError: If that worker has been deactivated.
         """
         try:
             auth_user_id = UUID(token.sub)
@@ -935,6 +953,9 @@ class WorkerService:
         worker = self.worker_repo.get_by_auth_user_id(auth_user_id)
         if not worker:
             raise NotFoundError("Worker profile not found for authenticated user")
+        # Deactivation bans the login, but a token issued before it stays valid for up to an hour.
+        if not worker.is_active:
+            raise PermissionDeniedError("This account has been deactivated")
         return worker
 
     def authorize_manage_worker(self, token: TokenPayload, worker_id: UUID, *, protect_heads: bool = False) -> None:

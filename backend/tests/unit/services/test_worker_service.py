@@ -222,6 +222,40 @@ class TestDeactivateWorker:
         with pytest.raises(NotFoundError, match="not found"):
             service.deactivate_worker(uuid4())
 
+    def test_bans_the_login_before_deactivating(self, service, mock_worker_repo, mock_supabase_client):
+        auth_user_id = uuid4()
+        worker = make_worker(auth_user_id=auth_user_id)
+        mock_worker_repo.get_by_id.return_value = worker
+        calls: list[str] = []
+        mock_supabase_client.auth.admin.update_user_by_id.side_effect = lambda *a: calls.append("ban")
+        mock_worker_repo.update.side_effect = lambda *a: calls.append("deactivate") or make_worker(is_active=False)
+
+        service.deactivate_worker(worker.id)
+
+        mock_supabase_client.auth.admin.update_user_by_id.assert_called_once_with(
+            str(auth_user_id), {"ban_duration": "876000h"}
+        )
+        assert calls == ["ban", "deactivate"]
+
+    def test_leaves_the_worker_active_when_the_ban_fails(self, service, mock_worker_repo, mock_supabase_client):
+        # Showing somebody as deactivated who can still sign in is worse than a retry.
+        mock_worker_repo.get_by_id.return_value = make_worker(auth_user_id=uuid4())
+        mock_supabase_client.auth.admin.update_user_by_id.side_effect = AuthApiError(
+            message="boom", status=500, code=None
+        )
+
+        with pytest.raises(AppError, match="revoke their login"):
+            service.deactivate_worker(uuid4())
+        mock_worker_repo.update.assert_not_called()
+
+    def test_skips_the_ban_for_a_worker_with_no_login(self, service, mock_worker_repo, mock_supabase_client):
+        mock_worker_repo.get_by_id.return_value = make_worker(auth_user_id=None)
+        mock_worker_repo.update.return_value = make_worker(is_active=False)
+
+        service.deactivate_worker(uuid4())
+
+        mock_supabase_client.auth.admin.update_user_by_id.assert_not_called()
+
 
 def _setup_deletable(mock_worker_repo, mock_department_repo, mock_schedule_repo, **worker_kwargs):
     """Configure mocks so delete_worker passes every guard, returning the worker."""
@@ -440,6 +474,12 @@ class TestGetWorkerForToken:
     def test_raises_not_found_when_no_profile(self, service, mock_worker_repo):
         mock_worker_repo.get_by_auth_user_id.return_value = None
         with pytest.raises(NotFoundError, match="Worker profile not found"):
+            service.get_worker_for_token(_token())
+
+    def test_refuses_a_deactivated_worker(self, service, mock_worker_repo):
+        # Their login is banned on deactivation, but a token issued before it lives out its hour.
+        mock_worker_repo.get_by_auth_user_id.return_value = make_worker(is_active=False)
+        with pytest.raises(PermissionDeniedError, match="deactivated"):
             service.get_worker_for_token(_token())
 
 

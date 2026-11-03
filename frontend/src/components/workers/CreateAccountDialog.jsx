@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { createWorkerAccount, getWorkerDepartments } from '@/api/workers'
 import { useDepartments } from '@/hooks/useDepartments'
 import { Button } from '@/components/ui/button'
-import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Alert } from '@/components/ui/alert'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -17,7 +16,6 @@ import {
 
 export default function CreateAccountDialog({ workerId, workerName, onClose, onSuccess }) {
     const { departments, loading: loadingDepartments } = useDepartments()
-    const [password, setPassword] = useState('')
     const [role, setRole] = useState('worker')
     // Departments the worker will manage as assistant HOD. Pre-filled with the departments they
     // already belong to, since that is the common case (manage the team you're part of).
@@ -50,15 +48,9 @@ export default function CreateAccountDialog({ workerId, workerName, onClose, onS
     const handleSave = async e => {
         e.preventDefault()
         setError(null)
-
-        if (password.length < 6) {
-            setError('Password must be at least 6 characters')
-            return
-        }
-
         setSaving(true)
         try {
-            const payload = { password, role }
+            const payload = { role }
             if (role === 'assistant_hod') {
                 payload.assistant_hod_departments = assistantHodDepartments
             }
@@ -66,7 +58,7 @@ export default function CreateAccountDialog({ workerId, workerName, onClose, onS
             onSuccess?.()
             onClose()
         } catch (err) {
-            setError(err.response?.data?.detail ?? 'Failed to create account')
+            setError(err.response?.data?.detail ?? 'Failed to send the invite')
         } finally {
             setSaving(false)
         }
@@ -81,27 +73,11 @@ export default function CreateAccountDialog({ workerId, workerName, onClose, onS
             )}
 
             <div>
-                <Label className="text-base">Create login account for {workerName}</Label>
+                <Label className="text-base">Invite {workerName} to sign in</Label>
                 <p className="text-xs text-muted-foreground mt-1">
-                    Sets an initial password and role so this worker can sign in. They can change
-                    their password later from account settings.
-                </p>
-            </div>
-
-            <div className="space-y-2">
-                <Label htmlFor="account-password">
-                    Password <span className="text-destructive">*</span>
-                </Label>
-                <PasswordInput
-                    id="account-password"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    disabled={saving}
-                    required
-                />
-                <p className="text-xs text-muted-foreground">
-                    Password must be at least 6 characters
+                    They will get an email at their address on file with a link to choose their own
+                    password. The link lasts 24 hours; you can resend it from the worker&apos;s
+                    menu.
                 </p>
             </div>
 
@@ -167,7 +143,7 @@ export default function CreateAccountDialog({ workerId, workerName, onClose, onS
                     Cancel
                 </Button>
                 <Button type="submit" disabled={saving}>
-                    {saving ? 'Creating...' : 'Create Account'}
+                    {saving ? 'Sending...' : 'Send invite'}
                 </Button>
             </div>
         </form>
