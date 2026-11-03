@@ -231,6 +231,10 @@ class AssignableWorker(BaseModel):
     next_scheduled: date | None = None
     # How many dates they already have in this rota's month.
     month_count: int = 0
+    # Why they should not normally be picked for this date, as a short label the picker shows
+    # ("Unavailable or on leave", the department's lead title, "On another rota"); None if free.
+    # Advisory, like the warnings an edit returns - picking them anyway still goes through.
+    unavailable_reason: str | None = None
 
 
 class ScheduleEditResult(BaseModel):

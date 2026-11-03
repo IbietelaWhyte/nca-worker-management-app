@@ -1493,9 +1493,22 @@ export default function DepartmentDetailPage() {
                     {(() => {
                         // Read membership off the department, not subteamWorkers: that list
                         // belongs to whichever subteam is expanded, which need not be this one.
-                        const availableSubteamWorkers = (department?.workers ?? []).filter(
-                            w => w.subteam?.id !== selectedSubteam?.id
-                        )
+                        // Nobody-placed-yet first, since they are who a head is usually filling
+                        // a subteam from, then grouped by their current subteam. `numeric`
+                        // so age-group names run 2-3, 4-5 ... 10-11 rather than as text.
+                        const byName = (a, b) =>
+                            (a ?? '').localeCompare(b ?? '', undefined, { numeric: true })
+                        const availableSubteamWorkers = (department?.workers ?? [])
+                            .filter(w => w.subteam?.id !== selectedSubteam?.id)
+                            .sort(
+                                (a, b) =>
+                                    Boolean(a.subteam) - Boolean(b.subteam) ||
+                                    byName(a.subteam?.name, b.subteam?.name) ||
+                                    byName(
+                                        `${a.first_name} ${a.last_name}`,
+                                        `${b.first_name} ${b.last_name}`
+                                    )
+                            )
 
                         if (availableSubteamWorkers.length === 0) {
                             return (
