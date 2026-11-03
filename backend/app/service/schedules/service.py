@@ -522,8 +522,9 @@ class ScheduleService:
             schedule_id: The rota being edited.
 
         Returns:
-            list[AssignableWorker]: Candidates fairest first - fewest dates this month, then
-                                    longest since they last served - each with those dates.
+            list[AssignableWorker]: Candidates free on the date first, then fairest first - fewest
+                                    dates this month, then longest since they last served - each
+                                    with those dates and, if they are not free, why not.
 
         Raises:
             NotFoundError: If the schedule or its department does not exist.
@@ -554,10 +555,16 @@ class ScheduleService:
             candidate.next_scheduled = min((d for d in theirs if d > on), default=None)
             candidate.month_count = sum(1 for d in theirs if (d.year, d.month) == (on.year, on.month))
 
-        # Fairest first: fewest dates this month, then longest since they last served. Somebody
-        # never scheduled leads. Name breaks ties so the order is stable between opens.
+        reasons = self._unavailable_reasons([c.worker.id for c in candidates], schedule)
+        for candidate in candidates:
+            candidate.unavailable_reason = reasons.get(candidate.worker.id)
+
+        # Free people first, then fairest first: fewest dates this month, then longest since they
+        # last served. Somebody never scheduled leads. Name breaks ties so the order is stable
+        # between opens.
         candidates.sort(
             key=lambda c: (
+                c.unavailable_reason is not None,
                 c.month_count,
                 c.last_scheduled or date.min,
                 c.worker.last_name.lower(),
@@ -788,6 +795,35 @@ class ScheduleService:
         if worker.id in self.schedule_repo.get_workers_scheduled_on_date(schedule.scheduled_date):
             warnings.append(f"{name} is already on another rota on {when}.")
         return warnings
+
+    def _unavailable_reasons(self, worker_ids: list[UUID], schedule: ScheduleResponse) -> dict[UUID, str]:
+        """Why each of these workers should not normally go on this rota, for the picker.
+
+        The batched twin of `_clash_warnings`, asking the same three questions in a fixed
+        number of reads however many candidates there are. Only the first reason that applies
+        is kept: a picker row has room for one label, and any one is enough to think twice.
+        """
+        if not worker_ids:
+            return {}
+        on = schedule.scheduled_date
+        reasons: dict[UUID, str] = {}
+
+        busy = set(self.schedule_repo.get_workers_scheduled_on_date(on))
+        for worker_id in worker_ids:
+            if worker_id in busy:
+                reasons[worker_id] = "On another rota"
+
+        leads = self.monthly_lead_service.get_leads(schedule.department_id, on)
+        if leads.title:
+            for lead in leads.leads:
+                if lead.worker_id in worker_ids:
+                    reasons[lead.worker_id] = leads.title
+
+        # Last, so it wins: it is the person's own answer about the date. Leave and "cannot
+        # serve" are unioned upstream, so this cannot tell them apart.
+        for worker_id in self._build_unavailability_map(worker_ids, [on], on, on).get(on, set()):
+            reasons[worker_id] = "Unavailable or on leave"
+        return reasons
 
     def _announce_assignment(self, assignment_id: UUID, worker: Worker, schedule: ScheduleResponse) -> list[str]:
         # A draft texts nobody. The notice sweep reaches everyone on it once it is finalized,

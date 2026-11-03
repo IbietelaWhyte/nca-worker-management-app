@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { Search } from 'lucide-react'
+import { ChevronDown, ChevronRight, Search } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -37,10 +37,12 @@ const describeRecent = ({ last_scheduled, next_scheduled, month_count }) => {
  * new `cmdk` combobox — the list-with-filter is a few lines on top of a Dialog, which this
  * codebase already has twice.
  *
- * **It does not filter by availability or leave.** That logic lives in `ScheduleService`, and a
- * second copy in JavaScript would drift from it within a release. The server allows the pick
- * and hands back a warning instead, which the page shows after the fact — a head moving
- * somebody onto a date they marked off has usually already spoken to them.
+ * **Who is free on the date is the server's answer, not this file's.** Each candidate arrives
+ * with an `unavailable_reason` (on leave or marked off, the month's lead, on another rota) worked
+ * out by `ScheduleService`; a second copy in JavaScript would drift from it within a release.
+ * Those people sit in a collapsed section under everybody free rather than being dropped: the
+ * pick is still allowed and comes back with a warning, because a head moving somebody onto a
+ * date they marked off has usually already spoken to them.
  *
  * One instance is owned by the page rather than one per row, following the add-member dialog
  * on `DepartmentDetailPage`.
@@ -52,8 +54,9 @@ const describeRecent = ({ last_scheduled, next_scheduled, month_count }) => {
  * @param {string} props.description - What picking somebody will do, including who gets texted.
  * @param {Array<{worker: {id: string, first_name: string, last_name: string, email?: string},
  *   subteam: {id: string, name: string}|null, last_scheduled: string|null,
- *   next_scheduled: string|null, month_count: number}>} props.candidates - As the server resolved
- *   them, fairest first: fewest dates this month, then longest since they last served.
+ *   next_scheduled: string|null, month_count: number, unavailable_reason: string|null}>}
+ *   props.candidates - As the server resolved them: free on the date first, then fairest first -
+ *   fewest dates this month, then longest since they last served.
  *   `subteam` is the group this person would actually land in, not a guess: it comes from the
  *   same call that stamps it. A head picks a person and the rota decides the group, so the
  *   group has to be on screen at the moment they pick.
@@ -75,6 +78,7 @@ export default function WorkerPickerDialog({
     onPick,
 }) {
     const [query, setQuery] = useState('')
+    const [showUnavailable, setShowUnavailable] = useState(false)
 
     const matches = useMemo(() => {
         const needle = query.trim().toLowerCase()
@@ -88,9 +92,49 @@ export default function WorkerPickerDialog({
         )
     }, [candidates, query])
 
+    const free = matches.filter(c => !c.unavailable_reason)
+    const unavailable = matches.filter(c => c.unavailable_reason)
+    // A search is a head looking for somebody by name, so it reaches into the folded section too.
+    const unavailableOpen = showUnavailable || query.trim() !== ''
+
+    const renderCandidate = candidate => {
+        const { worker, subteam, unavailable_reason: reason } = candidate
+        return (
+            <li key={worker.id}>
+                <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onPick(worker.id)}
+                    className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-muted disabled:opacity-50"
+                >
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                        {worker.first_name[0]}
+                        {worker.last_name[0]}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">
+                            {worker.first_name} {worker.last_name}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                            {reason ?? describeRecent(candidate)}
+                        </span>
+                    </span>
+                    {/* Where they land. Outside the truncating column so the dates line cannot
+                        squeeze it out — this is the fact the head is choosing on. */}
+                    <Badge variant="secondary" className="shrink-0">
+                        {subteam?.name ?? 'No subteam'}
+                    </Badge>
+                </button>
+            </li>
+        )
+    }
+
     const handleOpenChange = next => {
         if (busy) return
-        if (!next) setQuery('')
+        if (!next) {
+            setQuery('')
+            setShowUnavailable(false)
+        }
         onOpenChange(next)
     }
 
@@ -135,40 +179,36 @@ export default function WorkerPickerDialog({
                         Nobody matches “{query}”.
                     </p>
                 ) : (
-                    <ul className="max-h-72 space-y-1 overflow-y-auto">
-                        {matches.map(candidate => {
-                            const { worker, subteam } = candidate
-                            return (
-                                <li key={worker.id}>
-                                    <button
-                                        type="button"
-                                        disabled={busy}
-                                        onClick={() => onPick(worker.id)}
-                                        className="flex w-full items-center gap-3 rounded-md p-2 text-left hover:bg-muted disabled:opacity-50"
-                                    >
-                                        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                                            {worker.first_name[0]}
-                                            {worker.last_name[0]}
-                                        </span>
-                                        <span className="min-w-0 flex-1">
-                                            <span className="block truncate text-sm font-medium">
-                                                {worker.first_name} {worker.last_name}
-                                            </span>
-                                            <span className="block truncate text-xs text-muted-foreground">
-                                                {describeRecent(candidate)}
-                                            </span>
-                                        </span>
-                                        {/* Where they land. Outside the truncating column so the
-                                        dates line cannot squeeze it out — this is the fact the
-                                        head is choosing on. */}
-                                        <Badge variant="secondary" className="shrink-0">
-                                            {subteam?.name ?? 'No subteam'}
-                                        </Badge>
-                                    </button>
-                                </li>
-                            )
-                        })}
-                    </ul>
+                    <div className="max-h-72 space-y-1 overflow-y-auto">
+                        {free.length === 0 && !unavailableOpen && (
+                            <p className="py-2 text-center text-sm text-muted-foreground">
+                                Nobody else on this roster is free on this date.
+                            </p>
+                        )}
+                        <ul className="space-y-1">{free.map(renderCandidate)}</ul>
+                        {unavailable.length > 0 && (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowUnavailable(open => !open)}
+                                    aria-expanded={unavailableOpen}
+                                    className="flex w-full items-center gap-1 rounded-md px-2 pb-1 pt-3 text-left text-xs font-medium text-muted-foreground hover:text-foreground"
+                                >
+                                    {unavailableOpen ? (
+                                        <ChevronDown size={14} />
+                                    ) : (
+                                        <ChevronRight size={14} />
+                                    )}
+                                    Not free on this date ({unavailable.length})
+                                </button>
+                                {unavailableOpen && (
+                                    <ul className="space-y-1">
+                                        {unavailable.map(renderCandidate)}
+                                    </ul>
+                                )}
+                            </>
+                        )}
+                    </div>
                 )}
             </DialogContent>
         </Dialog>

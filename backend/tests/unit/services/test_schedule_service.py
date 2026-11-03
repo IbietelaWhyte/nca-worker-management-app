@@ -1271,6 +1271,97 @@ class TestGetAssignableWorkers:
             service.get_assignable_workers(uuid4())
 
 
+class TestAssignableWorkerAvailability:
+    """Issue #105: the picker should lead with people who can actually serve the date.
+
+    Labelled and sunk rather than removed, because picking them anyway is still allowed.
+    """
+
+    @pytest.fixture
+    def roomy(self, mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo):
+        return EditFixture(
+            (mock_schedule_repo, mock_worker_repo, mock_department_repo, mock_department_role_repo), spare=4
+        )
+
+    def test_everybody_free_has_no_reason(self, service, edit):
+        [candidate] = service.get_assignable_workers(edit.schedule.id)
+        assert candidate.unavailable_reason is None
+
+    def test_labels_each_reason_and_lists_the_free_first(
+        self, service, roomy, mock_schedule_repo, mock_availability_repo, mock_monthly_lead_service
+    ):
+        from datetime import datetime
+
+        from app.schemas.monthly_leads.models import MonthlyLeadResponse, MonthlyLeadsResponse
+
+        marked_off, lead, elsewhere, free = roomy.spare
+        mock_availability_repo.get_for_workers.return_value = [
+            make_availability(
+                worker_id=marked_off.id,
+                availability_type=AvailabilityType.SPECIFIC_DATE,
+                specific_date=roomy.schedule.scheduled_date,
+                day_of_week=None,
+                is_available=False,
+            )
+        ]
+        mock_monthly_lead_service.get_leads.side_effect = lambda department_id, day: MonthlyLeadsResponse(
+            title="Teacher of the Month",
+            month=date(2026, 8, 1),
+            leads=[
+                MonthlyLeadResponse(
+                    id=uuid4(),
+                    department_id=department_id,
+                    worker_id=lead.id,
+                    month=date(2026, 8, 1),
+                    created_at=datetime.now(),
+                )
+            ],
+        )
+        mock_schedule_repo.get_workers_scheduled_on_date.return_value = [elsewhere.id]
+
+        assignable = service.get_assignable_workers(roomy.schedule.id)
+
+        reasons = {a.worker.id: a.unavailable_reason for a in assignable}
+        assert reasons == {
+            marked_off.id: "Unavailable or on leave",
+            lead.id: "Teacher of the Month",
+            elsewhere.id: "On another rota",
+            free.id: None,
+        }
+        assert assignable[0].worker.id == free.id
+
+    def test_being_free_outranks_fairness(self, service, roomy, mock_schedule_repo, mock_availability_repo):
+        # Somebody already on twice this month still comes before somebody who cannot come.
+        busy, marked_off = roomy.spare[0], roomy.spare[1]
+        mock_schedule_repo.get_assignment_history_for_workers.return_value = [
+            make_assignment(worker_id=busy.id, schedules=make_schedule(scheduled_date=on))
+            for on in (date(2026, 8, 9), date(2026, 8, 16))
+        ]
+        mock_availability_repo.get_for_workers.return_value = [
+            make_availability(
+                worker_id=marked_off.id,
+                availability_type=AvailabilityType.SPECIFIC_DATE,
+                specific_date=roomy.schedule.scheduled_date,
+                day_of_week=None,
+                is_available=False,
+            )
+        ]
+
+        ids = [a.worker.id for a in service.get_assignable_workers(roomy.schedule.id)]
+
+        assert ids.index(busy.id) < ids.index(marked_off.id)
+        assert ids[-1] == marked_off.id
+
+    def test_a_fixed_number_of_reads_however_many_candidates(
+        self, service, roomy, mock_schedule_repo, mock_availability_repo, mock_leave_repo
+    ):
+        service.get_assignable_workers(roomy.schedule.id)
+
+        mock_availability_repo.get_for_workers.assert_called_once()
+        mock_leave_repo.get_for_workers.assert_called_once()
+        mock_schedule_repo.get_workers_scheduled_on_date.assert_called_once()
+
+
 class TestAddAssignment:
     def test_adds_a_worker_and_stamps_their_role(self, service, edit, mock_schedule_repo, mock_department_role_repo):
         role = make_department_role(department_id=edit.department.id)
