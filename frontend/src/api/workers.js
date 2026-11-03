@@ -19,7 +19,10 @@ export const deactivateWorker = id => apiClient.delete(`/workers/${id}`)
 // Permanent, irreversible removal of the profile — distinct from the soft deactivate above.
 export const deleteWorkerPermanently = id => apiClient.delete(`/workers/${id}/permanent`)
 
+// Creates the login and emails the worker an invite to choose their own password.
 export const createWorkerAccount = (id, data) => apiClient.post(`/workers/${id}/account`, data)
+
+export const resendWorkerInvite = id => apiClient.post(`/workers/${id}/account/invite`)
 
 export const getWorkerDepartments = id => apiClient.get(`/workers/${id}/departments`)
 

@@ -16,8 +16,7 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog'
 import { AlertTriangle } from 'lucide-react'
-
-const MIN_PASSWORD_LENGTH = 8
+import { PASSWORD_RULE, passwordProblem } from '@/lib/password'
 
 function Section({ title, description, children }) {
     return (
@@ -95,8 +94,9 @@ export default function AccountPage() {
         setPasswordError(null)
         setPasswordSuccess(false)
 
-        if (passwords.next.length < MIN_PASSWORD_LENGTH) {
-            setPasswordError(`New password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+        const problem = passwordProblem(passwords.next)
+        if (problem) {
+            setPasswordError(problem)
             return
         }
         if (passwords.next !== passwords.confirm) {
@@ -231,6 +231,7 @@ export default function AccountPage() {
                             value={passwords.next}
                             onChange={e => setPasswords(p => ({ ...p, next: e.target.value }))}
                         />
+                        <p className="text-xs text-muted-foreground">{PASSWORD_RULE}</p>
                     </div>
                     <div className="space-y-2">
                         <Label htmlFor="confirm_password">Confirm new password</Label>

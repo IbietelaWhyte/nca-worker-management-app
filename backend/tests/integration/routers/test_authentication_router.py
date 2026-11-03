@@ -8,7 +8,6 @@ VALID_PAYLOAD = {
     "last_name": "Doe",
     "email": "john.doe@example.com",
     "phone": "+14165550101",
-    "password": "securepassword123",
 }
 
 
@@ -53,7 +52,7 @@ class TestRegisterWorker:
         assert response.status_code == 403
 
     def test_returns_422_on_invalid_email(self, mock_authentication_service):
-        client = make_client(UserRole.ADMIN, mock_authentication_service)
+        client = make_client(UserRole.ADMIN, authentication_service=mock_authentication_service)
         response = client.post(
             "/api/v1/authentication/register",
             json={
@@ -63,8 +62,13 @@ class TestRegisterWorker:
         )
         assert response.status_code == 422
 
-    def test_returns_422_when_password_missing(self, mock_authentication_service):
-        client = make_client(UserRole.ADMIN, mock_authentication_service)
-        payload = {k: v for k, v in VALID_PAYLOAD.items() if k != "password"}
-        response = client.post("/api/v1/authentication/register", json=payload)
-        assert response.status_code == 422
+    def test_ignores_a_password_in_the_payload(self, mock_authentication_service):
+        # The admin no longer sets one; the worker chooses theirs from the invite.
+        mock_authentication_service.register_worker.return_value = RegisterResponse(
+            message="Worker registered and invited", worker_id="some-uuid", email="john.doe@example.com"
+        )
+        client = make_client(UserRole.ADMIN, authentication_service=mock_authentication_service)
+        response = client.post("/api/v1/authentication/register", json={**VALID_PAYLOAD, "password": "x"})
+        assert response.status_code == 201
+        sent = mock_authentication_service.register_worker.call_args[0][0]
+        assert not hasattr(sent, "password")

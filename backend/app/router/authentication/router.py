@@ -19,7 +19,7 @@ def register_worker(
     service: AuthenticationService = Depends(get_authentication_service),
 ) -> RegisterResponse:
     """
-    Creates a new worker account. Admin only.
+    Creates a new worker and emails them an invite. Admin only.
     Creates both a Supabase auth user and a workers table row in one call.
     """
     return service.register_worker(data)

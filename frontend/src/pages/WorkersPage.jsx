@@ -13,7 +13,7 @@ import WorkerLeaveDialog from '@/components/workers/WorkerLeaveDialog'
 import WorkerHistoryDialog from '@/components/workers/WorkerHistoryDialog'
 import SmsBlockedBadge from '@/components/workers/SmsBlockedBadge'
 import { getCurrentLeave } from '@/api/leave'
-import { getWorkers } from '@/api/workers'
+import { getWorkers, resendWorkerInvite } from '@/api/workers'
 import { downloadCsv, slug, toCsv } from '@/lib/csv'
 import { toWorkerCsv } from '@/lib/workerExport'
 import { cn } from '@/lib/utils'
@@ -45,6 +45,7 @@ import {
     UserPlus,
     Shield,
     KeyRound,
+    MailPlus,
     Trash2,
     MoreVertical,
     CalendarOff,
@@ -144,6 +145,7 @@ function WorkerActionsMenu({
     onEdit,
     onRoles,
     onCreateAccount,
+    onResendInvite,
     onLeave,
     onHistory,
     onDeactivate,
@@ -177,6 +179,14 @@ function WorkerActionsMenu({
                     <DropdownMenuItem onClick={() => onCreateAccount(worker)}>
                         <KeyRound size={14} className="mr-2" />
                         Create account
+                    </DropdownMenuItem>
+                )}
+                {/* Shown for every login: the server knows whether the invite was accepted and
+                    says so, which saves a per-row auth lookup to decide whether to offer it. */}
+                {isAdmin && worker.has_account && worker.is_active && (
+                    <DropdownMenuItem onClick={() => onResendInvite(worker)}>
+                        <MailPlus size={14} className="mr-2" />
+                        Resend invite
                     </DropdownMenuItem>
                 )}
                 {isDepartmentHead && (
@@ -335,6 +345,23 @@ export default function WorkersPage() {
         setAccountDialogOpen(true)
     }
 
+    // The outcome of a one-click row action (a resent invite, a failed deactivation), shown above
+    // the list. { variant: 'default' | 'destructive', text } or null.
+    const [notice, setNotice] = useState(null)
+
+    const handleResendInvite = async worker => {
+        setNotice(null)
+        try {
+            await resendWorkerInvite(worker.id)
+            setNotice({ variant: 'default', text: `Invite sent to ${worker.email}.` })
+        } catch (err) {
+            setNotice({
+                variant: 'destructive',
+                text: err.response?.data?.detail ?? 'Failed to send the invite',
+            })
+        }
+    }
+
     const handleCloseAccountDialog = () => {
         setAccountDialogOpen(false)
         setAccountWorker(null)
@@ -393,7 +420,17 @@ export default function WorkersPage() {
 
     const handleDeactivate = async worker => {
         if (!confirm(`Deactivate ${worker.first_name} ${worker.last_name}?`)) return
-        await removeWorker(worker.id)
+        setNotice(null)
+        try {
+            await removeWorker(worker.id)
+        } catch (err) {
+            // Most likely their login could not be revoked; they stay active so this can be retried.
+            setNotice({
+                variant: 'destructive',
+                text: err.response?.data?.detail ?? 'Failed to deactivate the worker',
+            })
+            return
+        }
         refetch()
     }
 
@@ -443,6 +480,12 @@ export default function WorkersPage() {
                     </Button>
                 </div>
             </div>
+
+            {notice && (
+                <Alert variant={notice.variant}>
+                    <p className="text-sm">{notice.text}</p>
+                </Alert>
+            )}
 
             {/* Error state */}
             {error && (
@@ -556,6 +599,7 @@ export default function WorkersPage() {
                                                     onEdit={handleOpenEdit}
                                                     onRoles={handleOpenRoleEdit}
                                                     onCreateAccount={handleOpenCreateAccount}
+                                                    onResendInvite={handleResendInvite}
                                                     onLeave={handleOpenLeave}
                                                     onHistory={setHistoryWorker}
                                                     onDeactivate={handleDeactivate}
@@ -601,6 +645,7 @@ export default function WorkersPage() {
                                         onEdit={handleOpenEdit}
                                         onRoles={handleOpenRoleEdit}
                                         onCreateAccount={handleOpenCreateAccount}
+                                        onResendInvite={handleResendInvite}
                                         onLeave={handleOpenLeave}
                                         onHistory={setHistoryWorker}
                                         onDeactivate={handleDeactivate}

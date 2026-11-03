@@ -48,7 +48,7 @@ class TestChangeMyPassword:
 
         response = client.post(
             "/api/v1/account/change-password",
-            json={"current_password": "old-password", "new_password": "new-password-123"},
+            json={"current_password": "old-password", "new_password": "New-password-123"},
         )
         assert response.status_code == 200
         assert response.json()["message"] == "Password changed successfully"
@@ -60,7 +60,7 @@ class TestChangeMyPassword:
 
         response = client.post(
             "/api/v1/account/change-password",
-            json={"current_password": "wrong", "new_password": "new-password-123"},
+            json={"current_password": "wrong", "new_password": "New-password-123"},
         )
         assert response.status_code == 400
 

@@ -3,6 +3,7 @@ from uuid import UUID
 from supabase import Client
 from supabase_auth.errors import AuthApiError
 
+from app.core.config import settings
 from app.core.exceptions import AppError, BadRequestError, ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.core.redaction import mask_email
@@ -23,10 +24,10 @@ class AuthenticationService:
 
     def register_worker(self, data: RegisterRequest) -> RegisterResponse:
         """
-        Registers a new worker. Admin only.
+        Registers a new worker and emails them an invite. Admin only.
 
         Steps:
-        1. Create auth.users entry via Supabase Admin API
+        1. Create the auth user and send the invite (they choose their own password)
         2. Create workers row linked via auth_user_id
         3. Assign specified role (from data.role) in worker_app_roles
         4. Assign to departments if provided
@@ -34,8 +35,8 @@ class AuthenticationService:
         """
         logger.info("worker_registration_started", email=mask_email(data.email), role=data.role)
 
-        # 1. Create Supabase auth user
-        auth_user_id = self._create_auth_user(data.email, data.password, data.role)
+        # 1. Create the Supabase auth user and email the invite
+        auth_user_id = self._invite_auth_user(data.email, data.role)
 
         # 2, 3 & 4. Create worker row + assign role + assign departments
         # If this fails we clean up the auth user
@@ -68,45 +69,88 @@ class AuthenticationService:
         )
 
         return RegisterResponse(
-            message="Worker registered successfully",
+            message="Worker registered and invited",
             worker_id=str(worker.id),
             email=data.email,
         )
 
-    def _create_auth_user(self, email: str, password: str, role: UserRole) -> UUID:
-        """Creates the Supabase auth user and returns the auth_user_id."""
+    def _invite_auth_user(self, email: str, role: UserRole) -> UUID:
+        """Create an unconfirmed auth user carrying the role, then email them an invite.
+
+        Nobody but the person ever knows their password: the invite link signs them in on
+        /reset-password, where they choose one. The user is created *before* the invite so the
+        role is already in app_metadata when the link is opened — the invite endpoint itself
+        cannot set app_metadata, and GoTrue sends an invite to an existing unconfirmed user.
+        """
         try:
             response = self.client.auth.admin.create_user(
-                {
-                    "email": email,
-                    "password": password,
-                    "email_confirm": True,  # skip confirmation email for admin-created accounts
-                    "app_metadata": {"role": role},
-                }
+                {"email": email, "email_confirm": False, "app_metadata": {"role": role}}
             )
             auth_user_id = response.user.id
             logger.info("auth_user_created", auth_user_id=auth_user_id, email=mask_email(email), role=role)
-            return UUID(auth_user_id)
         except AuthApiError as e:
             logger.warning("auth_user_creation_failed", email=mask_email(email), error=str(e))
             if "already registered" in str(e).lower():
                 raise ConflictError(f"Email {email} is already registered") from e
-            # Supabase's own message for an input problem (a password the policy rejects) is
-            # the one the admin can act on; anything else is logged above and kept generic.
             if 400 <= (e.status or 0) < 500:
                 raise BadRequestError(e.message) from e
             raise AppError("Failed to create the login. Please try again.") from e
 
+        try:
+            self._send_invite(email)
+        except AuthApiError as e:
+            logger.error("invite_send_failed", auth_user_id=auth_user_id, email=mask_email(email), error=str(e))
+            self._cleanup_auth_user(UUID(auth_user_id))
+            raise AppError("Failed to send the invite email. Please try again.") from e
+        return UUID(auth_user_id)
+
+    def _send_invite(self, email: str) -> None:
+        """Email the invite link. Without redirect_to the link lands on the site root, not the
+        page that lets them set a password."""
+        self.client.auth.admin.invite_user_by_email(email, {"redirect_to": f"{settings.frontend_url}/reset-password"})
+        logger.info("invite_sent", email=mask_email(email))
+
+    def resend_invite(self, worker_id: UUID) -> None:
+        """Email a fresh invite to a worker whose login has not been set up yet. Admin only.
+
+        Invite links expire, and volunteers do not always open email the day it arrives.
+
+        Raises:
+            NotFoundError: If the worker does not exist.
+            BadRequestError: If the worker has no login to invite to.
+            ConflictError: If they have already accepted (they should use "Forgot password").
+            AppError: If sending fails for any other reason.
+        """
+        worker = self.worker_repo.get_by_id(worker_id)
+        if not worker:
+            raise NotFoundError(f"Worker {worker_id} not found")
+        log = logger.bind(method="resend_invite", worker_id=str(worker_id))
+        if not worker.auth_user_id:
+            raise BadRequestError("This worker has no login yet. Create an account to invite them.")
+        try:
+            self._send_invite(worker.email)
+        except AuthApiError as e:
+            # GoTrue refuses to invite a confirmed user; that is the "already accepted" case.
+            if e.code == "email_exists":
+                log.info("invite_already_accepted")
+                raise ConflictError(
+                    'They have already set up their login. They can use "Forgot password" on the sign-in page.'
+                ) from e
+            log.error("invite_resend_failed", error=str(e))
+            raise AppError("Failed to send the invite email. Please try again.") from e
+        log.info("invite_resent")
+
     def create_account_for_worker(self, worker_id: UUID, data: GrantAccountRequest) -> RegisterResponse:
-        """Give an existing worker profile a Supabase login account. Admin only.
+        """Invite an existing worker profile to sign in. Admin only.
 
         Workers created as bare profiles (via "Add Worker Profile") have no auth_user_id and cannot
-        sign in. This creates a Supabase auth user, links it to the existing worker row, and ensures
-        the chosen role is recorded in both worker_app_roles and the JWT app_metadata.
+        sign in. This creates a Supabase auth user, emails them an invite to choose a password,
+        links the user to the existing worker row, and ensures the chosen role is recorded in both
+        worker_app_roles and the JWT app_metadata.
 
         Args:
             worker_id: The existing worker to grant an account to.
-            data: The initial password and role for the new account.
+            data: The role for the new account.
 
         Returns:
             RegisterResponse: Confirmation with the worker id and email.
@@ -128,8 +172,8 @@ class AuthenticationService:
             log.warning("worker_missing_email")
             raise BadRequestError("Worker must have an email before an account can be created")
 
-        # 1. Create the Supabase auth user (sets app_metadata.role for the JWT).
-        auth_user_id = self._create_auth_user(worker.email, data.password, data.role)
+        # 1. Create the Supabase auth user (sets app_metadata.role for the JWT) and send the invite.
+        auth_user_id = self._invite_auth_user(worker.email, data.role)
 
         # 2. Link the auth user to the worker row and record the role. Clean up on any failure.
         try:
@@ -151,7 +195,7 @@ class AuthenticationService:
 
         log.info("account_created_for_worker", auth_user_id=str(auth_user_id), role=data.role)
         return RegisterResponse(
-            message="Account created successfully",
+            message="Invite sent",
             worker_id=str(worker_id),
             email=worker.email,
         )

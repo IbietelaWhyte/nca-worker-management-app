@@ -31,6 +31,21 @@ db-env:
     npx supabase status -o env
 
 # ---------------------------------------------------------------
+# Auth email
+#
+# Supabase sends invite and password-reset emails through its own SMTP settings. EMAIL_PROVIDER
+# (gmail or resend) in supabase/.env picks the provider; see docs/smtp-setup.md.
+# ---------------------------------------------------------------
+
+# Apply the chosen provider, templates and link expiry to the production project.
+smtp-apply *args:
+    python3 scripts/auth_email.py apply {{args}}
+
+# Print SMTP_* exports for sending real mail from the local stack: eval "$(just smtp-env)"
+smtp-env:
+    @python3 scripts/auth_email.py env
+
+# ---------------------------------------------------------------
 # Dev servers
 #
 # Nothing here sets an environment variable, deliberately. APP_ENV chooses which

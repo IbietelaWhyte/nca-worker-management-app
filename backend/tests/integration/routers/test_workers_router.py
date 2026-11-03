@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.exceptions import BadRequestError, ConflictError, NotFoundError, PermissionDeniedError
@@ -191,7 +192,7 @@ class TestCreateWorkerAccount:
     def test_returns_201_on_success(self, mock_authentication_service):
         worker_id = uuid4()
         mock_authentication_service.create_account_for_worker.return_value = RegisterResponse(
-            message="Account created successfully",
+            message="Invite sent",
             worker_id=str(worker_id),
             email="john.doe@example.com",
         )
@@ -199,7 +200,7 @@ class TestCreateWorkerAccount:
 
         response = client.post(
             f"/api/v1/workers/{worker_id}/account",
-            json={"password": "securepass1", "role": "admin"},
+            json={"role": "admin"},
         )
         assert response.status_code == 201
         assert response.json()["worker_id"] == str(worker_id)
@@ -209,7 +210,7 @@ class TestCreateWorkerAccount:
 
         response = client.post(
             f"/api/v1/workers/{uuid4()}/account",
-            json={"password": "securepass1", "role": "worker"},
+            json={"role": "worker"},
         )
         assert response.status_code == 403
         mock_authentication_service.create_account_for_worker.assert_not_called()
@@ -222,8 +223,34 @@ class TestCreateWorkerAccount:
 
         response = client.post(
             f"/api/v1/workers/{uuid4()}/account",
-            json={"password": "securepass1", "role": "worker"},
+            json={"role": "worker"},
         )
+        assert response.status_code == 409
+
+
+class TestResendWorkerInvite:
+    def test_returns_200_on_success(self, mock_authentication_service):
+        worker_id = uuid4()
+        client = make_client(role=UserRole.ADMIN, authentication_service=mock_authentication_service)
+
+        response = client.post(f"/api/v1/workers/{worker_id}/account/invite")
+        assert response.status_code == 200
+        assert response.json()["message"] == "Invite sent"
+        mock_authentication_service.resend_invite.assert_called_once_with(worker_id)
+
+    @pytest.mark.parametrize("role", [UserRole.HOD, UserRole.ASSISTANT_HOD, UserRole.WORKER])
+    def test_returns_403_for_non_admin(self, mock_authentication_service, role):
+        client = make_client(role=role, authentication_service=mock_authentication_service)
+
+        response = client.post(f"/api/v1/workers/{uuid4()}/account/invite")
+        assert response.status_code == 403
+        mock_authentication_service.resend_invite.assert_not_called()
+
+    def test_returns_409_once_accepted(self, mock_authentication_service):
+        mock_authentication_service.resend_invite.side_effect = ConflictError("They have already set up their login.")
+        client = make_client(role=UserRole.ADMIN, authentication_service=mock_authentication_service)
+
+        response = client.post(f"/api/v1/workers/{uuid4()}/account/invite")
         assert response.status_code == 409
 
 

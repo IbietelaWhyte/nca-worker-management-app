@@ -13,7 +13,7 @@ from app.core.dependencies import (
 from app.core.exceptions import BadRequestError
 from app.schemas.authentication.models import GrantAccountRequest, RegisterResponse
 from app.schemas.departments.models import DepartmentResponse
-from app.schemas.models import TOTAL_COUNT_HEADER, TokenPayload, UserRole, WorkerStatus
+from app.schemas.models import TOTAL_COUNT_HEADER, MessageResponse, TokenPayload, UserRole, WorkerStatus
 from app.schemas.workers.models import WorkerCreate, WorkerResponse, WorkerUpdate
 from app.service.authentication.service import AuthenticationService
 from app.service.departments.service import DepartmentService
@@ -156,14 +156,14 @@ def create_worker_account(
     _: TokenPayload = AdminUser,
     auth_service: AuthenticationService = Depends(get_authentication_service),
 ) -> RegisterResponse:
-    """Give an existing worker profile a Supabase login account (admin only).
+    """Invite an existing worker profile to sign in (admin only).
 
-    Creates a Supabase auth user with the provided password and role and links it to the worker
-    record, so a profile created without a login can sign in.
+    Creates a Supabase auth user with the chosen role, links it to the worker record, and emails
+    them an invite to choose their own password.
 
     Args:
         worker_id: Unique identifier of the worker to grant an account to.
-        data: The initial password and role for the new account.
+        data: The role for the new account.
         _: Admin user token required.
         auth_service: Authentication service dependency.
 
@@ -171,6 +171,26 @@ def create_worker_account(
         RegisterResponse: Confirmation with the worker id and email.
     """
     return auth_service.create_account_for_worker(worker_id, data)
+
+
+@router.post("/{worker_id}/account/invite", response_model=MessageResponse)
+def resend_worker_invite(
+    worker_id: UUID,
+    _: TokenPayload = AdminUser,
+    auth_service: AuthenticationService = Depends(get_authentication_service),
+) -> MessageResponse:
+    """Email a fresh invite to a worker who has not set up their login yet (admin only).
+
+    Args:
+        worker_id: Unique identifier of the worker to re-invite.
+        _: Admin user token required.
+        auth_service: Authentication service dependency.
+
+    Returns:
+        MessageResponse: Confirmation that the invite was sent.
+    """
+    auth_service.resend_invite(worker_id)
+    return MessageResponse(message="Invite sent")
 
 
 @router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)

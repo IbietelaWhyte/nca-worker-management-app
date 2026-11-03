@@ -11,7 +11,6 @@ class RegisterRequest(BaseModel):
     last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
     phone: str | None = None
-    password: str
     role: UserRole = UserRole.WORKER
     department_ids: list[str] | None = None
 
@@ -40,7 +39,7 @@ class RegisterResponse(BaseModel):
 
 
 class GrantAccountRequest(BaseModel):
-    password: str
+    # No password: the worker is emailed an invite and chooses their own.
     role: UserRole = UserRole.WORKER
     # Departments this worker should manage as assistant HOD. Only used when role is assistant_hod;
     # creates department_assistant_hods rows so the assignment actually grants management access.
