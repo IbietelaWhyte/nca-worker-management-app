@@ -10,8 +10,8 @@ dependencies = [
     "supabase>=2.33.0",
     "python-jose[cryptography]>=3.5.0",
     "httpx>=0.27.0",
-    "pydantic>=2.14.1",
-    "pydantic-settings>=2.16.1",
+    "pydantic>=2.14.2",
+    "pydantic-settings>=2.16.2",
     "twilio>=9.12.0",
     "apscheduler>=3.11.3",
     "python-dotenv>=1.2.4",
@@ -19,17 +19,17 @@ dependencies = [
     "twilio-stubs>=0.2.0",
     "types-python-jose>=3.5.0.20260408",
     "email-validator>=2.3.0",
-    "python-multipart>=0.0.32",
+    "python-multipart>=0.0.33",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.1.1",
-    "pytest-asyncio>=1.4.0",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1",
     "pytest-cov>=7.1.0",
     "httpx>=0.27.0",
-    "ruff>=0.17.2",
-    "mypy>=2.4.0",
+    "ruff>=0.17.3",
+    "mypy>=2.4.1",
 ]
 
 [build-system]
