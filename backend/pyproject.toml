@@ -5,30 +5,30 @@ description = "Church Worker Scheduler API"
 requires-python = ">=3.13"
 
 dependencies = [
-    "fastapi>=0.162.0",
+    "fastapi>=0.165.0",
     "uvicorn[standard]>=0.54.0",
-    "supabase>=2.33.0",
+    "supabase>=2.34.1",
     "python-jose[cryptography]>=3.5.0",
     "httpx>=0.27.0",
-    "pydantic>=2.14.2",
-    "pydantic-settings>=2.16.2",
-    "twilio>=9.12.0",
+    "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
+    "twilio>=9.13.0",
     "apscheduler>=3.11.3",
     "python-dotenv>=1.2.4",
     "structlog>=26.1.0",
     "twilio-stubs>=0.2.0",
     "types-python-jose>=3.5.0.20260408",
-    "email-validator>=2.3.0",
-    "python-multipart>=0.0.33",
+    "email-validator>=2.4.0",
+    "python-multipart>=0.0.34",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.2.0",
-    "pytest-asyncio>=1.4.1",
+    "pytest-asyncio>=1.5.0",
     "pytest-cov>=7.1.0",
     "httpx>=0.27.0",
-    "ruff>=0.17.3",
+    "ruff>=0.17.6",
     "mypy>=2.4.1",
 ]
 
