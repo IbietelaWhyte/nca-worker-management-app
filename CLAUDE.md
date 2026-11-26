@@ -10,7 +10,7 @@ NCA Worker Management App — a church worker scheduler. A monorepo with three p
 - `frontend/` — React 18 + Vite SPA (plain JavaScript/JSX, not TypeScript).
 - `supabase/` — Postgres schema as SQL migrations; auth is Supabase Auth.
 
-The top-level `justfile` orchestrates both apps. The root `package.json` only carries the Supabase CLI and a couple of stray deps — it is not the app entrypoint. Root `README.md` is the **Supabase CLI's** README, checked in by accident at the first commit; it documents nothing about this project — ignore it. `frontend/README.md` is likewise the stock Vite template.
+The top-level `justfile` orchestrates both apps. The root `package.json` only carries the Supabase CLI and a couple of stray deps — it is not the app entrypoint. Root `README.md` is the project's front page (what the app does, the stack, local setup, links into `docs/`); keep it short and leave the detail here. `frontend/README.md` is the stock Vite template — ignore it.
 
 ## Commands
 

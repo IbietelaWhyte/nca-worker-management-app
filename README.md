@@ -1,177 +1,83 @@
-# Supabase CLI
+# NCA Worker Management
 
-[![Coverage Status](https://coveralls.io/repos/github/supabase/cli/badge.svg?branch=main)](https://coveralls.io/github/supabase/cli?branch=main) [![Bitbucket Pipelines](https://img.shields.io/bitbucket/pipelines/supabase-cli/setup-cli/master?style=flat-square&label=Bitbucket%20Canary)](https://bitbucket.org/supabase-cli/setup-cli/pipelines) [![Gitlab Pipeline Status](https://img.shields.io/gitlab/pipeline-status/sweatybridge%2Fsetup-cli?label=Gitlab%20Canary)
-](https://gitlab.com/sweatybridge/setup-cli/-/pipelines)
+Scheduling for the volunteers who serve at New Covenant Assembly. Heads of department build
+fair monthly rotas, and the app texts each person their duties, reminds them beforehand, and asks
+them which dates they can't make.
 
-[Supabase](https://supabase.io) is an open source Firebase alternative. We're building the features of Firebase using enterprise-grade open source tools.
+Live at **https://nca-worker-management-app.vercel.app** (sign-in is by invitation).
 
-This repository contains all the functionality for Supabase CLI.
+## What it does
 
-- [x] Running Supabase locally
-- [x] Managing database migrations
-- [x] Creating and deploying Supabase Functions
-- [x] Generating types directly from your database schema
-- [x] Making authenticated HTTP requests to [Management API](https://supabase.com/docs/reference/api/introduction)
+- **Rotas.** Generate a single date or a whole month. A head previews it, keeps the dates they
+  want, and saves it as a draft or publishes it. Picks rotate fairly, and big services
+  ("special services") get their own rotation so the same few people don't serve every one.
+  Rotas can be edited by hand afterwards.
+- **Availability.** Workers mark only the dates they *can't* serve, from a link texted to them.
+  It needs no account, so silence means "available". Heads can send these requests now or on a
+  monthly schedule.
+- **Text messages** (Twilio). A notice when someone is rostered, reminders at the lead times
+  the head chooses, and a text when a duty is cancelled. Numbers that have opted out are not
+  texted again.
+- **Teams.** Departments, subteams, roles within a department (with minimum counts per rota),
+  leave, and "Teacher of the Month"-style leads.
+- **Attendance.** Whoever runs a service checks people in from a phone, and heads get a
+  per-department report with a CSV export.
+- **Accounts.** Admins invite heads by email and the person chooses their own password. Most
+  volunteers never need a login.
 
-## Getting started 
+## How it's built
 
-### Install the CLI
+| Part | Stack | Hosted on |
+|---|---|---|
+| `frontend/` | React 18 + Vite, Tailwind v4, shadcn/Radix components | Vercel |
+| `backend/` | FastAPI on Python 3.13 (`uv`), APScheduler for the text sweeps | Railway |
+| `supabase/` | Postgres schema as SQL migrations, Supabase Auth | Supabase |
 
-Available via [NPM](https://www.npmjs.com) as dev dependency. To install:
+The browser uses Supabase only to sign in. Everything else goes through the API, which checks
+the Supabase token and enforces who may see and change what.
 
-```bash
-npm i supabase --save-dev
-```
+## Running it locally
 
-When installing with yarn 4, you need to disable experimental fetch with the following nodejs config.
-
-```
-NODE_OPTIONS=--no-experimental-fetch yarn add supabase
-```
-
-> **Note**
-For Bun versions below v1.0.17, you must add `supabase` as a [trusted dependency](https://bun.sh/guides/install/trusted) before running `bun add -D supabase`.
-
-<details>
-  <summary><b>macOS</b></summary>
-
-  Available via [Homebrew](https://brew.sh). To install:
-
-  ```sh
-  brew install supabase/tap/supabase
-  ```
-
-  To install the beta release channel:
-  
-  ```sh
-  brew install supabase/tap/supabase-beta
-  brew link --overwrite supabase-beta
-  ```
-  
-  To upgrade:
-
-  ```sh
-  brew upgrade supabase
-  ```
-</details>
-
-<details>
-  <summary><b>Windows</b></summary>
-
-  Available via [Scoop](https://scoop.sh). To install:
-
-  ```powershell
-  scoop bucket add supabase https://github.com/supabase/scoop-bucket.git
-  scoop install supabase
-  ```
-
-  To upgrade:
-
-  ```powershell
-  scoop update supabase
-  ```
-</details>
-
-<details>
-  <summary><b>Linux</b></summary>
-
-  Available via [Homebrew](https://brew.sh) and Linux packages.
-
-  #### via Homebrew
-
-  To install:
-
-  ```sh
-  brew install supabase/tap/supabase
-  ```
-
-  To upgrade:
-
-  ```sh
-  brew upgrade supabase
-  ```
-
-  #### via Linux packages
-
-  Linux packages are provided in [Releases](https://github.com/supabase/cli/releases). To install, download the `.apk`/`.deb`/`.rpm`/`.pkg.tar.zst` file depending on your package manager and run the respective commands.
-
-  ```sh
-  sudo apk add --allow-untrusted <...>.apk
-  ```
-
-  ```sh
-  sudo dpkg -i <...>.deb
-  ```
-
-  ```sh
-  sudo rpm -i <...>.rpm
-  ```
-
-  ```sh
-  sudo pacman -U <...>.pkg.tar.zst
-  ```
-</details>
-
-<details>
-  <summary><b>Other Platforms</b></summary>
-
-  You can also install the CLI via [go modules](https://go.dev/ref/mod#go-install) without the help of package managers.
-
-  ```sh
-  go install github.com/supabase/cli@latest
-  ```
-
-  Add a symlink to the binary in `$PATH` for easier access:
-
-  ```sh
-  ln -s "$(go env GOPATH)/bin/cli" /usr/bin/supabase
-  ```
-
-  This works on other non-standard Linux distros.
-</details>
-
-<details>
-  <summary><b>Community Maintained Packages</b></summary>
-
-  Available via [pkgx](https://pkgx.sh/). Package script [here](https://github.com/pkgxdev/pantry/blob/main/projects/supabase.com/cli/package.yml).
-  To install in your working directory:
-
-  ```bash
-  pkgx install supabase
-  ```
-
-  Available via [Nixpkgs](https://nixos.org/). Package script [here](https://github.com/NixOS/nixpkgs/blob/master/pkgs/development/tools/supabase-cli/default.nix).
-</details>
-
-### Run the CLI
-
-```bash
-supabase bootstrap
-```
-
-Or using npx:
-
-```bash
-npx supabase bootstrap
-```
-
-The bootstrap command will guide you through the process of setting up a Supabase project using one of the [starter](https://github.com/supabase-community/supabase-samples/blob/main/samples.json) templates.
-
-## Docs
-
-Command & config reference can be found [here](https://supabase.com/docs/reference/cli/about).
-
-## Breaking changes
-
-We follow semantic versioning for changes that directly impact CLI commands, flags, and configurations.
-
-However, due to dependencies on other service images, we cannot guarantee that schema migrations, seed.sql, and generated types will always work for the same CLI major version. If you need such guarantees, we encourage you to pin a specific version of CLI in package.json.
-
-## Developing
-
-To run from source:
+You need [`just`](https://github.com/casey/just), [`uv`](https://docs.astral.sh/uv/),
+Node 20+, and Docker (for the local Supabase stack). The Supabase CLI is installed by
+`npm install` at the repo root and run through `npx`.
 
 ```sh
-# Go >= 1.22
-go run . help
+npm install            # the pinned Supabase CLI
+just install           # backend dependencies
+just install-frontend  # frontend dependencies
+just dev               # starts local Supabase, then the API on :8000
+just dev-frontend      # the app on http://localhost:5173 (in another terminal)
 ```
+
+No credentials are needed. Local configuration is committed because the local Supabase keys are
+the same on every machine. Sign in as `test_user@test.com` / `TestUserPassword123!` (an admin).
+Emails the app would send, such as invites and password resets, land in Mailpit at
+http://127.0.0.1:54324. No real texts go out: the local Twilio credentials are placeholders, so
+sends fail and are only logged.
+
+| Command | What it does |
+|---|---|
+| `just check` | Lint, format, type-check and test. Run it before pushing; CI runs the same checks. |
+| `just test` | Backend tests (pytest) |
+| `just db-reset` | Rebuild the local database from the migrations and seed data |
+| `just install-hooks` | Install the pre-commit hook (ruff, mypy, prettier) |
+| `just build-frontend` | Production build of the app |
+
+There is no frontend test suite. CI checks the frontend with lint, a build, and an audit of
+production dependencies.
+
+## Documentation
+
+- [`CLAUDE.md`](CLAUDE.md): the architecture and the design decisions behind it, including
+  the conventions that are easy to break. Read this before changing anything significant.
+- [`docs/local-development.md`](docs/local-development.md): local setup in detail, and how to
+  point a local API at production.
+- [`docs/database-migrations.md`](docs/database-migrations.md): creating and applying schema
+  changes.
+- [`docs/smtp-setup.md`](docs/smtp-setup.md): how auth email is sent and switched between
+  providers.
+- [`docs/church-onboarding.md`](docs/church-onboarding.md): what is left to move the app from a
+  one-department pilot to church-wide.
+- [`docs/assistant-hod-department-association.md`](docs/assistant-hod-department-association.md):
+  why assistant heads are linked to departments the way they are.
