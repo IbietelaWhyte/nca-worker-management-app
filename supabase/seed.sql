@@ -1,10 +1,10 @@
 -- ============================================================
 -- Local bootstrap: one admin you can actually sign in as.
 --
--- `20260303184000_seed_data.sql` gives a local stack twelve workers, five departments and a
--- month of rotas, but no auth.users rows and every auth_user_id null - so the whole RLS
+-- The demo data further down gives a local stack twelve workers, five departments and a
+-- fortnight of rotas, but no auth.users rows and every auth_user_id null - so the whole RLS
 -- chain (auth.uid() -> workers.auth_user_id -> workers.id -> worker_app_roles) resolves to
--- nothing and there is nobody to log in as. This closes that.
+-- nothing and there is nobody to log in as. This first section closes that.
 --
 -- Run automatically by `supabase db reset` and the first `supabase start`, via
 -- [db.seed] in config.toml. It is NEVER run by `supabase db push`, so it cannot reach a
@@ -21,7 +21,7 @@
 
 -- Literals rather than \set: the CLI sends this file to the server as a batch, not
 -- through psql, so meta-commands are a syntax error. e1000000-… keeps the auth id clear
--- of the seed migration's c1000000-… worker block.
+-- of the demo data's c1000000-… worker block.
 
 insert into auth.users (
     id,

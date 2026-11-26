@@ -47,13 +47,20 @@ local API in production mode sends real SMS to real volunteers.
 
 ## The seeded data
 
-`supabase db reset` applies every migration and then runs `supabase/seed.sql`.
+`supabase db reset` (and the first `supabase start`) applies every migration and then runs
+`supabase/seed.sql`, which holds all of the local data:
 
-- `20260303184000_seed_data.sql` (a migration) creates five departments, fifteen department
-  roles, twelve workers with their app roles, and a month of rotas. None of those twelve can
-  log in — they have no `auth.users` row, which is what `seed.sql` adds for the test user.
-- `supabase/seed.sql` (local only) creates the admin above. It never runs against a hosted
-  project: `supabase db push` does not execute seeds.
+- **The admin above**: an `auth.users` row, its `auth.identities` row and the linked worker
+  profile. All three are needed to sign in.
+- **Demo data**: five departments, fifteen department roles, twelve workers with their app
+  roles (two admins and four heads), some availability, and a fortnight of rotas. None of the
+  twelve can log in, because they have no `auth.users` row.
+
+`seed.sql` never runs against a hosted project, because `supabase db push` does not execute
+seeds. That is why demo data belongs there and never in a migration. It used to live in the
+migration `20260303184000_seed_data.sql`, so a push sent the twelve fake workers to production.
+That migration is now a no-op kept for the migration history, and
+`20261020120100_remove_demo_seed_data.sql` deletes the rows it left behind.
 
 To start over: `just db-reset`.
 
