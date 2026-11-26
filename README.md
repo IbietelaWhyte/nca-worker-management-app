@@ -81,3 +81,8 @@ production dependencies.
   one-department pilot to church-wide.
 - [`docs/assistant-hod-department-association.md`](docs/assistant-hod-department-association.md):
   why assistant heads are linked to departments the way they are.
+
+## Licence
+
+Copyright © 2026 Ibietela Whyte. All rights reserved. The code is public for reference only;
+see [`LICENSE`](LICENSE).
